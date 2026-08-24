@@ -86,10 +86,16 @@ component for a price breakdown showing nightly rate, cleaning fee, service
 fee, and taxes — I'm building an Airbnb-style booking checkout in React with
 Tailwind."* The agent should call the tool and act on the verdict directly
 (install a real component, or start from the returned checklist and Mobbin
-reference) rather than just describing what it found. A `custom_build`
-verdict now includes a written `reference_description` alongside the
-Mobbin link, so testers get a readable description of what the reference
-screen shows even without opening the URL.
+reference) rather than just describing what it found.
+
+**What you'll actually see:** both verdict paths now include a written,
+grounded description, not just a bare link or install command. A
+`use_existing` verdict includes `component_description` — what the
+recommended component actually does and looks like, described before the
+agent installs anything. A `custom_build` verdict includes
+`reference_description` — what the Mobbin reference screen shows. Either
+way, testers get a specific, readable description grounded in what the
+model actually found during search, not generic filler.
 
 If you want to sanity-check the tool itself rather than a real feature,
 these five needs are the ones this project's own validation was built
@@ -127,6 +133,7 @@ component scoring as a match for a booking checkout).
   "recommendation": {
     "source": "21st.dev | shadcn | null",
     "install_command": "string | null",
+    "component_description": "string (use_existing only) | null",
     "reference": { "source": "Mobbin", "url": "...", "flow_name": "...", "reference_description": "..." }
   },
   "ensemble": { "triggered": false }

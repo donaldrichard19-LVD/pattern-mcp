@@ -123,6 +123,8 @@ coverage >= 80% -> verdict "use_existing", confidence "high"
 coverage 40-79% -> verdict "use_existing", confidence "low" (list the missing fields)
 coverage < 40% -> verdict "custom_build"
 
+If the verdict is use_existing, include "component_description": 1-2 sentences of plain-language description of what the recommended component actually does and looks like, grounded in what you found during search -- specific enough that it could only come from reading the actual search result, not a generic guess at what a component like this probably looks like. E.g. "A 3-column pricing card with a highlighted middle tier, monthly/annual toggle at the top, and a CTA button pinned to the bottom of each card," not "A well-designed pricing component." Same grounding standard as reference_description below: base it on real evidence, not marketing copy or a template description.
+
 6. IF custom_build
 Search Mobbin (site:mobbin.com) for the closest real-app reference matching the stated domain (e.g. real Airbnb screens for an Airbnb-style app), using the one search call reserved for this step. One search call is enough -- return that reference plus the requirement checklist from step 2 as the build spec. Only include a "reference" if you actually ran this search and it returned a real result -- if you're out of search budget or the search found nothing, set "reference" to null rather than naming a plausible-sounding URL from memory. An unverified reference is worse than none: it will be silently discarded server-side if it isn't backed by an actual successful Mobbin search, so there is no benefit to guessing.
 
@@ -143,6 +145,7 @@ Respond with ONLY a single JSON object, no prose before or after, no markdown co
   "recommendation": {
     "source": "string or null",
     "install_command": "string or null",
+    "component_description": "string (use_existing only) or null",
     "reference": { "source": "Mobbin", "url": "string", "flow_name": "string", "reference_description": "string" } | null
   }
 }`;
@@ -182,6 +185,7 @@ async function runSinglePass(input: {
         recommendation: {
           source: "shadcn/ui or 21st.dev (commodity primitive)",
           install_command: null,
+          component_description: null,
           reference: null,
         },
       },
@@ -404,7 +408,19 @@ async function judgeComponent(input: {
   const [majorityVerdict, majorityCount] = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
   const agreement = `${majorityCount}/${passes.length}`;
 
-  const base = first.result;
+  // Use a pass whose own verdict already matches the majority as the base
+  // for everything else in the response (recommendation, coverage,
+  // requirements_checked) -- not unconditionally `first`. `first` can be
+  // the outlier in a 2/3 split: if it said custom_build but the other two
+  // passes said use_existing, blindly keeping first's recommendation would
+  // return verdict "use_existing" paired with a custom_build-shaped
+  // recommendation (a populated Mobbin reference, component_description
+  // still null) -- internally inconsistent output. Falling back to `first`
+  // below is unreachable in practice (majorityVerdict is defined as the
+  // most common value among `verdicts`, so some pass must have it) but
+  // kept as a defensive default.
+  const winningPass = passes.find((p) => p.result.verdict === majorityVerdict) ?? first;
+  const base = winningPass.result;
   base.verdict = majorityVerdict;
   // Unanimous agreement keeps whatever confidence the base run computed
   // for itself (already threshold-correct); any split forces "low" --
@@ -435,6 +451,7 @@ interface JudgmentResult {
   recommendation?: {
     source?: string | null;
     install_command?: string | null;
+    component_description?: string | null;
     reference?: { url?: string; flow_name?: string; source?: string; reference_description?: string } | null;
   } | null;
   ensemble?: { triggered: boolean; runs?: string[]; agreement?: string };
