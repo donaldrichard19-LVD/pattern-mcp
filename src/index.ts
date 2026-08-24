@@ -63,6 +63,35 @@ const SKIP_LIST = [
   "icon",
 ];
 
+function isSkipListMatch(componentNeed: string): boolean {
+  const needLower = componentNeed.toLowerCase().trim();
+  return SKIP_LIST.some(
+    (item) => needLower === item || needLower === `a ${item}` || needLower === `an ${item}`
+  );
+}
+
+// Session-level call cap, protecting a tester's API key against a
+// calling agent stuck in a retry/loop. Counts once per recommend_component
+// invocation that actually reaches the Anthropic API -- skip-list hits
+// never call the API, so they don't count. Default of 40 is grounded in
+// real usage: a full pass through a realistic ~25-component project
+// (validated against this project's own 5-case Airbnb-style test list,
+// scaled up) costs 25 calls, so 40 leaves headroom for iteration while
+// still catching a runaway loop well before it gets expensive. This is
+// an in-memory counter -- it resets when the server process restarts,
+// by design (see README).
+const SESSION_CALL_CAP_RAW = process.env.UI_JUDGMENT_SESSION_CAP ?? "40";
+const SESSION_CALL_CAP = (() => {
+  const parsed = Number.parseInt(SESSION_CALL_CAP_RAW, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error(
+      `UI_JUDGMENT_SESSION_CAP must be a positive integer, got: ${SESSION_CALL_CAP_RAW}`
+    );
+  }
+  return parsed;
+})();
+let sessionCallCount = 0;
+
 const TOOL_NAME = "recommend_component";
 
 const INPUT_SCHEMA = {
@@ -170,11 +199,7 @@ async function runSinglePass(input: {
   // Fast path: skip-list check happens locally too, so trivial primitives
   // never spend a real API call. The system prompt also enforces this, but
   // checking here avoids the round-trip entirely for the common case.
-  const needLower = input.component_need.toLowerCase().trim();
-  const isSkippable = SKIP_LIST.some(
-    (item) => needLower === item || needLower === `a ${item}` || needLower === `an ${item}`
-  );
-  if (isSkippable) {
+  if (isSkipListMatch(input.component_need)) {
     return {
       ok: true,
       result: {
@@ -386,6 +411,24 @@ async function judgeComponent(input: {
   framework: string;
   existing_stack?: string;
 }): Promise<string> {
+  // Session cap is enforced once per recommend_component invocation, not
+  // once per underlying Anthropic request -- an ensemble-triggered call
+  // makes up to 3 of those internally, but the caller only sees one tool
+  // call, so that's the unit the cap counts. Skip-list hits never reach
+  // the API at all, so they're excluded here rather than counted and
+  // immediately refunded.
+  if (!isSkipListMatch(input.component_need)) {
+    if (sessionCallCount >= SESSION_CALL_CAP) {
+      throw new Error(
+        `Session call cap (${SESSION_CALL_CAP}) reached. This protects against runaway costs on your API key. Restart the MCP server to reset the counter, or set UI_JUDGMENT_SESSION_CAP to raise the limit.`
+      );
+    }
+    sessionCallCount++;
+    console.error(
+      JSON.stringify({ diagnostic: "session_call_count", count: sessionCallCount, cap: SESSION_CALL_CAP })
+    );
+  }
+
   const first = await runSinglePass(input);
   if (!first.ok) return first.raw;
 

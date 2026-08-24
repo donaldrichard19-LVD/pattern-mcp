@@ -61,18 +61,29 @@ equivalent). Two things are worth knowing anyway:
   `component_need`/`domain`, so the same caution applies if your client
   logs stderr.
 
-## No cost ceiling
+## Cost ceiling is a session cap, not a spend cap
 
-The server has no built-in spend cap, rate limit, or circuit breaker. A
-single non-trivial call already costs multiple Anthropic API requests
-(search + score, up to 3x on a boundary-risk ensemble trigger — see
-[Ensemble cost](./README.md#ensemble-cost-boundary-risk-cases-only)). If
-a calling agent retries aggressively — on a timeout, a transient error,
-or its own retry loop — nothing here stops it from repeating expensive
-calls indefinitely against your key. Watch your
-[Anthropic Console usage dashboard](https://console.anthropic.com) if
-you're testing with an agent that has its own retry behavior you don't
-fully control.
+The server caps itself at 40 `recommend_component` calls per process
+lifetime by default (`UI_JUDGMENT_SESSION_CAP` — see
+[Session call cap](./README.md#session-call-cap)), which bounds the
+worst case rather than eliminating cost risk entirely. Three things to
+know:
+
+- The cap is **in-memory and per-process** — it resets on restart. A
+  calling agent (or a person) that just restarts the MCP server after
+  hitting the cap can keep going indefinitely. The cap catches a loop
+  *within one session*, not persistent abuse across many.
+- The cap counts `recommend_component` invocations, not underlying
+  Anthropic API requests — a single boundary-risk call can still cost up
+  to 3x that internally (see
+  [Ensemble cost](./README.md#ensemble-cost-boundary-risk-cases-only)),
+  so 40 calls is not a hard ceiling of 40 API requests.
+- There's still no rate limit or circuit breaker on *how fast* those 40
+  calls can happen, and no spend-based cap in dollar terms.
+
+Watch your [Anthropic Console usage dashboard](https://console.anthropic.com)
+if you're testing with an agent that has its own retry behavior you
+don't fully control.
 
 ## Not sandboxed
 

@@ -239,6 +239,22 @@ outer runs even with the ensemble active, always with a 2/3 split and
 `confidence: "low"` — the tool is correctly reporting low confidence on
 a genuinely ambiguous case rather than a bug to fix with a bigger N.
 
+### Session call cap
+
+The server caps itself at **40 calls per process lifetime** by default,
+configurable via `UI_JUDGMENT_SESSION_CAP`. This protects against a
+*buggy calling agent* looping on the tool — a retry loop, a stuck agent
+re-calling the same need repeatedly — not against normal project usage.
+The number is grounded in real usage, not arbitrary: a full pass through
+a realistic ~25-component project (scaled up from this project's own
+5-case Airbnb-style validation list) costs 25 calls, so 40 leaves
+headroom for iteration on top of that without being so high it fails to
+catch an actual runaway loop before it gets expensive. Skip-listed
+primitives don't count toward the cap, since they never reach the API.
+The counter is in-memory and resets when the server process restarts —
+raise the cap via the env var if 40 is genuinely too low for your
+project, don't just restart repeatedly to reset it.
+
 ## Known limitations (carried over from validation)
 
 - **Evidence judgment varies run to run, independent of search results.**
