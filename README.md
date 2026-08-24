@@ -16,47 +16,85 @@ fact.
 ## How it works
 
 The server does not scrape shadcn/21st.dev/Mobbin itself. Each tool call
-makes one request to the Anthropic Messages API (`claude-sonnet-4-6`) with
-the server-side `web_search` tool enabled, and a system prompt that encodes
-the full process: skip-list check, requirement extraction, candidate search,
-real-evidence coverage scoring, threshold, and — on `custom_build` — a
-Mobbin reference lookup. The model returns structured JSON, which the server
-passes back to the calling agent unchanged.
+makes one or more requests to the Anthropic Messages API (`claude-sonnet-5`
+by default) with the server-side `web_search` tool enabled, and a system
+prompt that encodes the full process: skip-list check, requirement
+extraction, candidate search, real-evidence coverage scoring, threshold, and
+— on `custom_build` — a Mobbin reference lookup. The model returns
+structured JSON; the server recomputes the coverage fraction from the
+`requirements_checked` array itself (rather than trusting the model's stated
+percentage) and applies the verdict/confidence threshold in code.
+
+**Boundary-risk ensemble.** Validation found that a single run's coverage
+score can vary between calls on the same input — not because search results
+differ, but because the model can judge the same piece of evidence
+differently run to run (see Known limitations). When a call's recounted
+coverage lands close enough to a threshold boundary to plausibly flip the
+verdict, the server automatically re-runs the judgment 2 more times and
+takes the majority verdict. If the 3 runs disagree (a 2/3 split), the result
+ships with `confidence: "low"` and an `ensemble` field so the calling agent
+can see it was a close call rather than a confident read. Calls that land
+clearly inside a threshold band never trigger this and stay single-run —
+see [Cost](#cost) below for the measured impact.
 
 Trivial primitives (button, input, checkbox, label, badge, spinner, tooltip,
 avatar, icon) are caught locally before any API call, so they don't spend a
 request.
 
-## Setup
+## Setup — quickstart
 
 ```bash
+git clone <this repo>
+cd ui-component-judgment-mcp
 npm install
 npm run build
 ```
 
-Requires `ANTHROPIC_API_KEY` set in the environment the server runs in.
+Requires `ANTHROPIC_API_KEY` — the account whose key you use pays for every
+call this tool makes (see [Cost](#cost) below).
 
-## Running
+**Point your MCP client at it** — this is a standard MCP server, so it works
+with any MCP-compatible client, not just one. Drop this into your client's
+config (adjusting the path per client), swapping in your own project path
+and key:
 
-```bash
-ANTHROPIC_API_KEY=sk-ant-... npm start
-```
-
-This starts an MCP server over stdio. Point your MCP client (Claude Code,
-Cursor, Claude Desktop, etc.) at it — the exact config depends on the
-client, but generally looks like:
+- Claude Code: `.claude/mcp_config.json`, or `claude mcp add`
+- Cursor: `.cursor/mcp.json`
+- Codex CLI: `~/.codex/config.toml` (global) or `.codex/config.json`
+  (project-level) — same `mcpServers` shape, TOML or JSON depending on file
+- Claude Desktop: its MCP settings file
 
 ```json
 {
   "mcpServers": {
     "ui-component-judgment": {
       "command": "node",
-      "args": ["/path/to/ui-component-mcp/dist/index.js"],
+      "args": ["/absolute/path/to/ui-component-judgment-mcp/dist/index.js"],
       "env": { "ANTHROPIC_API_KEY": "sk-ant-..." }
     }
   }
 }
 ```
+
+Restart your MCP client, then confirm it picked up the tool — ask your
+agent to list its available MCP tools and look for `recommend_component`.
+
+## Try it
+
+Ask your agent something like: *"Use recommend_component to find me a UI
+component for a price breakdown showing nightly rate, cleaning fee, service
+fee, and taxes — I'm building an Airbnb-style booking checkout in React with
+Tailwind."* The agent should call the tool and act on the verdict directly
+(install a real component, or start from the returned checklist and Mobbin
+reference) rather than just describing what it found.
+
+If you want to sanity-check the tool itself rather than a real feature,
+these five needs are the ones this project's own validation was built
+against, spanning the full range of outcomes (clean commodity match,
+false-positive-prone case, zero candidates, and boundary/near-tie cases):
+price breakdown with fees and taxes, cancellation policy display, host
+earnings dashboard, image gallery for a property listing, and a host-guest
+messaging inbox — all in the same Airbnb-style rental marketplace domain.
 
 ## Tool: `recommend_component`
 
@@ -165,6 +203,16 @@ a genuinely ambiguous case rather than a bug to fix with a bigger N.
 
 ## Known limitations (carried over from validation)
 
+- **Evidence judgment varies run to run, independent of search results.**
+  Validation traced a real case where two runs found the exact same named
+  candidate components via the exact same search queries, but the model
+  judged the same evidence differently — e.g. reading one candidate's
+  "Export" action as present in one run and absent in another, for the
+  identical component. This isn't a search-consistency or code bug; it's
+  inherent to how the model reads natural-language evidence, and it's what
+  the boundary-risk ensemble exists to catch and disclose (as a 2/3
+  `agreement` split) rather than eliminate. If you see a verdict flip
+  between your own runs on the same input, this is almost certainly why.
 - **No caching, by design.** Every call re-searches and re-scores from
   scratch. A `custom_build` verdict can go stale as libraries ship new
   components (validated: shadcn's June 2026 chat primitives turned a likely
@@ -180,6 +228,6 @@ a genuinely ambiguous case rather than a bug to fix with a bigger N.
   model's web_search tool reaches — it won't run somewhere that blocks
   general internet access.
 - **Requirement extraction and coverage scoring are judgment calls made by
-  the model in a single pass**, not deterministic lookups. Spot-check early
-  outputs against real components before trusting the pipeline unattended,
-  same as during manual validation.
+  the model**, not deterministic lookups, even with the ensemble and
+  server-side recount in place. Spot-check early outputs against real
+  components before trusting the pipeline unattended.

@@ -7,9 +7,33 @@
   "bin": {
     "ui-component-judgment-mcp": "dist/index.js"
   },
+  "author": "Don Richard",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/donaldrichard19-LVD/ui-component-judgment-mcp.git"
+  },
+  "homepage": "https://github.com/donaldrichard19-LVD/ui-component-judgment-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/donaldrichard19-LVD/ui-component-judgment-mcp/issues"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "ui-components",
+    "shadcn",
+    "design-system",
+    "claude-code",
+    "ai-agent-tools"
+  ],
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0"
