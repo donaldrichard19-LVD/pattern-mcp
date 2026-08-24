@@ -3,8 +3,9 @@
 MCP server exposing one tool, `recommend_component`, that judges whether a UI
 component need should be met with an existing shadcn/ui or 21st.dev
 component, or requires a custom build guided by a real-app reference from
-Mobbin. Returns a structured verdict, not a list of search results — built
-for an agent to consume mid-build, not for a human to browse.
+Mobbin and/or Figma Community. Returns a structured verdict, not a list of
+search results — built for an agent to consume mid-build, not for a human
+to browse.
 
 This implements the judgment layer validated in the product brief: field/
 requirement coverage scored against real component evidence, thresholded
@@ -15,15 +16,18 @@ fact.
 
 ## How it works
 
-The server does not scrape shadcn/21st.dev/Mobbin itself. Each tool call
-makes one or more requests to the Anthropic Messages API (`claude-sonnet-5`
-by default) with the server-side `web_search` tool enabled, and a system
-prompt that encodes the full process: skip-list check, requirement
-extraction, candidate search, real-evidence coverage scoring, threshold, and
-— on `custom_build` — a Mobbin reference lookup. The model returns
-structured JSON; the server recomputes the coverage fraction from the
-`requirements_checked` array itself (rather than trusting the model's stated
-percentage) and applies the verdict/confidence threshold in code.
+The server does not scrape shadcn/21st.dev/Mobbin/Figma itself. Each tool
+call makes one or more requests to the Anthropic Messages API
+(`claude-sonnet-5` by default) with the server-side `web_search` tool
+enabled, and a system prompt that encodes the full process: skip-list
+check, requirement extraction, candidate search, real-evidence coverage
+scoring, threshold, and — on `custom_build` — reference lookups against
+Mobbin and Figma Community. No new credentials are required for the Figma
+lookup — it uses the same plain `web_search` mechanism as everything else
+in the tool, not the Figma API. The model returns structured JSON; the
+server recomputes the coverage fraction from the `requirements_checked`
+array itself (rather than trusting the model's stated percentage) and
+applies the verdict/confidence threshold in code.
 
 **Boundary-risk ensemble.** Validation found that a single run's coverage
 score can vary between calls on the same input — not because search results
@@ -105,17 +109,19 @@ Ask your agent something like: *"Use recommend_component to find me a UI
 component for a price breakdown showing nightly rate, cleaning fee, service
 fee, and taxes — I'm building an Airbnb-style booking checkout in React with
 Tailwind."* The agent should call the tool and act on the verdict directly
-(install a real component, or start from the returned checklist and Mobbin
-reference) rather than just describing what it found.
+(install a real component, or start from the returned checklist and
+Mobbin/Figma Community reference) rather than just describing what it
+found.
 
 **What you'll actually see:** both verdict paths now include a written,
 grounded description, not just a bare link or install command. A
 `use_existing` verdict includes `component_description` — what the
 recommended component actually does and looks like, described before the
 agent installs anything. A `custom_build` verdict includes
-`reference_description` — what the Mobbin reference screen shows. Either
-way, testers get a specific, readable description grounded in what the
-model actually found during search, not generic filler.
+`reference_description` for each reference it found — what that Mobbin
+screen or Figma Community file actually shows. Either way, testers get a
+specific, readable description grounded in what the model actually found
+during search, not generic filler.
 
 If you want to sanity-check the tool itself rather than a real feature,
 these five needs are the ones this project's own validation was built
@@ -154,7 +160,13 @@ component scoring as a match for a booking checkout).
     "source": "21st.dev | shadcn | null",
     "install_command": "string | null",
     "component_description": "string (use_existing only) | null",
-    "reference": { "source": "Mobbin", "url": "...", "flow_name": "...", "reference_description": "..." }
+    "reference": {
+      "source": "Mobbin | Figma Community",
+      "url": "...",
+      "flow_name": "... (Mobbin only)",
+      "file_name": "... (Figma Community only)",
+      "reference_description": "..."
+    }
   },
   "ensemble": { "triggered": false }
 }
@@ -163,6 +175,19 @@ component scoring as a match for a booking checkout).
 boundary-risk coverage result it becomes
 `{ "triggered": true, "runs": ["use_existing", "custom_build", "use_existing"], "agreement": "2/3" }`
 — see [Ensemble cost](#ensemble-cost-boundary-risk-cases-only) below.
+
+**`recommendation.reference` shape depends on how many sources actually
+grounded**, not just on the verdict. On a `custom_build` verdict:
+- Both Mobbin and Figma Community returned a real, grounded result:
+  `reference` is an **array of both** objects.
+- Only one of the two grounded: `reference` is a **single object**, same
+  shape as before this feature existed — never a one-element array.
+- Neither grounded: `reference` is `null`, same as today's
+  no-fabrication rule for a Mobbin-only lookup that found nothing.
+
+No new credentials are required for the Figma Community reference — it
+uses the same `web_search` mechanism as every other lookup in this tool,
+not the Figma API, so there's no separate token to configure.
 
 **`install_command` is untrusted text.** It's derived from a web search
 result the model read, not a verified package registry, and the server
@@ -182,11 +207,12 @@ the API. Three things keep a single pass down without touching quality:
 - **Prompt caching** on the system block (`cache_control: ephemeral`) —
   the instructions are identical every call, so repeated turns and repeated
   invocations read from cache instead of re-billing full price.
-- **A 2-search budget** for candidate discovery, plus 1 more reserved
-  specifically for the `custom_build` Mobbin lookup so it doesn't have to
-  compete with discovery for the same cap — shadcn and 21st.dev are
-  searched in the same turn rather than sequentially, so the growing
-  conversation gets re-sent fewer times per call.
+- **A 2-search budget** for candidate discovery, plus 2 more reserved
+  specifically for the `custom_build` reference lookups (one each for
+  Mobbin and Figma Community) so neither has to compete with discovery
+  for the same cap — shadcn and 21st.dev are searched in the same turn
+  rather than sequentially, so the growing conversation gets re-sent
+  fewer times per call.
 - **`UI_JUDGMENT_MODEL` env var** (defaults to `claude-sonnet-5`) — lets you
   swap in a cheaper model (e.g. Haiku 4.5) without a code change. Before
   trusting a cheaper model in production, re-run the 5 validated test cases
