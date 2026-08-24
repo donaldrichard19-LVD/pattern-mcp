@@ -51,14 +51,32 @@ npm run build
 ```
 
 Requires `ANTHROPIC_API_KEY` — the account whose key you use pays for every
-call this tool makes (see [Cost](#cost) below).
+call this tool makes (see [Cost](#cost) below). Get one from the
+[Anthropic Console](https://console.anthropic.com) (Settings → API Keys);
+this requires its own billing setup. **This is not the same thing as a
+Claude.ai or Claude Code subscription** — a Pro/Max plan does not cover
+API usage, and a subscription login won't get you a key. You need a
+separate Console account with credits or a payment method attached.
 
 **Point your MCP client at it** — this is a standard MCP server, so it works
 with any MCP-compatible client, not just one. Drop this into your client's
 config (adjusting the path per client), swapping in your own project path
 and key:
 
-- Claude Code: `.claude/mcp_config.json`, or `claude mcp add`
+- **Claude Code**: either add `"ui-component-judgment": { ... }` (the
+  block below) to the `mcpServers` object in `.mcp.json` at your project
+  root, or run:
+  ```bash
+  claude mcp add ui-component-judgment \
+    -e ANTHROPIC_API_KEY=sk-ant-... \
+    -- node /absolute/path/to/ui-component-judgment-mcp/dist/index.js
+  ```
+  `claude mcp add` stores this in a per-project "local config" entry
+  inside `~/.claude.json`, not in a project file — check with
+  `claude mcp list` (should show `ui-component-judgment ... ✔ Connected`)
+  or `claude mcp get ui-component-judgment`. Note that `claude mcp get`
+  prints your key back to the terminal in plaintext, so be mindful of
+  scrollback/logging when you run it.
 - Cursor: `.cursor/mcp.json`
 - Codex CLI: `~/.codex/config.toml` (global) or `.codex/config.json`
   (project-level) — same `mcpServers` shape, TOML or JSON depending on file
@@ -78,6 +96,8 @@ and key:
 
 Restart your MCP client, then confirm it picked up the tool — ask your
 agent to list its available MCP tools and look for `recommend_component`.
+For Claude Code specifically, `claude mcp list` will show a health-checked
+`✔ Connected` status without needing to ask the agent directly.
 
 ## Try it
 
