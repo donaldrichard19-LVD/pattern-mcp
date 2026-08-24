@@ -126,6 +126,8 @@ coverage < 40% -> verdict "custom_build"
 6. IF custom_build
 Search Mobbin (site:mobbin.com) for the closest real-app reference matching the stated domain (e.g. real Airbnb screens for an Airbnb-style app), using the one search call reserved for this step. One search call is enough -- return that reference plus the requirement checklist from step 2 as the build spec. Only include a "reference" if you actually ran this search and it returned a real result -- if you're out of search budget or the search found nothing, set "reference" to null rather than naming a plausible-sounding URL from memory. An unverified reference is worse than none: it will be silently discarded server-side if it isn't backed by an actual successful Mobbin search, so there is no benefit to guessing.
 
+If you do include a reference, also include "reference_description": 1-2 sentences of plain-language description of what the reference screen actually shows -- specific enough that an agent that can't open the URL still has something to act on. E.g. "Airbnb's checkout screen shows the cancellation policy as an expandable section below the price breakdown, with the exact refund percentage next to each date threshold." Base this on what you actually saw in the search result, not a generic guess at what the screen probably looks like.
+
 7. EXISTING STACK TIEBREAKER
 If existing_stack is provided and two candidates score similarly, prefer the one matching the existing stack. Never use it as a hard filter that excludes a genuinely better-scoring candidate from a different source.
 
@@ -141,7 +143,7 @@ Respond with ONLY a single JSON object, no prose before or after, no markdown co
   "recommendation": {
     "source": "string or null",
     "install_command": "string or null",
-    "reference": { "source": "Mobbin", "url": "string", "flow_name": "string" } | null
+    "reference": { "source": "Mobbin", "url": "string", "flow_name": "string", "reference_description": "string" } | null
   }
 }`;
 }
@@ -433,7 +435,7 @@ interface JudgmentResult {
   recommendation?: {
     source?: string | null;
     install_command?: string | null;
-    reference?: { url?: string; flow_name?: string; source?: string } | null;
+    reference?: { url?: string; flow_name?: string; source?: string; reference_description?: string } | null;
   } | null;
   ensemble?: { triggered: boolean; runs?: string[]; agreement?: string };
   [key: string]: unknown;
@@ -588,7 +590,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         "this whenever you are about to scaffold a new, non-trivial UI " +
         "component from scratch, when you're unsure your own default output " +
         "will look production-quality, or when the user references a " +
-        "specific app's pattern to match.",
+        "specific app's pattern to match. On a custom_build verdict, open " +
+        "or fetch the returned Mobbin reference URL if you have that " +
+        "capability, and describe what the reference screen shows before " +
+        "starting the build. Do not just print the URL and move on.",
       inputSchema: INPUT_SCHEMA,
     },
   ],

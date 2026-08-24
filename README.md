@@ -86,7 +86,10 @@ component for a price breakdown showing nightly rate, cleaning fee, service
 fee, and taxes — I'm building an Airbnb-style booking checkout in React with
 Tailwind."* The agent should call the tool and act on the verdict directly
 (install a real component, or start from the returned checklist and Mobbin
-reference) rather than just describing what it found.
+reference) rather than just describing what it found. A `custom_build`
+verdict now includes a written `reference_description` alongside the
+Mobbin link, so testers get a readable description of what the reference
+screen shows even without opening the URL.
 
 If you want to sanity-check the tool itself rather than a real feature,
 these five needs are the ones this project's own validation was built
@@ -124,7 +127,7 @@ component scoring as a match for a booking checkout).
   "recommendation": {
     "source": "21st.dev | shadcn | null",
     "install_command": "string | null",
-    "reference": { "source": "Mobbin", "url": "...", "flow_name": "..." }
+    "reference": { "source": "Mobbin", "url": "...", "flow_name": "...", "reference_description": "..." }
   },
   "ensemble": { "triggered": false }
 }
