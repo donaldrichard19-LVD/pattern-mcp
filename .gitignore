@@ -1,0 +1,4 @@
+node_modules/
+dist/
+.env
+scripts/*-results.json

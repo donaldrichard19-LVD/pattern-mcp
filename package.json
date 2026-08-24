@@ -1,0 +1,24 @@
+{
+  "name": "ui-component-judgment-mcp",
+  "version": "0.1.0",
+  "description": "MCP tool that judges whether a UI component need should be met with an existing shadcn/21st.dev component or requires a custom build, using field/requirement coverage scored against real component code.",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "ui-component-judgment-mcp": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
