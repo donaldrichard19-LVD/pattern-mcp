@@ -108,7 +108,7 @@ Follow this process exactly:
 If the component need is a trivial, single-purpose primitive with no meaningful internal structure (button, input, checkbox, label, badge, spinner, loader, tooltip, avatar, icon), skip the rest of this process and return verdict "use_existing" with reason "skip_list", confidence "high", and a note that this is a commodity primitive not worth scoring.
 
 2. EXTRACT REQUIREMENTS
-Turn the component need + domain into a concrete checklist of elements the component must contain -- specific enough to check against real code, not a vibe. Ground it in the stated domain, not the component name alone. Aim for 5-10 checklist items for non-trivial components.
+Turn the component need + domain into a concrete checklist of elements the component must contain -- specific enough to check against real code, not a vibe. Ground it in the stated domain, not the component name alone. Extract exactly 8 checklist items, ranked by importance to the component's core function (most important first) -- a fixed count, not a range, so coverage = met/total isn't itself a moving target across runs.
 
 3. SEARCH FOR CANDIDATES
 Search shadcn/ui and 21st.dev for components matching the need, filtered to the stated framework. Fire the shadcn and 21st.dev searches together in the same turn (they're independent lookups) rather than one at a time -- this avoids re-sending the growing conversation on extra round-trips. ${budgetLine} If those don't surface enough to score, proceed with what you have rather than continuing to search -- a "low confidence, here's why" verdict is more useful than an unbounded search loop.
@@ -146,12 +146,14 @@ Respond with ONLY a single JSON object, no prose before or after, no markdown co
 }`;
 }
 
-async function callAnthropic(input: {
+type SinglePassResult = { ok: true; result: JudgmentResult } | { ok: false; raw: string };
+
+async function runSinglePass(input: {
   component_need: string;
   domain: string;
   framework: string;
   existing_stack?: string;
-}): Promise<string> {
+}): Promise<SinglePassResult> {
   if (!ANTHROPIC_API_KEY) {
     throw new Error(
       "ANTHROPIC_API_KEY is not set. Export it in the environment running this MCP server."
@@ -166,19 +168,22 @@ async function callAnthropic(input: {
     (item) => needLower === item || needLower === `a ${item}` || needLower === `an ${item}`
   );
   if (isSkippable) {
-    return JSON.stringify({
-      verdict: "use_existing",
-      confidence: "high",
-      reason: "skip_list",
-      computed_at: new Date().toISOString().slice(0, 10),
-      requirements_checked: null,
-      coverage: null,
-      recommendation: {
-        source: "shadcn/ui or 21st.dev (commodity primitive)",
-        install_command: null,
-        reference: null,
+    return {
+      ok: true,
+      result: {
+        verdict: "use_existing",
+        confidence: "high",
+        reason: "skip_list",
+        computed_at: new Date().toISOString().slice(0, 10),
+        requirements_checked: null,
+        coverage: null,
+        recommendation: {
+          source: "shadcn/ui or 21st.dev (commodity primitive)",
+          install_command: null,
+          reference: null,
+        },
       },
-    });
+    };
   }
 
   const userMessage = `component_need: ${input.component_need}
@@ -318,13 +323,105 @@ existing_stack: ${input.existing_stack ?? "(not specified)"}`;
     // Can't post-process what doesn't parse -- return as-is rather than
     // crash. The caller still gets the raw (if malformed) model output.
     console.error(JSON.stringify({ diagnostic: "postprocess_skipped", reason: "output did not parse as JSON" }));
-    return extracted;
+    return { ok: false, raw: extracted };
   }
 
   enforceReferenceGrounding(parsed, searchCallDetails);
+  enforceCoverageRecount(parsed);
   enforceVerdictThreshold(parsed);
 
-  return JSON.stringify(parsed);
+  return { ok: true, result: parsed };
+}
+
+// Coverage can only land on one of 9 discrete values when exactly 8
+// checklist items are extracted (0, 12.5, 25, 37.5, 50, 62.5, 75, 87.5,
+// 100%). The 40% verdict threshold sits between met=3 (37.5%) and met=4
+// (50%); the 80% threshold sits between met=6 (75%) and met=7 (87.5%).
+// Those are the only met-counts where a single item's judgment flipping
+// is enough to change the verdict -- confirmed by direct testing
+// (variance-check-results.json): image gallery and host-guest messaging
+// both sat in this zone and flipped verdict across identical-input runs.
+//
+// no_candidates_found was included here too, on the theory that its
+// run-to-run inconsistency (query-phrasing variance) was itself a
+// reliability risk. Removed after testing showed it never actually
+// caused a verdict flip in this session -- price breakdown hit this
+// reason repeatedly and stayed "custom_build" every time, ensembled or
+// not, since "no real candidates" and "candidates but low coverage"
+// both point the same direction for that case. It was pure extra cost
+// with no observed stability benefit; revisit if a future case shows
+// otherwise.
+const BOUNDARY_RISK_MET_COUNTS_FOR_8_ITEMS = new Set([3, 4, 6, 7]);
+
+function isBoundaryRisk(result: JudgmentResult): boolean {
+  if (result.reason !== "scored") return false;
+
+  const items = result.requirements_checked;
+  if (!Array.isArray(items) || items.length === 0) return true; // malformed -- be conservative
+
+  const total = items.length;
+  if (total !== 8) return true; // extraction didn't follow the fixed-8 instruction -- the precomputed boundary table doesn't apply, so don't trust a single run
+
+  const met = items.filter((item) => item.met === true).length;
+  return BOUNDARY_RISK_MET_COUNTS_FOR_8_ITEMS.has(met);
+}
+
+// Orchestrates the ensemble: run once, and only pay for 2 more full
+// pipeline passes when the single-run result landed close enough to a
+// verdict threshold that a single item's judgment swinging could flip
+// the answer. Cases far from any boundary return the fast single-run
+// path unchanged, at no extra cost.
+async function judgeComponent(input: {
+  component_need: string;
+  domain: string;
+  framework: string;
+  existing_stack?: string;
+}): Promise<string> {
+  const first = await runSinglePass(input);
+  if (!first.ok) return first.raw;
+
+  if (!isBoundaryRisk(first.result)) {
+    first.result.ensemble = { triggered: false };
+    return JSON.stringify(first.result);
+  }
+
+  console.error(
+    JSON.stringify({
+      diagnostic: "ensemble_triggered",
+      reason: first.result.reason,
+      coverage: first.result.coverage,
+    })
+  );
+
+  const [second, third] = await Promise.all([runSinglePass(input), runSinglePass(input)]);
+  const passes = [first, second, third].filter((p): p is { ok: true; result: JudgmentResult } => p.ok);
+
+  const verdicts = passes.map((p) => p.result.verdict);
+  const counts = new Map<string, number>();
+  for (const v of verdicts) counts.set(v, (counts.get(v) ?? 0) + 1);
+  const [majorityVerdict, majorityCount] = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
+  const agreement = `${majorityCount}/${passes.length}`;
+
+  const base = first.result;
+  base.verdict = majorityVerdict;
+  // Unanimous agreement keeps whatever confidence the base run computed
+  // for itself (already threshold-correct); any split forces "low" --
+  // a genuine disagreement across identical inputs is real uncertainty
+  // the tool should surface, not paper over with a confident-sounding verdict.
+  if (majorityCount < passes.length) base.confidence = "low";
+  base.ensemble = { triggered: true, runs: verdicts, agreement };
+
+  console.error(
+    JSON.stringify({
+      diagnostic: "ensemble_decision",
+      runs: verdicts,
+      agreement,
+      finalVerdict: base.verdict,
+      finalConfidence: base.confidence,
+    })
+  );
+
+  return JSON.stringify(base);
 }
 
 interface JudgmentResult {
@@ -332,8 +429,49 @@ interface JudgmentResult {
   confidence: string;
   reason: string;
   coverage?: string | null;
-  recommendation?: { reference?: { url?: string; flow_name?: string; source?: string } | null } | null;
+  requirements_checked?: Array<{ requirement?: string; met?: boolean; evidence?: string }> | null;
+  recommendation?: {
+    source?: string | null;
+    install_command?: string | null;
+    reference?: { url?: string; flow_name?: string; source?: string } | null;
+  } | null;
+  ensemble?: { triggered: boolean; runs?: string[]; agreement?: string };
   [key: string]: unknown;
+}
+
+// The model's stated `coverage` string doesn't always match its own
+// `requirements_checked` array -- observed a run where the array listed
+// 5 "met" items out of 10 but the coverage field said "4/10 (40%)". Since
+// enforceVerdictThreshold (and the calling agent) trusts the `coverage`
+// string, a wrong string silently produces a verdict that's internally
+// consistent with itself but not with the evidence the model actually
+// wrote down. Recount from the array -- the one part of the output that's
+// a plain enumerable list, not arithmetic the model has to get right --
+// and overwrite `coverage` with the true tally before anything else reads
+// it.
+function enforceCoverageRecount(parsed: JudgmentResult): void {
+  if (parsed.reason !== "scored") return;
+  const items = parsed.requirements_checked;
+  if (!Array.isArray(items) || items.length === 0) return;
+
+  const total = items.length;
+  const met = items.filter((item) => item.met === true).length;
+  const percent = Math.round((met / total) * 1000) / 10; // one decimal, matches model's own style
+  const percentDisplay = Number.isInteger(percent) ? String(percent) : percent.toFixed(1);
+  const recounted = `${met}/${total} (${percentDisplay}%)`;
+
+  if (parsed.coverage !== recounted) {
+    console.error(
+      JSON.stringify({
+        diagnostic: "coverage_recounted",
+        statedCoverage: parsed.coverage,
+        recountedCoverage: recounted,
+        metCount: met,
+        totalCount: total,
+      })
+    );
+    parsed.coverage = recounted;
+  }
 }
 
 // The model doesn't reliably self-apply its own coverage->verdict rule --
@@ -469,7 +607,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   };
 
   try {
-    const resultText = await callAnthropic(args);
+    const resultText = await judgeComponent(args);
     return {
       content: [{ type: "text", text: resultText }],
     };
