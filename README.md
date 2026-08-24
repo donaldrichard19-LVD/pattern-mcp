@@ -75,12 +75,30 @@ and key:
     -e ANTHROPIC_API_KEY=sk-ant-... \
     -- node /absolute/path/to/ui-component-judgment-mcp/dist/index.js
   ```
-  `claude mcp add` stores this in a per-project "local config" entry
-  inside `~/.claude.json`, not in a project file — check with
-  `claude mcp list` (should show `ui-component-judgment ... ✔ Connected`)
-  or `claude mcp get ui-component-judgment`. Note that `claude mcp get`
-  prints your key back to the terminal in plaintext, so be mindful of
-  scrollback/logging when you run it.
+  This registers under `--scope local` (the default) — tied to the
+  current project directory only. Add `--scope user` (or `-s user`)
+  instead to make it available across **all** your projects:
+  ```bash
+  claude mcp add ui-component-judgment \
+    -e ANTHROPIC_API_KEY=sk-ant-... \
+    --scope user \
+    -- node /absolute/path/to/ui-component-judgment-mcp/dist/index.js
+  ```
+  **Flag order matters here.** `-e`/`--env` and `-s`/`--scope` must come
+  *before* the `--` separator and command — `claude mcp add`'s
+  `[args...]` capture is variadic, so a flag placed *after* the command
+  (e.g. `node dist/index.js --scope user`) is liable to be swallowed as
+  an argument to `node` itself instead of being parsed as a flag for
+  `claude mcp add`. Keep all your flags on the left of `--`, the command
+  and its own args on the right.
+
+  `claude mcp add` stores this in `~/.claude.json` (a local- or
+  user-scoped entry depending on `--scope`), not in a project file —
+  check with `claude mcp list` (should show
+  `ui-component-judgment ... ✔ Connected`). Avoid `claude mcp get
+  ui-component-judgment` if you can — it prints your key back to the
+  terminal in plaintext, so `claude mcp list`'s connection status is
+  usually enough without that risk.
 - Cursor: `.cursor/mcp.json`
 - Codex CLI: `~/.codex/config.toml` (global) or `.codex/config.json`
   (project-level) — same `mcpServers` shape, TOML or JSON depending on file
