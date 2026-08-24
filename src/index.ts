@@ -335,6 +335,7 @@ existing_stack: ${input.existing_stack ?? "(not specified)"}`;
   enforceReferenceGrounding(parsed, searchCallDetails);
   enforceCoverageRecount(parsed);
   enforceVerdictThreshold(parsed);
+  enforceRecommendationConsistency(parsed);
 
   return { ok: true, result: parsed };
 }
@@ -545,6 +546,52 @@ function enforceVerdictThreshold(parsed: JudgmentResult): void {
     );
     parsed.verdict = correctVerdict;
     if (correctConfidence !== null) parsed.confidence = correctConfidence;
+  }
+}
+
+// enforceVerdictThreshold can flip the verdict without touching
+// `recommendation`, which the model built to match its OWN (possibly
+// wrong) verdict -- e.g. a corrected "use_existing" can still carry the
+// "custom_build" shape: a populated Mobbin reference and a null
+// component_description, flatly contradicting the documented output
+// schema. Confirmed live during a cold-start test: the tool returned
+// isError: false with exactly this mismatch, which is indistinguishable
+// from a bug to anyone reading the output without the source in front of
+// them. Backfilling a grounded description for the corrected verdict
+// would need another model call (and the original reference_description
+// describes a *different* app's screen anyway, not the now-recommended
+// existing component -- discarding it is correct, not just safe). So
+// instead of trying to salvage it, enforce the invariant directly: only
+// the field that belongs to the final verdict is ever populated. Runs
+// after every other correction, on every single pass, so each pass
+// entering the ensemble is already self-consistent before any
+// cross-pass selection happens.
+function enforceRecommendationConsistency(parsed: JudgmentResult): void {
+  const rec = parsed.recommendation;
+  if (!rec) return;
+
+  if (parsed.verdict === "use_existing" && rec.reference) {
+    console.error(
+      JSON.stringify({
+        diagnostic: "recommendation_reference_cleared",
+        reason:
+          "verdict is use_existing but recommendation still carried a custom_build-shaped reference (likely left over from a verdict correction) -- cleared to keep the output schema-consistent",
+        clearedReference: rec.reference,
+      })
+    );
+    rec.reference = null;
+  }
+
+  if (parsed.verdict === "custom_build" && rec.component_description) {
+    console.error(
+      JSON.stringify({
+        diagnostic: "recommendation_component_description_cleared",
+        reason:
+          "verdict is custom_build but recommendation still carried a use_existing-shaped component_description (likely left over from a verdict correction) -- cleared to keep the output schema-consistent",
+        clearedDescription: rec.component_description,
+      })
+    );
+    rec.component_description = null;
   }
 }
 
