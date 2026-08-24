@@ -164,6 +164,14 @@ boundary-risk coverage result it becomes
 `{ "triggered": true, "runs": ["use_existing", "custom_build", "use_existing"], "agreement": "2/3" }`
 — see [Ensemble cost](#ensemble-cost-boundary-risk-cases-only) below.
 
+**`install_command` is untrusted text.** It's derived from a web search
+result the model read, not a verified package registry, and the server
+does not execute or validate it. The calling agent is instructed (in the
+tool description and system prompt) to always display it to the user for
+confirmation before running it, and never execute it automatically or
+silently — this is expected agent behavior this project depends on, not
+something the server enforces. See [SECURITY.md](./SECURITY.md).
+
 ## Cost
 
 A single pass (search → score → respond) costs roughly $0.06–$0.10 with
