@@ -183,7 +183,8 @@ component scoring as a match for a booking checkout).
       "url": "...",
       "flow_name": "... (Mobbin only)",
       "file_name": "... (Figma Community only)",
-      "reference_description": "..."
+      "reference_description": "...",
+      "url_type": "deep_link | entry_point"
     }
   },
   "ensemble": { "triggered": false }
@@ -206,6 +207,46 @@ grounded**, not just on the verdict. On a `custom_build` verdict:
 No new credentials are required for the Figma Community reference — it
 uses the same `web_search` mechanism as every other lookup in this tool,
 not the Figma API, so there's no separate token to configure.
+
+**`reference.url_type` tells you whether the URL is a deep link or just a
+search entry point.** A Mobbin or Figma Community search result is very
+often a category/browse page (e.g.
+`mobbin.com/explore/mobile/screens/notifications`), not a direct link to
+the specific screen or flow the model actually identified (e.g. "Saturn
+Calendar - Notifications List") — the original gap this field exists to
+disclose. On a `custom_build` verdict:
+
+- **Mobbin**: the server fetches the search result page (via the
+  `web_fetch` tool) and looks for a more specific permalink to the
+  identified screen/flow actually written on that page. Found and
+  confirmed → `url_type: "deep_link"` and `url` is that permalink. Not
+  found (including when the fetch itself fails) → `url_type:
+  "entry_point"`, `url` stays the category/search page, and
+  `reference_description` is guaranteed to say so explicitly (append or
+  auto-generated server-side, never left to the model alone) — so a
+  reader always knows whether they're getting the exact screen or a
+  browse page they'll need to search themselves.
+- **Figma Community**: a result URL containing `/community/file/` is
+  already file-specific by Figma's own URL structure, so it's treated as
+  `url_type: "deep_link"` without spending a fetch on it. A result that
+  *isn't* a `/community/file/` URL (an occasional browse/tag page) goes
+  through the same fetch-and-verify path as Mobbin. In practice a Figma
+  fetch will almost always fail regardless — `figma.com/robots.txt`
+  disallows `ClaudeBot` site-wide — so a non-file Figma result reliably
+  ends up `entry_point`, honestly.
+
+This is enforced the same way as every other grounding rule in this
+project: **server-side, not just prompt instruction.** A claimed deep
+link is only kept if it's literally present in the text of a page the
+server actually fetched; a claim that fails that check is silently
+replaced with a real URL from an actual search/fetch result (never
+discarded to a guess), and the entry-point caveat is force-appended to
+`reference_description` if the model's own text didn't already disclose
+it. `src/index.ts`'s `applyDeepLinkGrounding` is the single place this
+happens — see its comments for the exact rules, including why a
+model-guessed URL-pattern retry (e.g. stripping a path segment after a
+fetch fails) is both prompted against and independently rejected by the
+`web_fetch` tool itself (`url_not_in_prior_context`).
 
 **`install_command` is untrusted text.** It's derived from a web search
 result the model read, not a verified package registry, and the server
@@ -231,6 +272,14 @@ the API. Three things keep a single pass down without touching quality:
   for the same cap — shadcn and 21st.dev are searched in the same turn
   rather than sequentially, so the growing conversation gets re-sent
   fewer times per call.
+- **A separate 2-call `web_fetch` budget**, used only for the step-6
+  deep-link check described above (`max_content_tokens: 15000` caps what
+  a single category-page fetch can cost). `web_fetch` itself has no
+  per-call charge beyond the tokens the fetched page adds to context, and
+  the system prompt explicitly reserves this tool for step 6 only — the
+  model is instructed not to reach for it during requirement scoring
+  (step 4), so it doesn't compete with the reference lookups it exists
+  for.
 - **`UI_JUDGMENT_MODEL` env var** (defaults to `claude-sonnet-5`) — lets you
   swap in a cheaper model (e.g. Haiku 4.5) without a code change. Before
   trusting a cheaper model in production, re-run the 5 validated test cases
