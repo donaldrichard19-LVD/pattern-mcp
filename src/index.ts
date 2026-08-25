@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * ui-component-judgment-mcp
+ * Pattern
  *
  * MCP server exposing two tools. `recommend_component` judges whether a UI
  * component need should be met with an existing shadcn/ui or 21st.dev
@@ -33,14 +33,14 @@ const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 // cheaper tier -- re-run the 5 validated test cases from the product brief
 // (price breakdown, cancellation policy, earnings dashboard, gallery,
 // messaging) and diff verdicts before trusting it in production.
-const MODEL = process.env.UI_JUDGMENT_MODEL ?? "claude-sonnet-5";
+const MODEL = process.env.PATTERN_MODEL ?? "claude-sonnet-5";
 
 // Search budget for candidate discovery. Defaults to 2, matching the
 // process the system prompt was originally validated against. Set to
 // "unlimited" to remove the cap entirely (enforced server-side via the
 // web_search tool's max_uses -- not just prompt instruction, since models
 // don't reliably self-limit against a purely textual budget).
-const SEARCH_BUDGET_RAW = process.env.UI_JUDGMENT_SEARCH_BUDGET ?? "2";
+const SEARCH_BUDGET_RAW = process.env.PATTERN_SEARCH_BUDGET ?? "2";
 const SEARCH_BUDGET: number | null =
   SEARCH_BUDGET_RAW.trim().toLowerCase() === "unlimited"
     ? null
@@ -48,7 +48,7 @@ const SEARCH_BUDGET: number | null =
         const parsed = Number.parseInt(SEARCH_BUDGET_RAW, 10);
         if (!Number.isFinite(parsed) || parsed <= 0) {
           throw new Error(
-            `UI_JUDGMENT_SEARCH_BUDGET must be a positive integer or "unlimited", got: ${SEARCH_BUDGET_RAW}`
+            `PATTERN_SEARCH_BUDGET must be a positive integer or "unlimited", got: ${SEARCH_BUDGET_RAW}`
           );
         }
         return parsed;
@@ -87,12 +87,12 @@ function isSkipListMatch(componentNeed: string): boolean {
 // still catching a runaway loop well before it gets expensive. This is
 // an in-memory counter -- it resets when the server process restarts,
 // by design (see README).
-const SESSION_CALL_CAP_RAW = process.env.UI_JUDGMENT_SESSION_CAP ?? "40";
+const SESSION_CALL_CAP_RAW = process.env.PATTERN_SESSION_CAP ?? "40";
 const SESSION_CALL_CAP = (() => {
   const parsed = Number.parseInt(SESSION_CALL_CAP_RAW, 10);
   if (!Number.isFinite(parsed) || parsed <= 0) {
     throw new Error(
-      `UI_JUDGMENT_SESSION_CAP must be a positive integer, got: ${SESSION_CALL_CAP_RAW}`
+      `PATTERN_SESSION_CAP must be a positive integer, got: ${SESSION_CALL_CAP_RAW}`
     );
   }
   return parsed;
@@ -106,7 +106,7 @@ let sessionCallCount = 0;
 // excludes requirements_checked evidence text and the API key -- see
 // SECURITY.md for what this means for component_need/domain, which are
 // written here in plaintext.
-const LOG_PATH = process.env.UI_JUDGMENT_LOG_PATH ?? join(homedir(), ".ui-component-judgment-mcp", "calls.log");
+const LOG_PATH = process.env.PATTERN_LOG_PATH ?? join(homedir(), ".pattern", "calls.log");
 
 // Persistent per-project decision memory -- distinct from LOG_PATH above.
 // The log is an append-only record of every call that reached the API;
@@ -115,7 +115,7 @@ const LOG_PATH = process.env.UI_JUDGMENT_LOG_PATH ?? join(homedir(), ".ui-compon
 // verdict. recommend_component never writes here, only reads (see
 // getPastDecisions) -- coverage scoring stays fresh every call regardless
 // of what's in this file (see README's "no verdict caching" rule).
-const MEMORY_PATH = process.env.UI_JUDGMENT_MEMORY_PATH ?? join(homedir(), ".ui-component-judgment-mcp", "memory.json");
+const MEMORY_PATH = process.env.PATTERN_MEMORY_PATH ?? join(homedir(), ".pattern", "memory.json");
 const MAX_DECISIONS_PER_PROJECT = 50;
 
 const TOOL_NAME = "recommend_component";
@@ -763,7 +763,7 @@ async function judgeComponent(input: {
   if (reachesApi) {
     if (sessionCallCount >= SESSION_CALL_CAP) {
       throw new Error(
-        `Session call cap (${SESSION_CALL_CAP}) reached. This protects against runaway costs on your API key. Restart the MCP server to reset the counter, or set UI_JUDGMENT_SESSION_CAP to raise the limit.`
+        `Session call cap (${SESSION_CALL_CAP}) reached. This protects against runaway costs on your API key. Restart the MCP server to reset the counter, or set PATTERN_SESSION_CAP to raise the limit.`
       );
     }
     sessionCallCount++;
@@ -1183,7 +1183,7 @@ function extractJson(text: string): string {
 }
 
 const server = new Server(
-  { name: "ui-component-judgment-mcp", version: "0.1.0" },
+  { name: "pattern-mcp", version: "0.1.0" },
   { capabilities: { tools: {} } }
 );
 
@@ -1302,6 +1302,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error("Fatal error starting ui-component-judgment-mcp:", err);
+  console.error("Fatal error starting pattern-mcp:", err);
   process.exit(1);
 });

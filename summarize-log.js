@@ -2,7 +2,7 @@
 /**
  * summarize-log.js
  *
- * Reads a ui-component-judgment-mcp calls.log file (see README.md's
+ * Reads a Pattern calls.log file (see README.md's
  * "Local call log" section for the format) and prints a human-readable
  * summary: verdict/confidence/reason breakdown, ensemble trigger and
  * agreement rates, reference-source grounding rates, and repeat
@@ -17,7 +17,7 @@
  *   node summarize-log.js [path-to-calls.log]
  *
  * With no argument, reads from the same default location the server
- * itself uses: $UI_JUDGMENT_LOG_PATH, or ~/.ui-component-judgment-mcp/calls.log
+ * itself uses: $PATTERN_LOG_PATH, or ~/.pattern/calls.log
  */
 
 import { readFileSync, existsSync } from "node:fs";
@@ -25,7 +25,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 const logPath =
-  process.argv[2] ?? process.env.UI_JUDGMENT_LOG_PATH ?? join(homedir(), ".ui-component-judgment-mcp", "calls.log");
+  process.argv[2] ?? process.env.PATTERN_LOG_PATH ?? join(homedir(), ".pattern", "calls.log");
 
 if (!existsSync(logPath)) {
   console.error(`No log file found at ${logPath}`);

@@ -82,7 +82,7 @@ async function main() {
   });
 
   const client = new Client(
-    { name: "ui-component-judgment-test-client", version: "0.1.0" },
+    { name: "pattern-test-client", version: "0.1.0" },
     { capabilities: {} }
   );
 

@@ -50,8 +50,8 @@ doesn't invalidate a key that already appeared in history.
   way you would with any other LLM API call.
 - **`component_need` and `domain` also get written to a local log file
   in plaintext**, separate from the API call above:
-  `~/.ui-component-judgment-mcp/calls.log` by default, overridable via
-  `UI_JUDGMENT_LOG_PATH` — see
+  `~/.pattern/calls.log` by default, overridable via
+  `PATTERN_LOG_PATH` — see
   [Local call log](./README.md#local-call-log). This is local-only
   (nothing here is sent anywhere by this server), but avoid putting
   sensitive project details in those two fields for this reason too, not
@@ -59,8 +59,8 @@ doesn't invalidate a key that already appeared in history.
   where the diagnostics below don't.
 - **`record_component_decision` writes `project_id`, `component_need`,
   `domain`, `action`, `source`, and `timestamp` to a second local file in
-  plaintext**: `~/.ui-component-judgment-mcp/memory.json` by default,
-  overridable via `UI_JUDGMENT_MEMORY_PATH` — see
+  plaintext**: `~/.pattern/memory.json` by default,
+  overridable via `PATTERN_MEMORY_PATH` — see
   [Per-project decision memory](./README.md#per-project-decision-memory).
   Same local-only caveat as `calls.log` above (nothing here is sent
   anywhere by this server on its own), but note this file's content
@@ -84,7 +84,7 @@ doesn't invalidate a key that already appeared in history.
 ## Cost ceiling is a session cap, not a spend cap
 
 The server caps itself at 40 `recommend_component` calls per process
-lifetime by default (`UI_JUDGMENT_SESSION_CAP` — see
+lifetime by default (`PATTERN_SESSION_CAP` — see
 [Session call cap](./README.md#session-call-cap)), which bounds the
 worst case rather than eliminating cost risk entirely. Three things to
 know:

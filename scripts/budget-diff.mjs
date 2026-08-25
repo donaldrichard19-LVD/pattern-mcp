@@ -112,8 +112,8 @@ async function main() {
   writeFileSync(outPath, JSON.stringify(combined, null, 2));
   console.log(`(saved partial results to ${outPath})`);
 
-  console.log("\n=== Running with UI_JUDGMENT_SEARCH_BUDGET=5 ===");
-  combined.capped5 = await runBudget("capped5", { UI_JUDGMENT_SEARCH_BUDGET: "5" });
+  console.log("\n=== Running with PATTERN_SEARCH_BUDGET=5 ===");
+  combined.capped5 = await runBudget("capped5", { PATTERN_SEARCH_BUDGET: "5" });
   writeFileSync(outPath, JSON.stringify(combined, null, 2));
   console.log(`\nWrote full results to ${outPath}`);
 }

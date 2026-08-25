@@ -16,7 +16,7 @@ if (!process.env.ANTHROPIC_API_KEY) {
   }
 }
 
-const budgetEnv = process.argv[2] === "unlimited" ? {} : { UI_JUDGMENT_SEARCH_BUDGET: process.argv[2] ?? "2" };
+const budgetEnv = process.argv[2] === "unlimited" ? {} : { PATTERN_SEARCH_BUDGET: process.argv[2] ?? "2" };
 
 const transport = new StdioClientTransport({
   command: "node",

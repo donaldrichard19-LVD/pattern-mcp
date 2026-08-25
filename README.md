@@ -1,4 +1,4 @@
-# ui-component-judgment-mcp
+# Pattern
 
 MCP server exposing two tools. `recommend_component` judges whether a UI
 component need should be met with an existing shadcn/ui or 21st.dev
@@ -52,7 +52,7 @@ request.
 
 ```bash
 git clone <this repo>
-cd ui-component-judgment-mcp
+cd pattern-mcp
 npm install
 npm run build
 ```
@@ -70,22 +70,22 @@ with any MCP-compatible client, not just one. Drop this into your client's
 config (adjusting the path per client), swapping in your own project path
 and key:
 
-- **Claude Code**: either add `"ui-component-judgment": { ... }` (the
+- **Claude Code**: either add `"pattern": { ... }` (the
   block below) to the `mcpServers` object in `.mcp.json` at your project
   root, or run:
   ```bash
-  claude mcp add ui-component-judgment \
+  claude mcp add pattern \
     -e ANTHROPIC_API_KEY=sk-ant-... \
-    -- node /absolute/path/to/ui-component-judgment-mcp/dist/index.js
+    -- node /absolute/path/to/pattern-mcp/dist/index.js
   ```
   This registers under `--scope local` (the default) — tied to the
   current project directory only. Add `--scope user` (or `-s user`)
   instead to make it available across **all** your projects:
   ```bash
-  claude mcp add ui-component-judgment \
+  claude mcp add pattern \
     -e ANTHROPIC_API_KEY=sk-ant-... \
     --scope user \
-    -- node /absolute/path/to/ui-component-judgment-mcp/dist/index.js
+    -- node /absolute/path/to/pattern-mcp/dist/index.js
   ```
   **Flag order matters here.** `-e`/`--env` and `-s`/`--scope` must come
   *before* the `--` separator and command — `claude mcp add`'s
@@ -98,8 +98,8 @@ and key:
   `claude mcp add` stores this in `~/.claude.json` (a local- or
   user-scoped entry depending on `--scope`), not in a project file —
   check with `claude mcp list` (should show
-  `ui-component-judgment ... ✔ Connected`). Avoid `claude mcp get
-  ui-component-judgment` if you can — it prints your key back to the
+  `pattern ... ✔ Connected`). Avoid `claude mcp get
+  pattern` if you can — it prints your key back to the
   terminal in plaintext, so `claude mcp list`'s connection status is
   usually enough without that risk.
 - Cursor: `.cursor/mcp.json`
@@ -110,9 +110,9 @@ and key:
 ```json
 {
   "mcpServers": {
-    "ui-component-judgment": {
+    "pattern": {
       "command": "node",
-      "args": ["/absolute/path/to/ui-component-judgment-mcp/dist/index.js"],
+      "args": ["/absolute/path/to/pattern-mcp/dist/index.js"],
       "env": { "ANTHROPIC_API_KEY": "sk-ant-..." }
     }
   }
@@ -325,9 +325,9 @@ effectively free and instant.
 ## Per-project decision memory
 
 `record_component_decision` appends to a local JSON file, default path
-`~/.ui-component-judgment-mcp/memory.json`, overridable via
-`UI_JUDGMENT_MEMORY_PATH` — same override pattern as
-[`UI_JUDGMENT_LOG_PATH`](#local-call-log). It's a flat object keyed by
+`~/.pattern/memory.json`, overridable via
+`PATTERN_MEMORY_PATH` — same override pattern as
+[`PATTERN_LOG_PATH`](#local-call-log). It's a flat object keyed by
 `project_id`, each value an array of decision entries in the same shape as
 `record_component_decision`'s input (minus `project_id` itself, since
 that's the key):
@@ -400,7 +400,7 @@ the API. Three things keep a single pass down without touching quality:
   model is instructed not to reach for it during requirement scoring
   (step 4), so it doesn't compete with the reference lookups it exists
   for.
-- **`UI_JUDGMENT_MODEL` env var** (defaults to `claude-sonnet-5`) — lets you
+- **`PATTERN_MODEL` env var** (defaults to `claude-sonnet-5`) — lets you
   swap in a cheaper model (e.g. Haiku 4.5) without a code change. Before
   trusting a cheaper model in production, re-run the 5 validated test cases
   from the product brief (price breakdown, cancellation policy, earnings
@@ -455,7 +455,7 @@ a genuinely ambiguous case rather than a bug to fix with a bigger N.
 ### Session call cap
 
 The server caps itself at **40 calls per process lifetime** by default,
-configurable via `UI_JUDGMENT_SESSION_CAP`. This protects against a
+configurable via `PATTERN_SESSION_CAP`. This protects against a
 *buggy calling agent* looping on the tool — a retry loop, a stuck agent
 re-calling the same need repeatedly — not against normal project usage.
 The number is grounded in real usage, not arbitrary: a full pass through
@@ -472,8 +472,8 @@ project, don't just restart repeatedly to reset it.
 
 Every call that reaches the API (skip-list hits excluded, same exclusion
 as the session cap) appends one JSON line to a local log file — default
-path `~/.ui-component-judgment-mcp/calls.log`, overridable via
-`UI_JUDGMENT_LOG_PATH`. This is **local-only**: nothing here is sent
+path `~/.pattern/calls.log`, overridable via
+`PATTERN_LOG_PATH`. This is **local-only**: nothing here is sent
 anywhere by this server, it's purely for your own debugging/usage
 visibility.
 

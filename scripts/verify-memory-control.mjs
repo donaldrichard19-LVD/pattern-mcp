@@ -23,7 +23,7 @@ const MEMORY_PATH = resolve(projectRoot, "scripts/verify-memory-scratch.json");
 const transport = new StdioClientTransport({
   command: "node",
   args: [resolve(projectRoot, "dist/index.js")],
-  env: { ...process.env, UI_JUDGMENT_MEMORY_PATH: MEMORY_PATH, UI_JUDGMENT_SEARCH_BUDGET: "2" },
+  env: { ...process.env, PATTERN_MEMORY_PATH: MEMORY_PATH, PATTERN_SEARCH_BUDGET: "2" },
   stderr: "pipe",
 });
 const client = new Client({ name: "verify-memory-control", version: "0.1.0" }, { capabilities: {} });
