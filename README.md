@@ -329,6 +329,15 @@ automatically if it doesn't exist, and a write failure (disk full,
 read-only filesystem, permissions) is caught and reported to stderr —
 it never breaks the tool call itself.
 
+**Reviewing a log file** — including a tester's, if they send you
+theirs (there's no automatic collection; this project doesn't phone
+home): run `node summarize-log.js [path]`, defaulting to the same
+location the server itself uses. It prints a verdict/confidence/reason
+breakdown, ensemble trigger and agreement rates, reference-source
+grounding rates on `custom_build` verdicts, and flags any
+`component_need` called more than once — a signal worth checking
+against the [session cap](#session-call-cap) if you see it.
+
 ## Known limitations (carried over from validation)
 
 - **Evidence judgment varies run to run, independent of search results.**
