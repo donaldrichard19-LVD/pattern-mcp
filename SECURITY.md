@@ -57,6 +57,21 @@ doesn't invalidate a key that already appeared in history.
   sensitive project details in those two fields for this reason too, not
   just because of the API call — the log file persists across restarts,
   where the diagnostics below don't.
+- **`record_component_decision` writes `project_id`, `component_need`,
+  `domain`, `action`, `source`, and `timestamp` to a second local file in
+  plaintext**: `~/.ui-component-judgment-mcp/memory.json` by default,
+  overridable via `UI_JUDGMENT_MEMORY_PATH` — see
+  [Per-project decision memory](./README.md#per-project-decision-memory).
+  Same local-only caveat as `calls.log` above (nothing here is sent
+  anywhere by this server on its own), but note this file's content
+  *does* subsequently flow into the Anthropic API call above whenever a
+  later `recommend_component` call reuses the same `project_id` — past
+  `component_need`/`domain` values get folded into that call's prompt as
+  context. Avoid sensitive project details in those fields for the same
+  reason as `calls.log`, and additionally: unlike the append-only log,
+  this file persists across restarts *and* is read back into future API
+  calls, so treat its contents with the same care as the live inputs
+  above, not just as a passive record.
 - The server emits diagnostic JSON lines to **stderr** on every call
   (search queries, coverage recounts, verdict corrections, ensemble
   decisions). These are not written to disk by this server, but depending

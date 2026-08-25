@@ -1,11 +1,14 @@
 # ui-component-judgment-mcp
 
-MCP server exposing one tool, `recommend_component`, that judges whether a UI
+MCP server exposing two tools. `recommend_component` judges whether a UI
 component need should be met with an existing shadcn/ui or 21st.dev
 component, or requires a custom build guided by a real-app reference from
 Mobbin and/or Figma Community. Returns a structured verdict, not a list of
 search results — built for an agent to consume mid-build, not for a human
-to browse.
+to browse. `record_component_decision` records a decision the calling agent
+has actually acted on, so a later `recommend_component` call in the same
+project can weigh it as a consistency signal — see
+[Per-project decision memory](#per-project-decision-memory).
 
 This implements the judgment layer validated in the product brief: field/
 requirement coverage scored against real component evidence, thresholded
@@ -157,13 +160,27 @@ messaging inbox — all in the same Airbnb-style rental marketplace domain.
   "component_need": "price breakdown with fees and taxes",
   "domain": "Airbnb-style rental marketplace",
   "framework": "React + Tailwind",
-  "existing_stack": "already using shadcn/ui"
+  "existing_stack": "already using shadcn/ui",
+  "project_id": "my-booking-app"
 }
 ```
 `component_need` should be specific, not a category — "price breakdown with
 fees and taxes" not "pricing". Vague category names are what produced
 false-positive matches during validation (a generic SaaS pricing-tier
 component scoring as a match for a booking checkout).
+
+`project_id` is optional — a project name or path the calling agent
+supplies. When present, past decisions recorded for that same `project_id`
+via `record_component_decision` are pulled from
+[per-project decision memory](#per-project-decision-memory) and included in
+the prompt as a *signal, not a rule*: the model is instructed to weigh
+consistency with a highly similar past decision, but never to let it
+override a genuinely better match this search finds, and never to skip
+searching or scoring because a past decision exists. Coverage is still
+computed fresh on every call regardless — see
+[No caching, by design](#known-limitations-carried-over-from-validation).
+Omit `project_id` to skip memory entirely; there's no shared/global bucket
+it falls back to.
 
 **Output:** JSON matching:
 ```json
@@ -187,13 +204,25 @@ component scoring as a match for a booking checkout).
       "url_type": "deep_link | entry_point"
     }
   },
-  "ensemble": { "triggered": false }
+  "ensemble": { "triggered": false },
+  "past_decision_signal": { "considered": true, "note": "..." }
 }
 ```
 `ensemble.triggered` is `false` on the normal single-pass path. On a
 boundary-risk coverage result it becomes
 `{ "triggered": true, "runs": ["use_existing", "custom_build", "use_existing"], "agreement": "2/3" }`
 — see [Ensemble cost](#ensemble-cost-boundary-risk-cases-only) below.
+
+`past_decision_signal` only appears when `project_id` was provided **and**
+that project has at least one past decision recorded — omitted entirely
+otherwise, never a hollow `{ "considered": false }` on a call with nothing
+to consider. `considered` is `true` only when a past decision was
+genuinely similar enough to factor into scoring or recommendation, not
+just present in the list; `note` names which decision and how, or why none
+applied. This is enforced server-side, not just prompted: a
+`considered`/`note` pair the model returns on a call that had no
+past-decision context in its prompt is discarded rather than trusted — see
+[Per-project decision memory](#per-project-decision-memory).
 
 **`recommendation.reference` shape depends on how many sources actually
 grounded**, not just on the verdict. On a `custom_build` verdict:
@@ -255,6 +284,97 @@ tool description and system prompt) to always display it to the user for
 confirmation before running it, and never execute it automatically or
 silently — this is expected agent behavior this project depends on, not
 something the server enforces. See [SECURITY.md](./SECURITY.md).
+
+## Tool: `record_component_decision`
+
+Records a decision the calling agent has actually acted on — call it
+**after** installing an existing component or finishing a custom build, not
+on every `recommend_component` verdict returned. Its only job is appending
+one entry to local [per-project decision memory](#per-project-decision-memory);
+it runs no judgment logic and makes no Anthropic API call, so it's
+effectively free and instant.
+
+**Input:**
+```json
+{
+  "project_id": "my-booking-app",
+  "component_need": "price breakdown with fees and taxes",
+  "domain": "Airbnb-style rental marketplace",
+  "action": "custom_built",
+  "source": "custom",
+  "timestamp": "2026-08-25T14:32:00.000Z"
+}
+```
+- `project_id` (required) — must match the `project_id` you pass to
+  `recommend_component` for this decision to ever be surfaced there. Use a
+  stable value, e.g. the project's directory path or name.
+- `component_need` (required), `domain` (optional) — same fields as
+  `recommend_component`'s input; free text, not matched against anything
+  server-side.
+- `action` (required) — `"installed"` or `"custom_built"`.
+- `source` (required) — e.g. `"shadcn"`, `"21st.dev"`, or `"custom"` for a
+  custom build.
+- `timestamp` (optional) — ISO 8601; defaults to the current time if
+  omitted.
+
+**Output:**
+```json
+{ "status": "recorded", "project_id": "my-booking-app", "entry": { "...": "..." } }
+```
+
+## Per-project decision memory
+
+`record_component_decision` appends to a local JSON file, default path
+`~/.ui-component-judgment-mcp/memory.json`, overridable via
+`UI_JUDGMENT_MEMORY_PATH` — same override pattern as
+[`UI_JUDGMENT_LOG_PATH`](#local-call-log). It's a flat object keyed by
+`project_id`, each value an array of decision entries in the same shape as
+`record_component_decision`'s input (minus `project_id` itself, since
+that's the key):
+
+```json
+{
+  "my-booking-app": [
+    {
+      "component_need": "price breakdown with fees and taxes",
+      "domain": "Airbnb-style rental marketplace",
+      "action": "custom_built",
+      "source": "custom",
+      "timestamp": "2026-08-25T14:32:00.000Z"
+    }
+  ]
+}
+```
+
+Each project's array is capped at the **50 most recent entries** — once a
+project hits the cap, the oldest entry is dropped as a new one is added, so
+the file stays bounded for a long-lived project without manual cleanup.
+
+**Only explicitly confirmed decisions are stored here — not every verdict
+`recommend_component` returns.** The server never writes to this file on
+its own; `recommend_component` only ever *reads* it (when `project_id` is
+provided) and never writes to it. A verdict you don't act on, or act on
+differently than recommended, leaves no trace here unless you call
+`record_component_decision` yourself to say what you actually did.
+
+**This is local-only plaintext**, same caveat pattern as the
+[local call log](#local-call-log): nothing in this file is sent anywhere by
+this server. `component_need` and `domain` are written here the same way
+they're written to `calls.log` — see
+[SECURITY.md](./SECURITY.md#what-actually-leaves-your-machine) before
+putting anything sensitive in those fields. A write failure (disk full,
+read-only filesystem, permissions) surfaces as a tool error on
+`record_component_decision` itself, since — unlike the best-effort call
+log — writing the decision *is* that tool's entire job, not a side effect
+of it.
+
+**This does not weaken the no-verdict-caching rule.** Memory only ever adds
+past-decision context to the prompt for a fresh judgment pass — see
+[No caching, by design](#known-limitations-carried-over-from-validation)
+and the `project_id` note under
+[Tool: `recommend_component`](#tool-recommend_component). Coverage is
+recomputed from a real search every single call, with or without a
+`project_id`.
 
 ## Cost
 
@@ -404,7 +524,11 @@ against the [session cap](#session-call-cap) if you see it.
   components (validated: shadcn's June 2026 chat primitives turned a likely
   custom-build messaging component into a near-perfect match). If you add
   caching at the calling-agent layer, keep it session-scoped only — never
-  persist a verdict across sessions or builds.
+  persist a verdict across sessions or builds. This still holds with
+  [per-project decision memory](#per-project-decision-memory) in the
+  picture: memory only ever adds context to the prompt for a fresh
+  judgment pass, it never substitutes for one — a `recommend_component`
+  call with a `project_id` still always re-searches and re-scores.
 - **Skip-list is a starting point, not validated against real usage yet.**
   Log every call and whether it hit the skip-list; watch for agents calling
   the tool anyway on skip-listed items (list too narrow) or shipping generic

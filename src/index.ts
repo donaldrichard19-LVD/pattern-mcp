@@ -2,10 +2,14 @@
 /**
  * ui-component-judgment-mcp
  *
- * MCP server exposing a single tool, `recommend_component`, that judges
- * whether a UI component need should be met with an existing shadcn/ui or
- * 21st.dev component, or requires a custom build guided by a real-app
- * reference from Mobbin.
+ * MCP server exposing two tools. `recommend_component` judges whether a UI
+ * component need should be met with an existing shadcn/ui or 21st.dev
+ * component, or requires a custom build guided by a real-app reference
+ * from Mobbin. `record_component_decision` appends a confirmed decision to
+ * local per-project memory (see MEMORY_PATH below), which recommend_component
+ * can optionally read back (via project_id) as consistency context for a
+ * future call -- never as a cached verdict; coverage is still scored fresh
+ * every time.
  *
  * The judgment logic (extract requirements -> search -> score real code ->
  * threshold into a verdict) is delegated to a single Anthropic API call
@@ -19,7 +23,7 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { appendFileSync, mkdirSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -104,7 +108,18 @@ let sessionCallCount = 0;
 // written here in plaintext.
 const LOG_PATH = process.env.UI_JUDGMENT_LOG_PATH ?? join(homedir(), ".ui-component-judgment-mcp", "calls.log");
 
+// Persistent per-project decision memory -- distinct from LOG_PATH above.
+// The log is an append-only record of every call that reached the API;
+// this file only ever gains an entry when record_component_decision is
+// called, i.e. when the calling agent explicitly confirms it acted on a
+// verdict. recommend_component never writes here, only reads (see
+// getPastDecisions) -- coverage scoring stays fresh every call regardless
+// of what's in this file (see README's "no verdict caching" rule).
+const MEMORY_PATH = process.env.UI_JUDGMENT_MEMORY_PATH ?? join(homedir(), ".ui-component-judgment-mcp", "memory.json");
+const MAX_DECISIONS_PER_PROJECT = 50;
+
 const TOOL_NAME = "recommend_component";
+const RECORD_DECISION_TOOL_NAME = "record_component_decision";
 
 const INPUT_SCHEMA = {
   type: "object",
@@ -132,8 +147,53 @@ const INPUT_SCHEMA = {
         "Optional. e.g. 'already using shadcn/ui'. Used only as a tiebreaker " +
         "between similarly-scored candidates, never as a hard filter.",
     },
+    project_id: {
+      type: "string",
+      description:
+        "Optional. A project name or path identifying which project this call " +
+        "belongs to. When provided, past decisions confirmed via " +
+        "record_component_decision for this same project_id are surfaced to " +
+        "the model as a consistency signal (never a rule -- a genuinely " +
+        "better match found in this search still wins). Omit to skip memory " +
+        "lookup entirely; this never falls back to a shared/global bucket.",
+    },
   },
   required: ["component_need", "domain", "framework"],
+} as const;
+
+const RECORD_DECISION_INPUT_SCHEMA = {
+  type: "object",
+  properties: {
+    project_id: {
+      type: "string",
+      description:
+        "A project name or path identifying which project this decision belongs " +
+        "to -- must match the project_id used in recommend_component calls for " +
+        "this decision to be surfaced there later.",
+    },
+    component_need: {
+      type: "string",
+      description: "The component need this decision was made for -- same field as recommend_component's input.",
+    },
+    domain: {
+      type: "string",
+      description: "Optional. The product domain, same field as recommend_component's input.",
+    },
+    action: {
+      type: "string",
+      enum: ["installed", "custom_built"],
+      description: "Whether the calling agent installed an existing component or custom-built one.",
+    },
+    source: {
+      type: "string",
+      description: "Where it came from, e.g. 'shadcn', '21st.dev', or 'custom' for a custom build.",
+    },
+    timestamp: {
+      type: "string",
+      description: "Optional. ISO 8601 timestamp of the decision. Defaults to the current time if omitted.",
+    },
+  },
+  required: ["project_id", "component_need", "action", "source"],
 } as const;
 
 function buildSystemPrompt(searchBudget: number | null): string {
@@ -142,6 +202,8 @@ function buildSystemPrompt(searchBudget: number | null): string {
       ? "Budget: no fixed limit on search calls for candidate discovery -- search as much as genuinely helps you find and verify real candidates, but don't search redundantly once you have enough to score confidently."
       : `Budget: at most ${searchBudget} search call${searchBudget === 1 ? "" : "s"} for candidate discovery. This is separate from, and does not include, the Mobbin and Figma Community lookups in step 6 -- two extra search calls (one per source) are reserved for those and will not work if you spend them here.`;
   return `You are a UI component judgment layer. Given a component need, you decide whether it should be met with an existing shadcn/ui or 21st.dev component, or requires a custom build guided by a real-app reference. You have access to a web_search tool -- use it.
+
+If the user message includes a "Past confirmed decisions in this project" section, treat it only as a signal, not a rule: if a highly similar past decision exists, consider consistency with it while scoring and recommending, but don't let it override a genuinely better match found in this search, and don't skip or shortcut your own search and scoring because a past decision exists. You decide relevance yourself -- nothing upstream has already matched these past decisions to the current need for you. Step 8 below tells you exactly how to report what you did with it.
 
 Follow this process exactly:
 
@@ -189,6 +251,9 @@ Each reference object has: "source" ("Mobbin" or "Figma Community"), "url", and 
 7. EXISTING STACK TIEBREAKER
 If existing_stack is provided and two candidates score similarly, prefer the one matching the existing stack. Never use it as a hard filter that excludes a genuinely better-scoring candidate from a different source.
 
+8. PAST DECISION SIGNAL (only if the user message included a "Past confirmed decisions in this project" section)
+Include a top-level "past_decision_signal" field in your response: { "considered": true|false, "note": "string" }. Set "considered": true only if at least one listed past decision was genuinely similar enough to this need that it actually factored into your scoring or recommendation -- not just present in the list. "note" is one sentence: if considered is true, name which past decision and how it factored in (e.g. "Consistent with this project's prior custom build of a similar price breakdown component"); if false, one sentence on why none applied (e.g. "No past decision matches this need closely enough to be a relevant signal"). This field is mandatory whenever the section is present in the user message -- do not omit it, and do not include it at all if the section was absent.
+
 Respond with ONLY a single JSON object, no prose before or after, no markdown code fences, matching this exact shape:
 
 {
@@ -203,7 +268,8 @@ Respond with ONLY a single JSON object, no prose before or after, no markdown co
     "install_command": "string or null",
     "component_description": "string (use_existing only) or null",
     "reference": { "source": "Mobbin" | "Figma Community", "url": "string", "flow_name": "string (Mobbin only)", "file_name": "string (Figma Community only)", "reference_description": "string" } | [ /* same shape, up to 2 entries, one per source */ ] | null
-  }
+  },
+  "past_decision_signal": { "considered": true|false, "note": "string" } | omit this field entirely if step 8 doesn't apply
 }`;
 }
 
@@ -214,6 +280,7 @@ async function runSinglePass(input: {
   domain: string;
   framework: string;
   existing_stack?: string;
+  project_id?: string;
 }): Promise<SinglePassResult> {
   if (!ANTHROPIC_API_KEY) {
     throw new Error(
@@ -244,10 +311,41 @@ async function runSinglePass(input: {
     };
   }
 
+  // Coverage still computes fresh below regardless of what this finds --
+  // memory only ever adds context to the user message, it never short-
+  // circuits search/scoring or gets treated as a cached verdict. No
+  // project_id -> no lookup at all, not a shared/global fallback (see
+  // getPastDecisions).
+  const pastDecisions = input.project_id ? getPastDecisions(input.project_id) : [];
+  const pastDecisionsBlock =
+    pastDecisions.length === 0
+      ? ""
+      : `\n\nPast confirmed decisions in this project:\n${pastDecisions
+          .map((d) => {
+            const verb = d.action === "installed" ? "Installed" : "Custom-built";
+            const domainPart = d.domain ? ` (domain: ${d.domain})` : "";
+            return `- ${verb} for "${d.component_need}"${domainPart}, source: ${d.source}, confirmed ${d.timestamp}`;
+          })
+          .join("\n")}`;
+
   const userMessage = `component_need: ${input.component_need}
 domain: ${input.domain}
 framework: ${input.framework}
-existing_stack: ${input.existing_stack ?? "(not specified)"}`;
+existing_stack: ${input.existing_stack ?? "(not specified)"}${pastDecisionsBlock}`;
+
+  // Diagnostic only, same pattern as the other stderr diagnostics in this
+  // file -- proves the memory lookup actually reached the prompt sent to
+  // the model, not just that it was read from disk successfully.
+  if (input.project_id) {
+    console.error(
+      JSON.stringify({
+        diagnostic: "past_decisions_context",
+        project_id: input.project_id,
+        past_decision_count: pastDecisions.length,
+        included_in_prompt: pastDecisionsBlock || null,
+      })
+    );
+  }
 
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -472,6 +570,23 @@ existing_stack: ${input.existing_stack ?? "(not specified)"}`;
   enforceVerdictThreshold(parsed);
   enforceRecommendationConsistency(parsed);
 
+  // Same "server-side, not just prompt instruction" policy as the rest of
+  // this file: a past_decision_signal is only trusted when this call
+  // actually had past-decision context to consider. Strips a fabricated
+  // signal on a call with no project_id or an empty project history --
+  // the model has no basis to claim it weighed something that was never
+  // in its prompt.
+  if (pastDecisions.length === 0 && parsed.past_decision_signal) {
+    console.error(
+      JSON.stringify({
+        diagnostic: "past_decision_signal_cleared",
+        reason: "no past-decision context was included in this call's prompt -- clearing an unbacked signal",
+        clearedSignal: parsed.past_decision_signal,
+      })
+    );
+    parsed.past_decision_signal = null;
+  }
+
   return { ok: true, result: parsed };
 }
 
@@ -560,6 +675,74 @@ function logCall(
   }
 }
 
+interface DecisionEntry {
+  component_need: string;
+  domain?: string;
+  action: "installed" | "custom_built";
+  source: string;
+  timestamp: string;
+}
+
+type MemoryFile = Record<string, DecisionEntry[]>;
+
+// Missing file, unreadable, or malformed content all collapse to "no
+// memory yet" rather than throwing -- a fresh install or a hand-edited
+// file that doesn't parse shouldn't break every recommend_component call
+// that happens to pass a project_id.
+function readMemory(): MemoryFile {
+  try {
+    const raw = readFileSync(MEMORY_PATH, "utf8");
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as MemoryFile;
+    }
+    return {};
+  } catch {
+    return {};
+  }
+}
+
+function writeMemory(memory: MemoryFile): void {
+  mkdirSync(dirname(MEMORY_PATH), { recursive: true });
+  writeFileSync(MEMORY_PATH, JSON.stringify(memory, null, 2), "utf8");
+}
+
+// Only entry point that mutates memory.json -- called exclusively from
+// record_component_decision, never from recommend_component. Appends and
+// caps at MAX_DECISIONS_PER_PROJECT, dropping the oldest entries first, so
+// the file stays bounded for a long-lived project without needing manual
+// cleanup.
+function recordDecision(input: {
+  project_id: string;
+  component_need: string;
+  domain?: string;
+  action: "installed" | "custom_built";
+  source: string;
+  timestamp?: string;
+}): DecisionEntry {
+  const entry: DecisionEntry = {
+    component_need: input.component_need,
+    domain: input.domain,
+    action: input.action,
+    source: input.source,
+    timestamp: input.timestamp ?? new Date().toISOString(),
+  };
+  const memory = readMemory();
+  const existing = memory[input.project_id] ?? [];
+  memory[input.project_id] = [...existing, entry].slice(-MAX_DECISIONS_PER_PROJECT);
+  writeMemory(memory);
+  return entry;
+}
+
+// Read-only lookup used by recommend_component when project_id is
+// provided. Never called with no project_id -- callers skip memory
+// entirely in that case (see runSinglePass) rather than falling back to
+// some shared bucket that would mix unrelated projects' decisions.
+function getPastDecisions(projectId: string): DecisionEntry[] {
+  const memory = readMemory();
+  return memory[projectId] ?? [];
+}
+
 // Orchestrates the ensemble: run once, and only pay for 2 more full
 // pipeline passes when the single-run result landed close enough to a
 // verdict threshold that a single item's judgment swinging could flip
@@ -570,6 +753,7 @@ async function judgeComponent(input: {
   domain: string;
   framework: string;
   existing_stack?: string;
+  project_id?: string;
 }): Promise<string> {
   // Session cap and local logging both apply only to calls that actually
   // reach the API -- skip-list hits never do, so both are excluded here
@@ -681,6 +865,7 @@ interface JudgmentResult {
     reference?: ReferenceEntry | ReferenceEntry[] | null;
   } | null;
   ensemble?: { triggered: boolean; runs?: string[]; agreement?: string };
+  past_decision_signal?: { considered: boolean; note: string } | null;
   [key: string]: unknown;
 }
 
@@ -1031,36 +1216,84 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         "read, not a verified package registry. Always display it to the " +
         "user and get their confirmation before running it. Never execute " +
         "it automatically or silently, and never chain it with other " +
-        "commands.",
+        "commands. Pass project_id (optional) to surface this project's " +
+        "own past confirmed decisions (recorded via " +
+        "record_component_decision) as a consistency signal -- coverage " +
+        "is still scored fresh every call regardless; this never returns " +
+        "a cached verdict.",
       inputSchema: INPUT_SCHEMA,
+    },
+    {
+      name: RECORD_DECISION_TOOL_NAME,
+      description:
+        "Records a UI component decision you have actually acted on -- call " +
+        "this AFTER you install an existing component or finish a custom " +
+        "build, not on every recommend_component verdict. This only appends " +
+        "to local per-project memory; it does not re-run any judgment and " +
+        "does not itself call the Anthropic API. Future recommend_component " +
+        "calls with the same project_id will see this decision as a " +
+        "consistency signal, not a binding rule. Use a stable project_id " +
+        "(e.g. the project's directory path or name) so decisions are " +
+        "grouped correctly and never mixed with another project's.",
+      inputSchema: RECORD_DECISION_INPUT_SCHEMA,
     },
   ],
 }));
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  if (request.params.name !== TOOL_NAME) {
-    throw new Error(`Unknown tool: ${request.params.name}`);
+  if (request.params.name === TOOL_NAME) {
+    const args = request.params.arguments as {
+      component_need: string;
+      domain: string;
+      framework: string;
+      existing_stack?: string;
+      project_id?: string;
+    };
+
+    try {
+      const resultText = await judgeComponent(args);
+      return {
+        content: [{ type: "text", text: resultText }],
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return {
+        content: [{ type: "text", text: `Error: ${message}` }],
+        isError: true,
+      };
+    }
   }
 
-  const args = request.params.arguments as {
-    component_need: string;
-    domain: string;
-    framework: string;
-    existing_stack?: string;
-  };
+  if (request.params.name === RECORD_DECISION_TOOL_NAME) {
+    const args = request.params.arguments as {
+      project_id: string;
+      component_need: string;
+      domain?: string;
+      action: "installed" | "custom_built";
+      source: string;
+      timestamp?: string;
+    };
 
-  try {
-    const resultText = await judgeComponent(args);
-    return {
-      content: [{ type: "text", text: resultText }],
-    };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return {
-      content: [{ type: "text", text: `Error: ${message}` }],
-      isError: true,
-    };
+    try {
+      const entry = recordDecision(args);
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ status: "recorded", project_id: args.project_id, entry }),
+          },
+        ],
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return {
+        content: [{ type: "text", text: `Error: ${message}` }],
+        isError: true,
+      };
+    }
   }
+
+  throw new Error(`Unknown tool: ${request.params.name}`);
 });
 
 async function main() {
