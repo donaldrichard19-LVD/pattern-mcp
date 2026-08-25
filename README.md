@@ -299,6 +299,36 @@ The counter is in-memory and resets when the server process restarts —
 raise the cap via the env var if 40 is genuinely too low for your
 project, don't just restart repeatedly to reset it.
 
+## Local call log
+
+Every call that reaches the API (skip-list hits excluded, same exclusion
+as the session cap) appends one JSON line to a local log file — default
+path `~/.ui-component-judgment-mcp/calls.log`, overridable via
+`UI_JUDGMENT_LOG_PATH`. This is **local-only**: nothing here is sent
+anywhere by this server, it's purely for your own debugging/usage
+visibility.
+
+Each line looks like:
+```json
+{"timestamp":"2026-08-24T21:12:43.882Z","component_need":"cancellation policy display","domain":"Airbnb-style rental marketplace","framework":"React + Tailwind","verdict":"custom_build","confidence":"high","reason":"scored","coverage":"2/8 (25%)","ensemble_triggered":false,"reference_sources_grounded":["Mobbin","Figma Community"]}
+```
+`ensemble_agreement` is only present when `ensemble_triggered` is `true`.
+`reference_sources_grounded` is only present on `custom_build` verdicts,
+and only lists sources (`"Mobbin"`, `"Figma Community"`) that actually
+grounded — matches whatever `recommendation.reference` ended up being
+after grounding is enforced (see the
+[Tool](#tool-recommend_component) section above for the full shape
+rules).
+
+**Deliberately excluded**: full `requirements_checked` evidence text, and
+the API key — never written here. **Included in plaintext**:
+`component_need` and `domain` — see
+[SECURITY.md](./SECURITY.md#what-actually-leaves-your-machine) before
+putting anything sensitive in those fields. The log directory is created
+automatically if it doesn't exist, and a write failure (disk full,
+read-only filesystem, permissions) is caught and reported to stderr —
+it never breaks the tool call itself.
+
 ## Known limitations (carried over from validation)
 
 - **Evidence judgment varies run to run, independent of search results.**

@@ -40,11 +40,7 @@ you already committed a key by accident, rotate it in the
 [Anthropic Console](https://console.anthropic.com) — a `git revert` alone
 doesn't invalidate a key that already appeared in history.
 
-## What actually leaves your machine — no local log file exists
-
-At the time of writing, this server does **not** write a persistent local
-log file anywhere (no `~/.ui-component-judgment-mcp/calls.log` or
-equivalent). Two things are worth knowing anyway:
+## What actually leaves your machine
 
 - **Every call sends `component_need`, `domain`, `framework`, and
   `existing_stack` to the Anthropic API** as part of the request (see
@@ -52,6 +48,15 @@ equivalent). Two things are worth knowing anyway:
   be mindful of — avoid putting sensitive project names, unreleased
   feature details, or anything confidential into those fields, the same
   way you would with any other LLM API call.
+- **`component_need` and `domain` also get written to a local log file
+  in plaintext**, separate from the API call above:
+  `~/.ui-component-judgment-mcp/calls.log` by default, overridable via
+  `UI_JUDGMENT_LOG_PATH` — see
+  [Local call log](./README.md#local-call-log). This is local-only
+  (nothing here is sent anywhere by this server), but avoid putting
+  sensitive project details in those two fields for this reason too, not
+  just because of the API call — the log file persists across restarts,
+  where the diagnostics below don't.
 - The server emits diagnostic JSON lines to **stderr** on every call
   (search queries, coverage recounts, verdict corrections, ensemble
   decisions). These are not written to disk by this server, but depending

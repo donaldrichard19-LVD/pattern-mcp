@@ -19,6 +19,9 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+import { appendFileSync, mkdirSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 // Configurable so Sonnet vs. Haiku can be A/B tested without a code change.
@@ -91,6 +94,15 @@ const SESSION_CALL_CAP = (() => {
   return parsed;
 })();
 let sessionCallCount = 0;
+
+// Local structured logging -- one JSON line per recommend_component call
+// that actually reaches the Anthropic API (skip-list hits are excluded,
+// same exclusion as the session cap, since they never call it). Local
+// only: nothing here is sent anywhere by this server. Deliberately
+// excludes requirements_checked evidence text and the API key -- see
+// SECURITY.md for what this means for component_need/domain, which are
+// written here in plaintext.
+const LOG_PATH = process.env.UI_JUDGMENT_LOG_PATH ?? join(homedir(), ".ui-component-judgment-mcp", "calls.log");
 
 const TOOL_NAME = "recommend_component";
 
@@ -411,6 +423,58 @@ function isBoundaryRisk(result: JudgmentResult): boolean {
   return BOUNDARY_RISK_MET_COUNTS_FOR_8_ITEMS.has(met);
 }
 
+// Extracts which reference source(s) actually grounded, for the log line
+// only -- doesn't touch or re-validate the reference itself, that's
+// already been done by enforceReferenceGrounding by the time this runs.
+function groundedReferenceSources(recommendation: JudgmentResult["recommendation"]): string[] {
+  const reference = recommendation?.reference;
+  if (!reference) return [];
+  const entries = Array.isArray(reference) ? reference : [reference];
+  return entries.map((e) => e.source).filter((s): s is string => !!s);
+}
+
+// One JSON line per call that reached the API. Never throws -- a logging
+// failure (disk full, permissions, read-only filesystem) must not break
+// the tool call it's trying to log. component_need/domain/framework are
+// written in plaintext here; requirements_checked evidence text and the
+// API key never are.
+function logCall(
+  input: { component_need: string; domain: string; framework: string },
+  result: JudgmentResult | { parseError: true }
+): void {
+  try {
+    mkdirSync(dirname(LOG_PATH), { recursive: true });
+    const entry: Record<string, unknown> = {
+      timestamp: new Date().toISOString(),
+      component_need: input.component_need,
+      domain: input.domain,
+      framework: input.framework,
+    };
+    if ("parseError" in result) {
+      entry.error = "model output did not parse as JSON";
+    } else {
+      entry.verdict = result.verdict;
+      entry.confidence = result.confidence;
+      entry.reason = result.reason;
+      entry.coverage = result.coverage ?? null;
+      entry.ensemble_triggered = result.ensemble?.triggered ?? false;
+      if (result.ensemble?.triggered) entry.ensemble_agreement = result.ensemble.agreement ?? null;
+      if (result.verdict === "custom_build") {
+        entry.reference_sources_grounded = groundedReferenceSources(result.recommendation);
+      }
+    }
+    appendFileSync(LOG_PATH, JSON.stringify(entry) + "\n", "utf8");
+  } catch (err) {
+    console.error(
+      JSON.stringify({
+        diagnostic: "local_log_write_failed",
+        path: LOG_PATH,
+        error: err instanceof Error ? err.message : String(err),
+      })
+    );
+  }
+}
+
 // Orchestrates the ensemble: run once, and only pay for 2 more full
 // pipeline passes when the single-run result landed close enough to a
 // verdict threshold that a single item's judgment swinging could flip
@@ -422,13 +486,12 @@ async function judgeComponent(input: {
   framework: string;
   existing_stack?: string;
 }): Promise<string> {
-  // Session cap is enforced once per recommend_component invocation, not
-  // once per underlying Anthropic request -- an ensemble-triggered call
-  // makes up to 3 of those internally, but the caller only sees one tool
-  // call, so that's the unit the cap counts. Skip-list hits never reach
-  // the API at all, so they're excluded here rather than counted and
-  // immediately refunded.
-  if (!isSkipListMatch(input.component_need)) {
+  // Session cap and local logging both apply only to calls that actually
+  // reach the API -- skip-list hits never do, so both are excluded here
+  // on the same condition rather than counted/logged and refunded.
+  const reachesApi = !isSkipListMatch(input.component_need);
+
+  if (reachesApi) {
     if (sessionCallCount >= SESSION_CALL_CAP) {
       throw new Error(
         `Session call cap (${SESSION_CALL_CAP}) reached. This protects against runaway costs on your API key. Restart the MCP server to reset the counter, or set UI_JUDGMENT_SESSION_CAP to raise the limit.`
@@ -441,10 +504,14 @@ async function judgeComponent(input: {
   }
 
   const first = await runSinglePass(input);
-  if (!first.ok) return first.raw;
+  if (!first.ok) {
+    if (reachesApi) logCall(input, { parseError: true });
+    return first.raw;
+  }
 
   if (!isBoundaryRisk(first.result)) {
     first.result.ensemble = { triggered: false };
+    if (reachesApi) logCall(input, first.result);
     return JSON.stringify(first.result);
   }
 
@@ -496,6 +563,10 @@ async function judgeComponent(input: {
     })
   );
 
+  // Reachable only past the boundary-risk branch, which is itself only
+  // reachable for calls that passed the skip-list check above -- always
+  // reachesApi === true here, no guard needed.
+  logCall(input, base);
   return JSON.stringify(base);
 }
 
