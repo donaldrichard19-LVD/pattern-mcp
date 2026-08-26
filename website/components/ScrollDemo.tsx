@@ -3,7 +3,7 @@
 import { AlertTriangle, Check, CircleSlash, Code, Loader, Minus, MessageSquare, type LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { useIsMobile, useScrollProgress } from "./hooks";
-import { BODY, H2, MONO, PANEL, SECTION } from "./tokens";
+import { BODY, H2, LABEL, MONO, PANEL, SECTION } from "./tokens";
 import { Chip } from "./ui";
 
 const BEATS = [
@@ -297,7 +297,10 @@ function DesktopDemo() {
   const [beat, sub, pick] = useBeat(wrap);
   return (
     <section id="demo" ref={wrap} style={{ borderTop: "1px solid var(--border-subtle)", background: "#fff" }}>
-      <div className="pt-sec" style={{ ...SECTION, padding: "72px 32px 96px", display: "grid", gridTemplateColumns: "1fr 1.05fr", gap: 64, alignItems: "start" }}>
+      <div className="pt-sec" style={{ ...SECTION, padding: "72px 32px 0" }}>
+        <div style={LABEL}>How it works</div>
+      </div>
+      <div className="pt-sec" style={{ ...SECTION, padding: "24px 32px 96px", display: "grid", gridTemplateColumns: "1fr 1.05fr", gap: 64, alignItems: "start" }}>
         <div className="pt-stage" style={{ display: "grid", gap: 12 }}>
           <AgentThread beat={beat} />
           <VerdictPanel beat={beat} sub={sub} />
@@ -343,6 +346,9 @@ function MobileDemo() {
   };
   return (
     <section id="demo" ref={wrap} style={{ position: "relative", height: BEATS.length * 100 + "svh", borderTop: "1px solid var(--border-subtle)", background: "#fff" }}>
+      <div className="pt-sec" style={{ ...SECTION, padding: "20px 32px 0" }}>
+        <div style={LABEL}>How it works</div>
+      </div>
       <div className="pt-mstage" style={stageStyle}>
         <div style={{ flex: "0 1 auto", minHeight: 0, overflow: "hidden", display: "grid", alignContent: "start", gap: 10 }}>
           <VerdictPanel beat={beat} sub={sub} compact />

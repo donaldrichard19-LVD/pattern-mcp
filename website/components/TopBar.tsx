@@ -5,14 +5,13 @@ import { Menu, X } from "lucide-react";
 import { useIsMobile } from "./hooks";
 import { SECTION } from "./tokens";
 import { Mark, Wordmark } from "./ui";
-import { DOCS } from "./constants";
 
 const NAV: [string, string][] = [
   ["How it works", "#demo"],
   ["Capabilities", "#capabilities"],
   ["Who it's for", "#audiences"],
   ["Reference", "#reference"],
-  ["Docs", DOCS],
+  ["Docs", "#docs"],
 ];
 
 export function TopBar() {

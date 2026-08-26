@@ -24,6 +24,9 @@ export function Audiences() {
   return (
     <section id="audiences" className="pt-pad-y" style={{ padding: "80px 0", borderTop: "1px solid var(--border-subtle)" }}>
       <div className="pt-sec" style={{ ...SECTION, display: "grid", gap: 48, maxWidth: 720 }}>
+        <Reveal>
+          <div style={LABEL}>Who it&apos;s for</div>
+        </Reveal>
         {AUDIENCES.map((a, i) => (
           <Reveal key={a.label} delay={i * 100}>
             <div style={{ display: "grid", gap: 14, alignContent: "start" }}>

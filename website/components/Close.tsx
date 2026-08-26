@@ -1,16 +1,19 @@
 "use client";
 
 import { DOCS, REPO } from "./constants";
-import { H2, SECTION } from "./tokens";
+import { H2, LABEL, SECTION } from "./tokens";
 import { Button, Divider, Mark, Wordmark } from "./ui";
 import { Reveal } from "./ui";
 
 export function Close() {
   return (
-    <footer style={{ borderTop: "1px solid var(--border-subtle)", background: "#fff" }}>
+    <footer id="docs" style={{ borderTop: "1px solid var(--border-subtle)", background: "#fff" }}>
       <div className="pt-sec pt-stack" style={{ ...SECTION, padding: "72px 32px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 32 }}>
         <Reveal style={{ maxWidth: 560 }}>
-          <h2 style={H2}>Agents will keep making design decisions. Make sure those decisions are good ones</h2>
+          <div style={{ display: "grid", gap: 12 }}>
+            <div style={LABEL}>Docs</div>
+            <h2 style={H2}>Agents will keep making design decisions. Make sure those decisions are good ones</h2>
+          </div>
         </Reveal>
         <Reveal delay={100}>
           <div className="pt-stack" style={{ display: "flex", gap: 12, flexShrink: 0, flexWrap: "wrap" }}>
