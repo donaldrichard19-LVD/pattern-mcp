@@ -787,6 +787,28 @@ search or code problem.
 
 The boundary-risk ensemble exists to detect and surface this uncertainty.
 
+### A staged pipeline was evaluated and not adopted
+
+To address the variance above, an alternative architecture was built and
+tested: splitting the single bundled judgment call into separate stages
+(extract requirements, search evidence, score coverage), on the theory
+that isolating each step would make results more consistent and easier
+to diagnose.
+
+A pilot comparison (5 cases, 3 repeated runs per case, per
+architecture) found no consistent benefit. The staged pipeline improved
+consistency on one boundary-risk case but was less consistent than the
+bundled pipeline on another, including one run that failed outright.
+Net accuracy against hand-graded gold answers was statistically
+indistinguishable between the two architectures, and the staged
+pipeline cost roughly **2x** the bundled pipeline's call volume across
+the board, not only on the boundary-risk cases it was expected to help
+most.
+
+Pattern ships the bundled pipeline. The staged implementation remains
+in the repo (`src/staged/`) as an evaluated, unshipped experiment, not
+a supported alternative.
+
 ### No caching, by design
 
 Every recommendation searches and scores again.
