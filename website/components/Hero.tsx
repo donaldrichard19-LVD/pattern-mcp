@@ -102,13 +102,13 @@ export function Hero() {
         </Reveal>
         <Reveal delay={260}>
           <div className="pt-cols-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, alignItems: "start" }}>
+            <CopyBlock label="install command" lines={INSTALL_LINES} />
             <div style={{ ...PANEL, padding: 14, display: "grid", gap: 8 }}>
               <span style={{ display: "flex", alignItems: "center", gap: 7, fontSize: "var(--text-body-sm)", color: "var(--text-primary)" }}>
                 <Terminal size={16} /> Tell your coding agent
               </span>
               <p style={{ ...MONO, margin: 0, fontSize: 12, lineHeight: 1.6, color: "var(--text-secondary)" }}>{AGENT_PROMPT}</p>
             </div>
-            <CopyBlock label="install command" lines={INSTALL_LINES} />
           </div>
         </Reveal>
       </div>
