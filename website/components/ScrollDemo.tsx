@@ -9,17 +9,27 @@ import { Chip } from "./ui";
 const BEATS = [
   {
     title: "The agent reaches a design decision",
-    body: "Mid-build, in a real project. This is where an agent needs to choose a component, but it has little context for what good looks like. It can grab something loosely related or invent a generic solution",
+    body: [
+      "This happens in the middle of a real build.",
+      "Your agent needs to choose a component, but it may not know what a good option looks like. It can pick something loosely related—or build a generic version from scratch.",
+      "Pattern gives the agent a better way to decide.",
+    ],
     label: "recommend_component",
   },
   {
     title: "Judgment against requirements, not keywords",
-    body: "Pattern turns the component need into a requirements checklist, searches shadcn/ui and 21st.dev, and scores each requirement against the evidence it finds. The server recounts coverage from the checklist instead of trusting a stated percentage",
+    body: [
+      "Pattern turns each component need into a requirements checklist. It searches shadcn/ui and 21st.dev, then checks each requirement against the evidence it finds.",
+      "Coverage is calculated from the checklist, not a percentage the model reports.",
+    ],
     label: "coverage scoring",
   },
   {
-    title: "If a real component fits, it installs it",
-    body: "A use_existing verdict includes the source, install command, and a description of what the component actually does. The description is based on the component Pattern found before anything is installed. The install command is untrusted text, so your agent shows it to you before running it",
+    title: "If a real component fits, use it",
+    body: [
+      "A use_existing verdict includes the source, install command, and a clear description of what the component does.",
+      "Pattern evaluates the component before recommending it. Your agent shows you the install command before running it.",
+    ],
     label: "verdict: use_existing",
   },
   {
