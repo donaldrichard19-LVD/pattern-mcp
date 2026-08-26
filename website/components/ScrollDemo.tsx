@@ -29,7 +29,10 @@ const BEATS = [
   },
   {
     title: "Some needs don't need a call",
-    body: "Buttons, inputs, checkboxes, badges, spinners, tooltips, avatars, and icons are trivial primitives. A local skip-list catches them before any API request, so they add no API cost or latency",
+    body: [
+      "Buttons, inputs, checkboxes, badges, spinners, tooltips, avatars, and icons are simple building blocks.",
+      "Pattern catches them locally, before making an API request. That means no added cost and no extra wait.",
+    ],
     label: "reason: skip_list",
   },
   {
@@ -38,6 +41,10 @@ const BEATS = [
     label: "record_component_decision",
   },
 ];
+
+function beatParagraphs(body: string | string[]): string[] {
+  return Array.isArray(body) ? body : [body];
+}
 
 const REQS = [
   { r: "Itemized line rows (rate, fees, taxes)", met: true },
@@ -329,7 +336,11 @@ function DesktopDemo() {
                 >
                   {b.title}
                 </h2>
-                <p style={{ ...BODY, fontSize: "var(--text-body-lg)", color: "var(--text-primary)" }}>{b.body}</p>
+                {beatParagraphs(b.body).map((para, pi) => (
+                  <p key={pi} style={{ ...BODY, fontSize: "var(--text-body-lg)", color: "var(--text-primary)" }}>
+                    {para}
+                  </p>
+                ))}
               </div>
             </div>
           ))}
@@ -366,7 +377,14 @@ function MobileDemo() {
         </div>
         <div key={beat} className="pt-msg" style={{ flex: "0 0 auto", paddingTop: 2 }}>
           <h2 style={{ ...H2, fontFamily: "inherit", fontWeight: 500, fontSize: "clamp(16px, 4.4vw, 21px)" }}>{b.title}</h2>
-          <p style={{ ...BODY, margin: "2px 0 0", fontSize: "var(--text-body-sm)", lineHeight: 1.5, color: "var(--text-primary)" }}>{b.body}</p>
+          {beatParagraphs(b.body).map((para, pi) => (
+            <p
+              key={pi}
+              style={{ ...BODY, margin: pi === 0 ? "2px 0 0" : "6px 0 0", fontSize: "var(--text-body-sm)", lineHeight: 1.5, color: "var(--text-primary)" }}
+            >
+              {para}
+            </p>
+          ))}
         </div>
         <div style={{ marginTop: "auto" }}>
           <BeatBar beat={beat} onPick={pick} />
