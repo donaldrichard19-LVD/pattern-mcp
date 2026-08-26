@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, Terminal } from "lucide-react";
+import { Info, Terminal } from "lucide-react";
 import { BODY, H2, LABEL, MONO, PANEL, SECTION } from "./tokens";
 import { CopyBlock, Reveal } from "./ui";
 
@@ -124,11 +124,11 @@ export function Hero() {
               gap: 10,
               padding: "12px 14px",
               borderRadius: "var(--radius-md)",
-              border: "1px solid color-mix(in oklab, var(--amber-500) 48%, transparent)",
-              background: "color-mix(in oklab, var(--amber-500) 12%, transparent)",
+              border: "1px solid color-mix(in oklab, var(--blue-500) 40%, transparent)",
+              background: "color-mix(in oklab, var(--blue-500) 8%, transparent)",
             }}
           >
-            <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 2, color: "var(--text-primary)" }} />
+            <Info size={16} style={{ flexShrink: 0, marginTop: 2, color: "var(--blue-500)" }} />
             <p style={{ ...BODY, margin: 0, fontSize: "var(--text-body-sm)", color: "var(--text-primary)" }}>
               Requires your own Anthropic API key from the Console, not a Claude subscription. Every call bills your account
               directly, roughly $0.06 to $0.30 per call depending on whether the boundary-risk ensemble triggers.
