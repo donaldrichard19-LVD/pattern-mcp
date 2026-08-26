@@ -27,13 +27,13 @@ import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
-const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+export const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 // Configurable so Sonnet vs. Haiku can be A/B tested without a code change.
 // Defaults to Sonnet 5. Try MODEL=claude-haiku-4-5-20251001 to test the
 // cheaper tier -- re-run the 5 validated test cases from the product brief
 // (price breakdown, cancellation policy, earnings dashboard, gallery,
 // messaging) and diff verdicts before trusting it in production.
-const MODEL = process.env.PATTERN_MODEL ?? "claude-sonnet-5";
+export const MODEL = process.env.PATTERN_MODEL ?? "claude-sonnet-5";
 
 // Search budget for candidate discovery. Defaults to 2, matching the
 // process the system prompt was originally validated against. Set to
@@ -57,7 +57,7 @@ const SEARCH_BUDGET: number | null =
 // Static skip-list: single-purpose primitives with no meaningful internal
 // structure to score coverage against. Decided in the product brief as a
 // starting point -- revisit once real usage data exists (see README).
-const SKIP_LIST = [
+export const SKIP_LIST = [
   "button",
   "input",
   "checkbox",
@@ -70,7 +70,7 @@ const SKIP_LIST = [
   "icon",
 ];
 
-function isSkipListMatch(componentNeed: string): boolean {
+export function isSkipListMatch(componentNeed: string): boolean {
   const needLower = componentNeed.toLowerCase().trim();
   return SKIP_LIST.some(
     (item) => needLower === item || needLower === `a ${item}` || needLower === `an ${item}`
@@ -608,9 +608,9 @@ existing_stack: ${input.existing_stack ?? "(not specified)"}${pastDecisionsBlock
 // both point the same direction for that case. It was pure extra cost
 // with no observed stability benefit; revisit if a future case shows
 // otherwise.
-const BOUNDARY_RISK_MET_COUNTS_FOR_8_ITEMS = new Set([3, 4, 6, 7]);
+export const BOUNDARY_RISK_MET_COUNTS_FOR_8_ITEMS = new Set([3, 4, 6, 7]);
 
-function isBoundaryRisk(result: JudgmentResult): boolean {
+export function isBoundaryRisk(result: JudgmentResult): boolean {
   if (result.reason !== "scored") return false;
 
   const items = result.requirements_checked;
@@ -675,7 +675,7 @@ function logCall(
   }
 }
 
-interface DecisionEntry {
+export interface DecisionEntry {
   component_need: string;
   domain?: string;
   action: "installed" | "custom_built";
@@ -738,7 +738,7 @@ function recordDecision(input: {
 // provided. Never called with no project_id -- callers skip memory
 // entirely in that case (see runSinglePass) rather than falling back to
 // some shared bucket that would mix unrelated projects' decisions.
-function getPastDecisions(projectId: string): DecisionEntry[] {
+export function getPastDecisions(projectId: string): DecisionEntry[] {
   const memory = readMemory();
   return memory[projectId] ?? [];
 }
@@ -839,7 +839,7 @@ async function judgeComponent(input: {
   return JSON.stringify(base);
 }
 
-interface ReferenceEntry {
+export interface ReferenceEntry {
   source?: string;
   url?: string;
   flow_name?: string;
@@ -852,7 +852,7 @@ interface ReferenceEntry {
   url_type?: "deep_link" | "entry_point";
 }
 
-interface JudgmentResult {
+export interface JudgmentResult {
   verdict: string;
   confidence: string;
   reason: string;
@@ -879,7 +879,7 @@ interface JudgmentResult {
 // a plain enumerable list, not arithmetic the model has to get right --
 // and overwrite `coverage` with the true tally before anything else reads
 // it.
-function enforceCoverageRecount(parsed: JudgmentResult): void {
+export function enforceCoverageRecount(parsed: JudgmentResult): void {
   if (parsed.reason !== "scored") return;
   const items = parsed.requirements_checked;
   if (!Array.isArray(items) || items.length === 0) return;
@@ -909,7 +909,7 @@ function enforceCoverageRecount(parsed: JudgmentResult): void {
 // thresholds (>=80 high, 40-79 low, <40 custom_build) call for
 // "use_existing" at low confidence. Recompute deterministically instead of
 // trusting the model's arithmetic.
-function parseCoveragePercent(coverage: string | null | undefined): number | null {
+export function parseCoveragePercent(coverage: string | null | undefined): number | null {
   if (!coverage) return null;
   const parenMatch = coverage.match(/\((\d+(?:\.\d+)?)%\)/);
   if (parenMatch) return Number.parseFloat(parenMatch[1]);
@@ -922,7 +922,7 @@ function parseCoveragePercent(coverage: string | null | undefined): number | nul
   return null;
 }
 
-function enforceVerdictThreshold(parsed: JudgmentResult): void {
+export function enforceVerdictThreshold(parsed: JudgmentResult): void {
   if (parsed.reason !== "scored") return;
   const pct = parseCoveragePercent(parsed.coverage);
   if (pct === null) return;
@@ -976,7 +976,7 @@ function enforceVerdictThreshold(parsed: JudgmentResult): void {
 // after every other correction, on every single pass, so each pass
 // entering the ensemble is already self-consistent before any
 // cross-pass selection happens.
-function enforceRecommendationConsistency(parsed: JudgmentResult): void {
+export function enforceRecommendationConsistency(parsed: JudgmentResult): void {
   const rec = parsed.recommendation;
   if (!rec) return;
 
@@ -1016,14 +1016,14 @@ function enforceRecommendationConsistency(parsed: JudgmentResult): void {
 // still valid when only one source grounded) or an array of up to 2 --
 // normalize, filter per-entry, then collapse back down: 0 survivors ->
 // null, 1 -> bare object (never a one-element array), 2 -> array.
-function referenceSourceKeyword(source: string | undefined): string | null {
+export function referenceSourceKeyword(source: string | undefined): string | null {
   const normalized = (source ?? "").toLowerCase();
   if (normalized.includes("mobbin")) return "mobbin";
   if (normalized.includes("figma")) return "figma";
   return null; // unrecognized source -- can't verify, treated as ungrounded below
 }
 
-const DOMAIN_FOR_SOURCE_KEYWORD: Record<string, string> = {
+export const DOMAIN_FOR_SOURCE_KEYWORD: Record<string, string> = {
   mobbin: "mobbin.com",
   figma: "figma.com",
 };
@@ -1038,14 +1038,14 @@ const DOMAIN_FOR_SOURCE_KEYWORD: Record<string, string> = {
 // only ever fail -- treating an already-specific file URL as grounded
 // without a fetch avoids wasting the reserved fetch budget on a check that
 // cannot succeed and isn't needed anyway.
-const FIGMA_FILE_URL_PATTERN = /\/community\/file\//i;
+export const FIGMA_FILE_URL_PATTERN = /\/community\/file\//i;
 
 // Pulls literal http(s) URLs out of arbitrary tool-result content (search
 // results, fetched page text) without needing to know that content's
 // exact shape -- used only to find real candidate URLs, never to
 // construct one, so a shape we didn't anticipate just yields fewer
 // matches rather than a wrong parse.
-function extractUrlsForDomain(content: unknown, domain: string): string[] {
+export function extractUrlsForDomain(content: unknown, domain: string): string[] {
   if (!content) return [];
   const text = typeof content === "string" ? content : JSON.stringify(content);
   const matches = text.match(/https?:\/\/[^\s"'<>\\]+/g) ?? [];
@@ -1062,7 +1062,7 @@ function extractUrlsForDomain(content: unknown, domain: string): string[] {
 // "entry_point" and the URL is swapped for one a real search/fetch call
 // actually returned -- the model's own unconfirmed claim is never kept,
 // same policy already enforced for search-only grounding above.
-function applyDeepLinkGrounding(
+export function applyDeepLinkGrounding(
   entry: ReferenceEntry,
   keyword: string,
   searchResultUrlsByKeyword: Map<string, string[]>,
@@ -1118,7 +1118,7 @@ function applyDeepLinkGrounding(
   }
 }
 
-function enforceReferenceGrounding(
+export function enforceReferenceGrounding(
   parsed: JudgmentResult,
   searchCallDetails: Array<{ query: unknown; succeeded: boolean }>,
   searchResultUrlsByKeyword: Map<string, string[]>,
@@ -1175,7 +1175,7 @@ function enforceReferenceGrounding(
 // output directly (the README's whole contract is structured JSON, not
 // prose), so pull out the {...} substring rather than trust verbatim
 // compliance.
-function extractJson(text: string): string {
+export function extractJson(text: string): string {
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
   if (start === -1 || end === -1 || end < start) return text;

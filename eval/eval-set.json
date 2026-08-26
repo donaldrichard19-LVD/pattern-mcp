@@ -1,0 +1,639 @@
+{
+  "_meta": {
+    "description": "Phase 0 eval set for validation-plan-staged-pipeline.md. 25 Airbnb-style rental-marketplace component needs across four categories (search_discovery, listing_detail, booking_checkout, host_guest_account), each with a hand-written gold answer: expected verdict and an 8-item requirements checklist, same rigor as the project's original 5 hand-validated cases.",
+    "domain": "Airbnb-style rental marketplace",
+    "framework": "React + Tailwind",
+    "gold_authoring_note": "Gold verdicts are this author's expert judgment of what a careful manual search of shadcn/ui and 21st.dev SHOULD find, not a guarantee of what a live web_search call will actually surface. They exist as a fixed comparison target for Phase 3, not as a claim of ground truth about the live component ecosystem at query time.",
+    "existing_cases_note": "5 of the 25 (ids: price-breakdown, cancellation-policy, host-earnings-dashboard, image-gallery, host-guest-messaging) are the project's original hand-validated cases from PRODUCT_BRIEF.md. Their gold verdicts are reused as-is rather than re-derived, except where this project's own later live testing (documented in README.md) established a more reliable finding than the original by-hand guess -- see per-case notes.",
+    "verdict_values": ["use_existing", "custom_build", "no_candidates_found"],
+    "created": "2026-08-26",
+    "tightening_pass_note": "Revised 2026-08-26 after Phase 2's smoke test on date-range-picker showed the original gold (use_existing, 100%) was too generous: a real staged-pipeline run against shadcn's actual official range-picker pattern found it genuinely doesn't include separate labeled check-in/check-out fields, a nights/price display, or a reset control, landing at 3/8 (37.5%), custom_build, unanimous across a 3-run ensemble. That's not a pipeline defect -- it's evidence the initial gold answer was graded on 'a plausible pattern exists' rather than checking every specific requirement against real capability. Before Phase 3, re-reviewed all 25 gold answers against a fresh, independent extraction cross-check (eval/gold-tightening-extraction.json) with that same stricter standard. 21 of 25 held up -- several (price-breakdown, host-earnings-dashboard, guest-count-selector) converged almost exactly with the independent extraction, reinforcing confidence in those. 4 were revised: date-range-picker (verdict flipped to custom_build, now backed by real live evidence rather than a guess), availability-calendar and notification-preferences (coverage/confidence lowered -- both had 1-2 gold items that looked plausible for a 'simple' need but aren't actually bundled into the generic component), and filter-panel (coverage lowered similarly). See each revised case's rationale for specifics."
+  },
+  "cases": [
+    {
+      "id": "search-map-toggle",
+      "category": "search_discovery",
+      "source": "new",
+      "component_need": "search results grid with map toggle",
+      "domain": "Airbnb-style rental marketplace",
+      "framework": "React + Tailwind",
+      "gold": {
+        "verdict": "custom_build",
+        "reason": "scored",
+        "confidence_expected": "high",
+        "coverage_estimate": "2/8 (25%)",
+        "rationale": "A synced list/map split view tied to real geocoded listings is a compound, domain-specific pattern. Generic libraries don't ship a listing-grid-plus-synced-map component; at best a generic card grid and a bare map embed exist separately, uncombined.",
+        "requirements": [
+          { "requirement": "Toggle or split view between grid and map", "expected_met": false },
+          { "requirement": "Listing cards showing photo, price/night, and rating", "expected_met": true },
+          { "requirement": "Map pins synced to the currently visible listings", "expected_met": false },
+          { "requirement": "Hovering a pin highlights the corresponding card", "expected_met": false },
+          { "requirement": "Infinite scroll or pagination through results", "expected_met": true },
+          { "requirement": "Map collapses or hides on mobile viewports", "expected_met": false },
+          { "requirement": "Loading skeleton state for the grid", "expected_met": false },
+          { "requirement": "Empty-state messaging for zero results", "expected_met": false }
+        ]
+      }
+    },
+    {
+      "id": "filter-panel",
+      "category": "search_discovery",
+      "source": "new",
+      "component_need": "filter panel for price, amenities, and property type",
+      "domain": "Airbnb-style rental marketplace",
+      "framework": "React + Tailwind",
+      "gold": {
+        "verdict": "use_existing",
+        "reason": "scored",
+        "confidence_expected": "low",
+        "coverage_estimate": "5/8 (62.5%)",
+        "rationale": "Tightened in the post-Phase-2 revision pass. Faceted filter sidebars (price range slider, checkbox lists, category select) are a common ecommerce pattern, but the original 75% estimate assumed the whole checklist was 'generic enough' without checking each item individually -- collapsible per-group sections and a mobile bottom-sheet variant are real UI-kit features, not guaranteed to ship with a bare filter-panel component the way the core slider/checkbox/apply/clear elements are.",
+        "requirements": [
+          { "requirement": "Price range dual-handle slider", "expected_met": true },
+          { "requirement": "Amenity checkbox list (multi-select)", "expected_met": true },
+          { "requirement": "Property type select or radio group", "expected_met": true },
+          { "requirement": "Applied-filter chips/badges above results", "expected_met": true },
+          { "requirement": "Clear-all-filters action", "expected_met": true },
+          { "requirement": "Active filter count badge on the trigger", "expected_met": false },
+          { "requirement": "Collapsible sections per filter group", "expected_met": false },
+          { "requirement": "Mobile: filters open in a bottom sheet/drawer", "expected_met": false }
+        ]
+      }
+    },
+    {
+      "id": "search-bar-autocomplete",
+      "category": "search_discovery",
+      "source": "new",
+      "component_need": "location, date, and guest search bar with autocomplete",
+      "domain": "Airbnb-style rental marketplace",
+      "framework": "React + Tailwind",
+      "gold": {
+        "verdict": "custom_build",
+        "reason": "scored",
+        "confidence_expected": "high",
+        "coverage_estimate": "3/8 (37.5%)",
+        "rationale": "The three-segment merged pill (where/when/who) with per-segment expanding popovers is Airbnb's own signature pattern. The underlying primitives (combobox, date range, stepper) exist individually, but the compound assembly does not.",
+        "requirements": [
+          { "requirement": "Location input with autocomplete suggestions", "expected_met": true },
+          { "requirement": "Check-in/check-out date range picker inline in the bar", "expected_met": false },
+          { "requirement": "Guest count stepper covering adults, children, infants, pets", "expected_met": false },
+          { "requirement": "Three segments visually merged into a single pill control", "expected_met": false },
+          { "requirement": "Active segment expands into a popover/dropdown", "expected_met": true },
+          { "requirement": "Sticky/compact mode on scroll", "expected_met": false },
+          { "requirement": "Keyboard navigation between segments", "expected_met": false },
+          { "requirement": "Mobile: full-screen modal instead of inline popovers", "expected_met": false }
+        ]
+      }
+    },
+    {
+      "id": "sort-control",
+      "category": "search_discovery",
+      "source": "new",
+      "component_need": "sort control for search results by price, rating, and distance",
+      "domain": "Airbnb-style rental marketplace",
+      "framework": "React + Tailwind",
+      "gold": {
+        "verdict": "use_existing",
+        "reason": "scored",
+        "confidence_expected": "high",
+        "coverage_estimate": "7/8 (87.5%)",
+        "rationale": "A labeled dropdown with a fixed option list and a selected-state indicator is a standard select/dropdown-menu pattern, fully covered by generic libraries.",
+        "requirements": [
+          { "requirement": "Dropdown trigger showing the current sort option", "expected_met": true },
+          { "requirement": "List of sort options (price low-high, high-low, rating, distance)", "expected_met": true },
+          { "requirement": "Selected option shows a checkmark/indicator", "expected_met": true },
+          { "requirement": "Menu closes on selection", "expected_met": true },
+          { "requirement": "Keyboard accessible (arrow keys, enter)", "expected_met": true },
+          { "requirement": "Icon indicating sort direction (asc/desc)", "expected_met": false },
+          { "requirement": "Selection persists visually after re-render", "expected_met": true },
+          { "requirement": "Compact trigger style matching a results toolbar", "expected_met": true }
+        ]
+      }
+    },
+    {
+      "id": "wishlist-grid",
+      "category": "search_discovery",
+      "source": "new",
+      "component_need": "saved listings / wishlist grid",
+      "domain": "Airbnb-style rental marketplace",
+      "framework": "React + Tailwind",
+      "gold": {
+        "verdict": "use_existing",
+        "reason": "scored",
+        "confidence_expected": "medium",
+        "coverage_estimate": "6/8 (75%)",
+        "rationale": "A card grid with a favorite/heart toggle is a common ecommerce wishlist pattern. Airbnb's named-collection grouping is the one piece generic components won't have.",
+        "requirements": [
+          { "requirement": "Grid layout of saved item cards", "expected_met": true },
+          { "requirement": "Heart/save toggle icon on each card", "expected_met": true },
+          { "requirement": "Empty state when nothing is saved", "expected_met": true },
+          { "requirement": "Card shows image, price, and rating", "expected_met": true },
+          { "requirement": "Remove confirmation or undo toast", "expected_met": true },
+          { "requirement": "Group-by-named-collection support", "expected_met": false },
+          { "requirement": "Responsive grid column count", "expected_met": true },
+          { "requirement": "Click-through to the listing detail page", "expected_met": false }
+        ]
+      }
+    },
+    {
+      "id": "image-gallery",
+      "category": "listing_detail",
+      "source": "existing",
+      "component_need": "image gallery for a property listing",
+      "domain": "Airbnb-style rental marketplace",
+      "framework": "React + Tailwind",
+      "gold": {
+        "verdict": "use_existing",
+        "reason": "scored",
+        "confidence_expected": "low",
+        "coverage_estimate": "genuinely boundary -- do not treat a single verdict as fixed ground truth for this case",
+        "rationale": "PRODUCT_BRIEF.md's original by-hand validation called this a clean 100% commodity match. This project's own later live testing (see README.md, Ensemble cost section) found the opposite in practice: this specific case kept flipping between use_existing and custom_build across outer runs even with the ensemble active, always landing on a 2/3 split with confidence low. That documented instability is preserved here on purpose -- this is the one case in the eval set that exists specifically to test whether a staged pipeline reduces run-to-run variance on a genuinely ambiguous input, not to assert a single correct answer.",
+        "requirements": [
+          { "requirement": "Grid/mosaic layout of multiple photos", "expected_met": true },
+          { "requirement": "Click opens a full-screen lightbox/carousel", "expected_met": true },
+          { "requirement": "Photo count badge (e.g. \"+12 photos\")", "expected_met": false },
+          { "requirement": "Category tabs within the gallery (bedroom, kitchen, etc.)", "expected_met": false },
+          { "requirement": "Keyboard/swipe navigation in the lightbox", "expected_met": true },
+          { "requirement": "Thumbnail strip in the lightbox", "expected_met": true },
+          { "requirement": "Close button and click-outside-to-close", "expected_met": true },
+          { "requirement": "Lazy-loaded images for performance", "expected_met": true }
+        ]
+      }
+    },
+    {
+      "id": "amenities-list",
+      "category": "listing_detail",
+      "source": "new",
+      "component_need": "amenities list with icons",
+      "domain": "Airbnb-style rental marketplace",
+      "framework": "React + Tailwind",
+      "gold": {
+        "verdict": "use_existing",
+        "reason": "scored",
+        "confidence_expected": "medium",
+        "coverage_estimate": "6/8 (75%)",
+        "rationale": "An icon-plus-label grid with a show-more expansion is a simple, common composition pattern well within reach of generic component blocks.",
+        "requirements": [
+          { "requirement": "Grid of amenity items, each icon plus label", "expected_met": true },
+          { "requirement": "\"Show all N amenities\" expand or modal", "expected_met": true },
+          { "requirement": "Categorized sections (Bathroom, Bedroom, Safety, etc.)", "expected_met": false },
+          { "requirement": "Icons for common amenities (wifi, kitchen, parking, pool)", "expected_met": true },
+          { "requirement": "Unavailable amenities shown struck-through or hidden", "expected_met": false },
+          { "requirement": "Responsive column count", "expected_met": true },
+          { "requirement": "Search/filter within the full amenities modal", "expected_met": false },
+          { "requirement": "Accessible icon+text pairing, not icon-only", "expected_met": true }
+        ]
+      }
+    },
+    {
+      "id": "host-profile-card",
+      "category": "listing_detail",
+      "source": "new",
+      "component_need": "host profile card with superhost badge and response rate",
+      "domain": "Airbnb-style rental marketplace",
+      "framework": "React + Tailwind",
+      "gold": {
+        "verdict": "custom_build",
+        "reason": "scored",
+        "confidence_expected": "high",
+        "coverage_estimate": "2/8 (25%)",
+        "rationale": "A generic avatar+card component covers the layout shell, but the Superhost badge system, response-rate/response-time stats, and hosting-tenure fields are platform-specific data points no generic component ships with.",
+        "requirements": [
+          { "requirement": "Host avatar and name", "expected_met": true },
+          { "requirement": "Superhost badge/icon when applicable", "expected_met": false },
+          { "requirement": "Response rate and response time stats", "expected_met": false },
+          { "requirement": "Years hosting / join date", "expected_met": false },
+          { "requirement": "Number of reviews and overall rating", "expected_met": true },
+          { "requirement": "Verified identity badge", "expected_met": false },
+          { "requirement": "\"Contact host\" or \"Message\" CTA", "expected_met": true },
+          { "requirement": "Link to the full host profile page", "expected_met": false }
+        ]
+      }
+    },
+    {
+      "id": "reviews-with-breakdown",
+      "category": "listing_detail",
+      "source": "new",
+      "component_need": "reviews list with rating breakdown",
+      "domain": "Airbnb-style rental marketplace",
+      "framework": "React + Tailwind",
+      "gold": {
+        "verdict": "custom_build",
+        "reason": "scored",
+        "confidence_expected": "medium",
+        "coverage_estimate": "4/8 (50%)",
+        "rationale": "Star-rated review cards are common, but the multi-category sub-rating breakdown (cleanliness, communication, accuracy, etc.) and per-star distribution histogram are specific enough that generic components only cover the list half of this need.",
+        "requirements": [
+          { "requirement": "Overall star rating and review count header", "expected_met": true },
+          { "requirement": "Category sub-rating bars (cleanliness, accuracy, communication, etc.)", "expected_met": false },
+          { "requirement": "Individual review cards with avatar, name, date", "expected_met": true },
+          { "requirement": "Review text with \"read more\" truncation", "expected_met": true },
+          { "requirement": "Pagination or \"show more reviews\"", "expected_met": true },
+          { "requirement": "Filter/sort reviews (most recent, highest rated)", "expected_met": false },
+          { "requirement": "Host response shown inline under a review", "expected_met": false },
+          { "requirement": "Rating distribution histogram (5-star to 1-star)", "expected_met": false }
+        ]
+      }
+    },
+    {
+      "id": "neighborhood-map",
+      "category": "listing_detail",
+      "source": "new",
+      "component_need": "interactive neighborhood map on the listing page",
+      "domain": "Airbnb-style rental marketplace",
+      "framework": "React + Tailwind",
+      "gold": {
+        "verdict": "custom_build",
+        "reason": "scored",
+        "confidence_expected": "high",
+        "coverage_estimate": "2/8 (25%)",
+        "rationale": "Real map integration plus domain-specific content (privacy-blurred pin, walk score, nearby POIs) is not something generic UI libraries provide -- this needs an actual mapping SDK, not just a styled component.",
+        "requirements": [
+          { "requirement": "Embedded interactive map centered on the listing", "expected_met": false },
+          { "requirement": "Approximate/privacy-blurred location pin pre-booking", "expected_met": false },
+          { "requirement": "Neighborhood name and description text", "expected_met": true },
+          { "requirement": "Nearby points-of-interest list", "expected_met": false },
+          { "requirement": "Walk/transit score or distance callouts", "expected_met": false },
+          { "requirement": "Zoom and pan controls", "expected_met": false },
+          { "requirement": "\"Get directions\" / open-in-Maps action", "expected_met": false },
+          { "requirement": "Legend or POI category icons", "expected_met": false }
+        ]
+      }
+    },
+    {
+      "id": "availability-calendar",
+      "category": "listing_detail",
+      "source": "new",
+      "component_need": "availability calendar showing booked and open dates",
+      "domain": "Airbnb-style rental marketplace",
+      "framework": "React + Tailwind",
+      "gold": {
+        "verdict": "use_existing",
+        "reason": "scored",
+        "confidence_expected": "low",
+        "coverage_estimate": "5/8 (62.5%)",
+        "rationale": "Tightened in the post-Phase-2 revision pass using real evidence: the date-range-picker case's actual staged-pipeline run found shadcn/ui's real Calendar (react-day-picker) natively supports disabled-date logic, multi-month display, and keyboard nav, but nothing about a legend or price-per-night overlay came up in that grounded search evidence -- both were originally marked met on assumption, not evidence. Corrected here; still use_existing since the core calendar mechanics are a strong match, but confidence drops from high to low now that coverage sits in the 40-79% band instead of >=80%.",
+        "requirements": [
+          { "requirement": "Month-grid calendar view", "expected_met": true },
+          { "requirement": "Visually distinct styling for booked vs. available dates", "expected_met": true },
+          { "requirement": "Minimum-stay indicator on hover", "expected_met": false },
+          { "requirement": "Multi-month navigation", "expected_met": true },
+          { "requirement": "Disabled state for past/blocked dates", "expected_met": true },
+          { "requirement": "Legend explaining date color coding", "expected_met": false },
+          { "requirement": "Price-per-night overlay on each date", "expected_met": false },
+          { "requirement": "Keyboard-navigable date grid", "expected_met": true }
+        ]
+      }
+    },
+    {
+      "id": "price-breakdown",
+      "category": "booking_checkout",
+      "source": "existing",
+      "component_need": "price breakdown with fees and taxes",
+      "domain": "Airbnb-style rental marketplace",
+      "framework": "React + Tailwind",
+      "gold": {
+        "verdict": "custom_build",
+        "reason": "scored",
+        "confidence_expected": "high",
+        "coverage_estimate": "3/8 (37.5%)",
+        "rationale": "Reuses the project's own canonical case. Multiple live runs this session (see scripts/verify-memory*.mjs logs) landed consistently in the 2/8-3/8 range across different phrasings of this need -- more heavily evidenced than a single by-hand guess, used here as gold in preference to the original product-brief figure.",
+        "requirements": [
+          { "requirement": "Itemized line rows (rate, fees, taxes)", "expected_met": true },
+          { "requirement": "Nightly rate × nights subtotal", "expected_met": true },
+          { "requirement": "Collapsible fee explanation", "expected_met": false },
+          { "requirement": "Currency + locale formatting", "expected_met": false },
+          { "requirement": "Total row with emphasis", "expected_met": false },
+          { "requirement": "Discount / long-stay line", "expected_met": false },
+          { "requirement": "Tooltip on service fee", "expected_met": false },
+          { "requirement": "Mobile bottom-sheet layout", "expected_met": false }
+        ]
+      }
+    },
+    {
+      "id": "cancellation-policy",
+      "category": "booking_checkout",
+      "source": "existing",
+      "component_need": "cancellation policy display",
+      "domain": "Airbnb-style rental marketplace",
+      "framework": "React + Tailwind",
+      "gold": {
+        "verdict": "custom_build",
+        "reason": "no_candidates_found",
+        "confidence_expected": "high",
+        "coverage_estimate": null,
+        "rationale": "Reuses the project's original hand-validated finding: no real candidate exists for a tiered, date-threshold refund policy display. Kept as reason no_candidates_found rather than a scored low-coverage result, per the project's own distinction between the two.",
+        "requirements": [
+          { "requirement": "Policy tier name (Flexible/Moderate/Firm/Strict)", "expected_met": false },
+          { "requirement": "Refund percentage by cancellation-date threshold", "expected_met": false },
+          { "requirement": "Timeline/date markers showing when the refund amount changes", "expected_met": false },
+          { "requirement": "Non-refundable fee callouts (service fee)", "expected_met": false },
+          { "requirement": "\"Learn more\" link to full policy details", "expected_met": false },
+          { "requirement": "Extenuating-circumstances note", "expected_met": false },
+          { "requirement": "Host-set vs. platform-set policy distinction", "expected_met": false },
+          { "requirement": "Visual timeline or stepped-bar representation", "expected_met": false }
+        ]
+      }
+    },
+    {
+      "id": "date-range-picker",
+      "category": "booking_checkout",
+      "source": "new",
+      "component_need": "date range picker for check-in and check-out",
+      "domain": "Airbnb-style rental marketplace",
+      "framework": "React + Tailwind",
+      "gold": {
+        "verdict": "custom_build",
+        "reason": "scored",
+        "confidence_expected": "high",
+        "coverage_estimate": "3/8 (37.5%)",
+        "rationale": "Replaced with a real finding, not a guess -- this is the case that triggered the whole gold-tightening pass. A live staged-pipeline run (Phase 2 smoke test) searched and found shadcn/ui's actual official range date-picker pattern (Popover + Calendar, built on react-day-picker): it natively handles dual-month display, range selection with highlighting, disabled-date logic, and min/max range length via props. But the grounded search evidence explicitly stated it does NOT natively include separate labeled 'Check-in'/'Check-out' trigger fields (just one combined Popover trigger), a nights-count/price display, or a reset button -- those need custom work on top. Scored 3/8 (37.5%) and confirmed custom_build unanimously across a 3-run boundary-risk ensemble. The original 100%/textbook-match gold was wrong: 'shadcn has range-mode calendars' is true but doesn't mean every specific requirement is met out of the box.",
+        "requirements": [
+          { "requirement": "Two distinct, clearly labeled 'Check-in'/'Check-out' triggers that open a calendar", "expected_met": false },
+          { "requirement": "Calendar view (dual-month) letting user pick start then end date to form contiguous range", "expected_met": true },
+          { "requirement": "Booked/unavailable dates from listing availability visibly disabled", "expected_met": false },
+          { "requirement": "Past dates disabled and check-out constrained after check-in", "expected_met": false },
+          { "requirement": "Selected range visually highlighted across days in between", "expected_met": true },
+          { "requirement": "Minimum/maximum night stay rules enforced", "expected_met": true },
+          { "requirement": "Nights count and price/subtotal display", "expected_met": false },
+          { "requirement": "Clear/reset control plus keyboard navigation and aria labels", "expected_met": false }
+        ]
+      }
+    },
+    {
+      "id": "guest-count-selector",
+      "category": "booking_checkout",
+      "source": "new",
+      "component_need": "guest count selector with adults, children, infants, and pets",
+      "domain": "Airbnb-style rental marketplace",
+      "framework": "React + Tailwind",
+      "gold": {
+        "verdict": "custom_build",
+        "reason": "scored",
+        "confidence_expected": "medium",
+        "coverage_estimate": "3/8 (37.5%)",
+        "rationale": "The stepper mechanics are generic, but the occupancy-cap rules (infants excluded from the cap, pets flagged separately, per-category descriptions) are domain-specific policy logic that generic components don't encode.",
+        "requirements": [
+          { "requirement": "Separate steppers for adults, children, infants, pets", "expected_met": true },
+          { "requirement": "Increment/decrement buttons with min/max enforcement", "expected_met": true },
+          { "requirement": "Occupancy-cap messaging (e.g. \"max 4 guests\")", "expected_met": false },
+          { "requirement": "Infants/pets excluded from the guest-cap count", "expected_met": false },
+          { "requirement": "Summary text (e.g. \"2 guests, 1 pet\")", "expected_met": true },
+          { "requirement": "Popover/dropdown trigger showing the current summary", "expected_met": true },
+          { "requirement": "Category descriptions (age ranges for children/infants)", "expected_met": false },
+          { "requirement": "Close-on-outside-click behavior", "expected_met": true }
+        ]
+      }
+    },
+    {
+      "id": "payment-form",
+      "category": "booking_checkout",
+      "source": "new",
+      "component_need": "payment method entry form",
+      "domain": "Airbnb-style rental marketplace",
+      "framework": "React + Tailwind",
+      "gold": {
+        "verdict": "use_existing",
+        "reason": "scored",
+        "confidence_expected": "high",
+        "coverage_estimate": "7/8 (87.5%)",
+        "rationale": "Card entry forms are one of the most commodified checkout patterns in existence; extensive coverage in both shadcn-derived form kits and 21st.dev checkout blocks.",
+        "requirements": [
+          { "requirement": "Card number input with formatting/masking", "expected_met": true },
+          { "requirement": "Expiry date and CVC inputs", "expected_met": true },
+          { "requirement": "Cardholder name field", "expected_met": true },
+          { "requirement": "Billing address fields or reuse-existing-address toggle", "expected_met": true },
+          { "requirement": "Inline validation error messages", "expected_met": true },
+          { "requirement": "Card-brand icon detection (Visa/Mastercard/Amex)", "expected_met": false },
+          { "requirement": "Save-card-for-later checkbox", "expected_met": true },
+          { "requirement": "Submit/pay button with loading state", "expected_met": true }
+        ]
+      }
+    },
+    {
+      "id": "booking-confirmation",
+      "category": "booking_checkout",
+      "source": "new",
+      "component_need": "booking confirmation summary screen",
+      "domain": "Airbnb-style rental marketplace",
+      "framework": "React + Tailwind",
+      "gold": {
+        "verdict": "use_existing",
+        "reason": "scored",
+        "confidence_expected": "medium",
+        "coverage_estimate": "6/8 (75%)",
+        "rationale": "Order-confirmation summary blocks are common in ecommerce checkout kits; rental-specific fields (check-in instructions, host contact) are the gap.",
+        "requirements": [
+          { "requirement": "Trip dates and duration summary", "expected_met": true },
+          { "requirement": "Listing thumbnail, title, and host name", "expected_met": true },
+          { "requirement": "Total price paid breakdown", "expected_met": true },
+          { "requirement": "Confirmation/reservation number", "expected_met": true },
+          { "requirement": "\"Add to calendar\" action", "expected_met": false },
+          { "requirement": "Check-in instructions or \"message host\" CTA", "expected_met": false },
+          { "requirement": "Cancellation policy summary reminder", "expected_met": true },
+          { "requirement": "Print/download receipt option", "expected_met": true }
+        ]
+      }
+    },
+    {
+      "id": "promo-code-input",
+      "category": "booking_checkout",
+      "source": "new",
+      "component_need": "promo/coupon code input",
+      "domain": "Airbnb-style rental marketplace",
+      "framework": "React + Tailwind",
+      "gold": {
+        "verdict": "use_existing",
+        "reason": "scored",
+        "confidence_expected": "high",
+        "coverage_estimate": "8/8 (100%)",
+        "rationale": "One of the most standardized ecommerce checkout patterns; nothing rental-specific about it.",
+        "requirements": [
+          { "requirement": "Text input for code entry", "expected_met": true },
+          { "requirement": "\"Apply\" button adjacent to the input", "expected_met": true },
+          { "requirement": "Success state showing the discount applied", "expected_met": true },
+          { "requirement": "Error state for invalid/expired code", "expected_met": true },
+          { "requirement": "Applied code shown as a removable chip", "expected_met": true },
+          { "requirement": "Discount amount reflected in the price summary", "expected_met": true },
+          { "requirement": "Loading state while validating", "expected_met": true },
+          { "requirement": "Disabled input state while a code is already applied", "expected_met": true }
+        ]
+      }
+    },
+    {
+      "id": "host-earnings-dashboard",
+      "category": "host_guest_account",
+      "source": "existing",
+      "component_need": "host earnings dashboard",
+      "domain": "Airbnb-style rental marketplace",
+      "framework": "React + Tailwind",
+      "gold": {
+        "verdict": "use_existing",
+        "reason": "scored",
+        "confidence_expected": "low",
+        "coverage_estimate": "5-6/8 (62.5%-75%)",
+        "rationale": "Reuses the project's original hand-validated finding (71%, low confidence, 'partial match with real gaps'). A control-test run this session (see scripts/verify-memory-control.mjs output) landed at 2/8 for a stricter requirement set, so this case's exact coverage is sensitive to how the requirements are extracted -- a good candidate to watch in Phase 1's consistency check.",
+        "requirements": [
+          { "requirement": "Summary cards for total gross/net earnings by period", "expected_met": true },
+          { "requirement": "Earnings trend chart over time", "expected_met": true },
+          { "requirement": "Table of individual payouts/transactions with date, amount, status", "expected_met": false },
+          { "requirement": "Date-range picker to select the earnings period", "expected_met": true },
+          { "requirement": "Breakdown of earnings by individual listing", "expected_met": false },
+          { "requirement": "Upcoming/scheduled payout section", "expected_met": false },
+          { "requirement": "Export/download earnings report", "expected_met": false },
+          { "requirement": "Service fees/taxes withheld breakdown", "expected_met": false }
+        ]
+      }
+    },
+    {
+      "id": "host-guest-messaging",
+      "category": "host_guest_account",
+      "source": "existing",
+      "component_need": "host-guest messaging inbox",
+      "domain": "Airbnb-style rental marketplace",
+      "framework": "React + Tailwind",
+      "gold": {
+        "verdict": "use_existing",
+        "reason": "scored",
+        "confidence_expected": "high",
+        "coverage_estimate": "8/8 (100%)",
+        "rationale": "Reuses the project's original hand-validated finding: shadcn/ui's June 2026 chat primitives turned this from a likely custom build into a near-perfect match (documented in README.md, No caching by design). The one case in the original 5 whose gold answer changed because the real ecosystem shipped new components -- a live reminder that gold answers here are snapshots, same as any recommend_component call.",
+        "requirements": [
+          { "requirement": "Conversation list sidebar with unread indicators", "expected_met": true },
+          { "requirement": "Message thread view with sender avatars", "expected_met": true },
+          { "requirement": "Text input with send button", "expected_met": true },
+          { "requirement": "Timestamp on each message", "expected_met": true },
+          { "requirement": "Read/delivered status indicators", "expected_met": true },
+          { "requirement": "Search/filter conversations", "expected_met": true },
+          { "requirement": "Attachment/image support in messages", "expected_met": true },
+          { "requirement": "Reservation context card pinned above the thread", "expected_met": true }
+        ]
+      }
+    },
+    {
+      "id": "guest-trip-itinerary",
+      "category": "host_guest_account",
+      "source": "new",
+      "component_need": "guest trip itinerary / upcoming reservations list",
+      "domain": "Airbnb-style rental marketplace",
+      "framework": "React + Tailwind",
+      "gold": {
+        "verdict": "custom_build",
+        "reason": "scored",
+        "confidence_expected": "medium",
+        "coverage_estimate": "3/8 (37.5%)",
+        "rationale": "Trip-centric grouping tied to real bookings, with rental-specific fields (check-in instructions, confirmation codes, countdowns), is not a generic component pattern.",
+        "requirements": [
+          { "requirement": "List/cards of upcoming trips grouped by date", "expected_met": true },
+          { "requirement": "Each card shows listing photo, dates, and host name", "expected_met": true },
+          { "requirement": "\"View itinerary\" expands full trip details", "expected_met": false },
+          { "requirement": "Check-in instructions and confirmation code", "expected_met": false },
+          { "requirement": "Past trips section separate from upcoming", "expected_met": true },
+          { "requirement": "Cancel/modify reservation action", "expected_met": false },
+          { "requirement": "Countdown to check-in (\"Trip starts in 3 days\")", "expected_met": false },
+          { "requirement": "Weather or local-guide add-on info", "expected_met": false }
+        ]
+      }
+    },
+    {
+      "id": "host-listing-management-table",
+      "category": "host_guest_account",
+      "source": "new",
+      "component_need": "host multi-listing management table",
+      "domain": "Airbnb-style rental marketplace",
+      "framework": "React + Tailwind",
+      "gold": {
+        "verdict": "use_existing",
+        "reason": "scored",
+        "confidence_expected": "medium",
+        "coverage_estimate": "6/8 (75%)",
+        "rationale": "A sortable/filterable data table with row actions is exactly what shadcn's Data Table (TanStack) is built for; only the domain-specific status/performance columns are a gap.",
+        "requirements": [
+          { "requirement": "Sortable/filterable table of listings", "expected_met": true },
+          { "requirement": "Status column (active/paused/draft)", "expected_met": false },
+          { "requirement": "Thumbnail plus title per row", "expected_met": true },
+          { "requirement": "Quick-edit action for pricing/availability", "expected_met": true },
+          { "requirement": "Bulk actions (select multiple, pause all)", "expected_met": true },
+          { "requirement": "Performance stats column (views, bookings)", "expected_met": false },
+          { "requirement": "\"Add new listing\" CTA", "expected_met": true },
+          { "requirement": "Search bar to filter by listing name", "expected_met": true }
+        ]
+      }
+    },
+    {
+      "id": "host-calendar-sync",
+      "category": "host_guest_account",
+      "source": "new",
+      "component_need": "host calendar sync and availability management",
+      "domain": "Airbnb-style rental marketplace",
+      "framework": "React + Tailwind",
+      "gold": {
+        "verdict": "custom_build",
+        "reason": "scored",
+        "confidence_expected": "medium",
+        "coverage_estimate": "3/8 (37.5%)",
+        "rationale": "The calendar grid itself is well covered, but multi-platform iCal sync status, per-date pricing overrides, and minimum-stay rule editing are backend-integration-heavy features no UI component ships with.",
+        "requirements": [
+          { "requirement": "Calendar grid showing availability status per date", "expected_met": true },
+          { "requirement": "Click-to-block/unblock individual dates", "expected_met": true },
+          { "requirement": "Bulk date-range blocking", "expected_met": false },
+          { "requirement": "Sync status indicators for connected external calendars", "expected_met": false },
+          { "requirement": "\"Add calendar\" / import iCal URL action", "expected_met": false },
+          { "requirement": "Per-date custom pricing override", "expected_met": false },
+          { "requirement": "Minimum-stay rule editor per date range", "expected_met": false },
+          { "requirement": "Sync conflict warning indicator", "expected_met": false }
+        ]
+      }
+    },
+    {
+      "id": "manage-booking-screen",
+      "category": "host_guest_account",
+      "source": "new",
+      "component_need": "guest reservation details / manage booking screen",
+      "domain": "Airbnb-style rental marketplace",
+      "framework": "React + Tailwind",
+      "gold": {
+        "verdict": "use_existing",
+        "reason": "scored",
+        "confidence_expected": "low",
+        "coverage_estimate": "5/8 (62.5%)",
+        "rationale": "Overlaps heavily with booking-confirmation, but adds modify/cancel actions and policy-warning states that push it toward the boundary -- a deliberately close-to-threshold case for the eval set.",
+        "requirements": [
+          { "requirement": "Reservation summary (dates, listing, guests)", "expected_met": true },
+          { "requirement": "Total paid and payment method on file", "expected_met": true },
+          { "requirement": "\"Modify reservation\" action (change dates/guests)", "expected_met": false },
+          { "requirement": "\"Cancel reservation\" action with policy warning", "expected_met": false },
+          { "requirement": "Host contact/message CTA", "expected_met": true },
+          { "requirement": "Check-in instructions section", "expected_met": false },
+          { "requirement": "Confirmation code and receipt download", "expected_met": true },
+          { "requirement": "Trip protection/insurance status", "expected_met": false }
+        ]
+      }
+    },
+    {
+      "id": "notification-preferences",
+      "category": "host_guest_account",
+      "source": "new",
+      "component_need": "notification preferences settings panel",
+      "domain": "Airbnb-style rental marketplace",
+      "framework": "React + Tailwind",
+      "gold": {
+        "verdict": "use_existing",
+        "reason": "scored",
+        "confidence_expected": "low",
+        "coverage_estimate": "6/8 (75%)",
+        "rationale": "Tightened in the post-Phase-2 revision pass. Grouped toggle-list settings panels are genuinely generic and common, but 100% assumed every listed item ships with a bare toggle-list component. The independent extraction cross-check (eval/gold-tightening-extraction.json) produced its own checklist for this need without seeing mine, and notably never included a digest-frequency selector or an unsaved-changes navigation guard -- both are real, but less-common additions on top of a basic toggle list, not part of the base pattern.",
+        "requirements": [
+          { "requirement": "Grouped sections (Email, SMS, Push)", "expected_met": true },
+          { "requirement": "Toggle switch per notification type", "expected_met": true },
+          { "requirement": "\"Enable all / disable all\" bulk action", "expected_met": true },
+          { "requirement": "Description text under each toggle", "expected_met": true },
+          { "requirement": "Save confirmation (toast or auto-save indicator)", "expected_met": true },
+          { "requirement": "Channel-level master toggle", "expected_met": true },
+          { "requirement": "Frequency selector for digest-style notifications", "expected_met": false },
+          { "requirement": "Unsaved-changes warning when navigating away", "expected_met": false }
+        ]
+      }
+    }
+  ]
+}
