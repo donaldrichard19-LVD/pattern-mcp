@@ -4,8 +4,7 @@ import { useEffect, useState } from "react";
 import { Menu, X } from "lucide-react";
 import { useIsMobile } from "./hooks";
 import { SECTION } from "./tokens";
-import { Button, Mark, Wordmark } from "./ui";
-import { REPO } from "./constants";
+import { Mark, Wordmark } from "./ui";
 
 const NAV: [string, string][] = [
   ["How it works", "#demo"],
@@ -35,9 +34,6 @@ export function TopBar() {
                 {t}
               </a>
             ))}
-          <Button size="sm" onClick={() => window.open(REPO, "_blank")}>
-            Get the repo
-          </Button>
           {isMobile && (
             <button
               onClick={() => setOpen((v) => !v)}
