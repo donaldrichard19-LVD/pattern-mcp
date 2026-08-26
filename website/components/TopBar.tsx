@@ -5,12 +5,14 @@ import { Menu, X } from "lucide-react";
 import { useIsMobile } from "./hooks";
 import { SECTION } from "./tokens";
 import { Mark, Wordmark } from "./ui";
+import { DOCS } from "./constants";
 
 const NAV: [string, string][] = [
   ["How it works", "#demo"],
   ["Capabilities", "#capabilities"],
   ["Who it's for", "#audiences"],
   ["Reference", "#reference"],
+  ["Docs", DOCS],
 ];
 
 export function TopBar() {
@@ -29,11 +31,20 @@ export function TopBar() {
         </a>
         <nav style={{ display: "flex", alignItems: "center", gap: isMobile ? 8 : 26, fontSize: "var(--text-body-sm)" }}>
           {!isMobile &&
-            NAV.map(([t, h]) => (
-              <a key={h} href={h} style={{ color: "var(--text-secondary)" }}>
-                {t}
-              </a>
-            ))}
+            NAV.map(([t, h]) => {
+              const external = h.startsWith("http");
+              return (
+                <a
+                  key={h}
+                  href={h}
+                  target={external ? "_blank" : undefined}
+                  rel={external ? "noreferrer" : undefined}
+                  style={{ color: "var(--text-secondary)" }}
+                >
+                  {t}
+                </a>
+              );
+            })}
           {isMobile && (
             <button
               onClick={() => setOpen((v) => !v)}
@@ -60,24 +71,29 @@ export function TopBar() {
       </div>
       {isMobile && open && (
         <div style={{ borderTop: "1px solid var(--border-subtle)", background: "#fff", padding: "6px 20px 14px", display: "grid" }}>
-          {NAV.map(([t, h]) => (
-            <a
-              key={h}
-              href={h}
-              onClick={() => setOpen(false)}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                minHeight: 48,
-                fontSize: "var(--text-body-md)",
-                color: "var(--text-primary)",
-                textDecoration: "none",
-                borderBottom: "1px solid var(--border-subtle)",
-              }}
-            >
-              {t}
-            </a>
-          ))}
+          {NAV.map(([t, h]) => {
+            const external = h.startsWith("http");
+            return (
+              <a
+                key={h}
+                href={h}
+                target={external ? "_blank" : undefined}
+                rel={external ? "noreferrer" : undefined}
+                onClick={() => setOpen(false)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  minHeight: 48,
+                  fontSize: "var(--text-body-md)",
+                  color: "var(--text-primary)",
+                  textDecoration: "none",
+                  borderBottom: "1px solid var(--border-subtle)",
+                }}
+              >
+                {t}
+              </a>
+            );
+          })}
         </div>
       )}
     </header>
