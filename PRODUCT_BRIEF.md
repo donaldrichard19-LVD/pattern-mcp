@@ -367,7 +367,7 @@ The validation work has shown that this approach can work in practice, while als
 | P1    | Package metadata, README, GitHub repo                        | Done                                   |
 | P1    | Claude Code, Cursor, Codex support                            | Confirmed                              |
 | P1    | Local usage logging                                           | In progress                            |
-| P2    | Clean-install test                                            | Not yet run                            |
+| P2    | Clean-install test                                            | Done -- `npm install pattern-mcp` + `npx pattern-mcp` verified end-to-end in a scratch dir |
 | P2    | Recruit early testers                                         | Ready                                  |
 | P3    | Validate skip-list with real usage                            | Not yet validated                      |
 | P3    | Validate demand from early-stage founders vs. freelancers     | Not yet validated                      |
@@ -397,7 +397,13 @@ A weaker signal would be usage concentrated around trivial components or high-co
 
 ### 3. Run a clean-install test
 
-Validate that someone who has never seen the project can install Pattern from scratch, configure their MCP client, and get a successful recommendation without help.
+Done. Installed `pattern-mcp` from the public registry in an empty
+directory, connected a real MCP client to `npx pattern-mcp`, and
+confirmed `recommend_component` runs real searches and returns a valid
+verdict. This surfaced a real gap: the README's Setup section still
+documented git-clone-and-build with no matching path for the published
+package. Fixed by making `npm install pattern-mcp` / `npx pattern-mcp`
+the primary path in every client config example.
 
 ### 4. Recruit early testers
 
