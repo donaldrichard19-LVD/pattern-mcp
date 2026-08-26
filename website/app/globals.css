@@ -1,0 +1,157 @@
+:root {
+  /* ---- surfaces / borders ---- */
+  --ink-0: #ffffff;
+  --surface-sunken: #f4f6f8;
+  --border-subtle: #e4e8ed;
+
+  /* ---- text ---- */
+  --text-primary: #0b0f16;
+  --text-secondary: #4a5462;
+  --text-tertiary: #6b7484;
+  --text-accent: #135cc4;
+  --text-success: #0b7e58;
+
+  /* ---- accent palette (mark, chips, progress) ---- */
+  --blue-500: #1a73e8;
+  --blue-700: #0e4da4;
+  --green-500: #0e9f6e;
+  --amber-500: #c77d0a;
+
+  /* ---- radii ---- */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+
+  /* ---- type scale ---- */
+  --text-display-md: 42px;
+  --text-display-sm: 32px;
+  --text-title-lg: 24px;
+  --text-body-lg: 17px;
+  --text-body-md: 15px;
+  --text-body-sm: 13px;
+  --text-caption: 12px;
+  --text-micro: 11px;
+
+  /* ---- line-height / tracking ---- */
+  --leading-display: 1.04;
+  --leading-body: 1.55;
+  --leading-tight: 1.35;
+  --tracking-display: -0.022em;
+  --tracking-title: -0.012em;
+  --tracking-body: -0.004em;
+  --tracking-caps: 0.08em;
+
+  /* ---- fonts (self-hosted via next/font; vars set on <html> in layout.tsx) ---- */
+  --font-sans: var(--font-instrument-sans), "Helvetica Neue", Helvetica, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-wordmark: var(--font-nunito), system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+  overflow-x: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+body {
+  margin: 0;
+  background: var(--ink-0);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--text-accent);
+  text-decoration: none;
+}
+a:hover {
+  color: var(--blue-700);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+button {
+  font-family: inherit;
+}
+
+@keyframes pt-pop {
+  0% {
+    transform: translateY(6px);
+    opacity: 0;
+  }
+  100% {
+    transform: none;
+    opacity: 1;
+  }
+}
+@keyframes pt-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.pt-msg {
+  animation: pt-pop 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.pt-spin {
+  animation: pt-spin 1.1s linear infinite;
+}
+
+.pt-stage {
+  position: sticky;
+  top: 104px;
+  align-self: start;
+}
+
+@media (max-width: 900px) {
+  .pt-cols-2 {
+    grid-template-columns: 1fr !important;
+    gap: 28px !important;
+  }
+  .pt-cols-3,
+  .pt-cols-4 {
+    grid-template-columns: 1fr !important;
+    gap: 20px !important;
+  }
+  .pt-sec {
+    padding-left: 20px !important;
+    padding-right: 20px !important;
+  }
+  .pt-pad-y {
+    padding-top: 56px !important;
+    padding-bottom: 56px !important;
+  }
+  .pt-hide-sm {
+    display: none !important;
+  }
+  .pt-stack {
+    flex-direction: column !important;
+    align-items: stretch !important;
+  }
+  .pt-bar {
+    height: 60px !important;
+  }
+  .pt-bar button,
+  .pt-mstage button {
+    min-height: 44px;
+  }
+  .pt-json {
+    font-size: 10px !important;
+  }
+  .pt-table {
+    font-size: 12px !important;
+  }
+  .pt-scroll-x {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}
