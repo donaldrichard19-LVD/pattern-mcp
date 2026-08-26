@@ -1,4 +1,3 @@
-import { Audiences } from "@/components/Audiences";
 import { Capabilities } from "@/components/Capabilities";
 import { Close } from "@/components/Close";
 import { Guidance } from "@/components/Guidance";
@@ -14,7 +13,6 @@ export default function Home() {
       <Hero />
       <ScrollDemo />
       <Capabilities />
-      <Audiences />
       <Reference />
       <Guidance />
       <Close />

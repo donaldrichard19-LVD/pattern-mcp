@@ -10,7 +10,6 @@ const NAV: [string, string][] = [
   ["Installation", "#install"],
   ["How it works", "#demo"],
   ["Capabilities", "#capabilities"],
-  ["Who it's for", "#audiences"],
   ["Reference", "#reference"],
   ["Docs", "#docs"],
 ];
