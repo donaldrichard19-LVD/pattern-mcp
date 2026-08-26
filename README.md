@@ -14,38 +14,109 @@ whether to:
 Pattern is designed for agents to use **while they are building**, not
 for people to browse.
 
+It exposes two tools:
+
+- `recommend_component` — evaluates a UI component need and returns a
+  structured recommendation.
+- `record_component_decision` — records what the agent actually did so
+  future recommendations in the same project can take that decision into
+  account.
+
 ## How it works
 
-The server does not scrape shadcn/21st.dev/Mobbin/Figma itself. Each tool
-call makes one or more requests to the Anthropic Messages API
-(`claude-sonnet-5` by default) with the server-side `web_search` tool
-enabled, and a system prompt that encodes the full process: skip-list
-check, requirement extraction, candidate search, real-evidence coverage
-scoring, threshold, and — on `custom_build` — reference lookups against
-Mobbin and Figma Community. No new credentials are required for the Figma
-lookup — it uses the same plain `web_search` mechanism as everything else
-in the tool, not the Figma API. The model returns structured JSON; the
-server recomputes the coverage fraction from the `requirements_checked`
-array itself (rather than trusting the model's stated percentage) and
-applies the verdict/confidence threshold in code.
+For each `recommend_component` call, Pattern:
 
-**Boundary-risk ensemble.** Validation found that a single run's coverage
-score can vary between calls on the same input — not because search results
-differ, but because the model can judge the same piece of evidence
-differently run to run (see Known limitations). When a call's recounted
-coverage lands close enough to a threshold boundary to plausibly flip the
-verdict, the server automatically re-runs the judgment 2 more times and
-takes the majority verdict. If the 3 runs disagree (a 2/3 split), the result
-ships with `confidence: "low"` and an `ensemble` field so the calling agent
-can see it was a close call rather than a confident read. Calls that land
-clearly inside a threshold band never trigger this and stay single-run —
-see [Cost](#cost) below for the measured impact.
+1. Checks whether the need is a simple primitive that doesn't require a
+   search.
+2. Turns the request into a set of specific requirements.
+3. Searches for matching shadcn/ui and 21st.dev components.
+4. Checks each candidate against the requirements using evidence from the
+   actual component.
+5. Calculates how much of the requirement is covered.
+6. Decides whether to use an existing component or build a custom one.
+7. If a custom build is needed, searches Mobbin and Figma Community for
+   real product examples.
+8. Returns the result as structured JSON the calling agent can act on.
 
-Trivial primitives (button, input, checkbox, label, badge, spinner, tooltip,
-avatar, icon) are caught locally before any API call, so they don't spend a
-request.
+Coverage is calculated by the server from the individual requirements it
+checked. It does not simply trust the percentage returned by the model.
 
-## Setup — quickstart
+A result can also be:
+
+- `use_existing`
+- `custom_build`
+- `no_candidates_found`
+- `skip_list`
+
+`no_candidates_found` is kept separate from a low-coverage result. Not
+finding a candidate is different from finding candidates that don't cover
+the requirements.
+
+Every result includes `computed_at` because coverage is a snapshot of the
+search at that point in time, not a permanent fact.
+
+### Boundary-risk checks
+
+The same evidence can sometimes be judged slightly differently between
+model runs. When a result is close enough to a decision threshold that it
+could change the verdict, Pattern automatically runs the judgment two more
+times and uses the majority result.
+
+If the three runs disagree, Pattern returns:
+
+```json
+{
+  "confidence": "low",
+  "ensemble": {
+    "triggered": true,
+    "runs": ["use_existing", "custom_build", "use_existing"],
+    "agreement": "2/3"
+  }
+}
+```
+
+Results that are clearly inside a threshold don't trigger extra runs — see
+[Cost](#cost) below for the measured impact.
+
+### Simple primitives
+
+These are handled locally without an API call:
+
+`button`, `input`, `checkbox`, `label`, `badge`, `spinner`, `tooltip`,
+`avatar`, `icon`
+
+This keeps trivial requests fast and avoids unnecessary API usage.
+
+### What powers the search
+
+Pattern does not scrape shadcn/ui, 21st.dev, Mobbin, or Figma Community
+itself.
+
+Each tool call makes one or more requests to the Anthropic Messages API,
+using `claude-sonnet-5` by default. The server enables Anthropic's
+`web_search` tool and provides a system prompt that defines the full
+decision process.
+
+That process includes:
+
+- Skip-list checks
+- Requirement extraction
+- Component search
+- Evidence-based coverage scoring
+- Decision thresholds
+- Mobbin and Figma Community reference searches when a custom build is
+  needed
+
+Figma Community does not require a Figma API key. Pattern uses the same
+web search mechanism for Figma Community as it does for the other sources.
+
+The model returns structured JSON. Pattern then applies important checks
+itself, including recalculating coverage and applying the decision
+threshold.
+
+## Setup
+
+### 1. Install
 
 ```bash
 git clone <this repo>
@@ -54,55 +125,101 @@ npm install
 npm run build
 ```
 
-Requires `ANTHROPIC_API_KEY` — the account whose key you use pays for every
-call this tool makes (see [Cost](#cost) below). Get one from the
-[Anthropic Console](https://console.anthropic.com) (Settings → API Keys);
-this requires its own billing setup. **This is not the same thing as a
-Claude.ai or Claude Code subscription** — a Pro/Max plan does not cover
-API usage, and a subscription login won't get you a key. You need a
-separate Console account with credits or a payment method attached.
+### 2. Add your Anthropic API key
 
-**Point your MCP client at it** — this is a standard MCP server, so it works
-with any MCP-compatible client, not just one. Drop this into your client's
-config (adjusting the path per client), swapping in your own project path
-and key:
+Pattern requires:
 
-- **Claude Code**: either add `"pattern": { ... }` (the
-  block below) to the `mcpServers` object in `.mcp.json` at your project
-  root, or run:
-  ```bash
-  claude mcp add pattern \
-    -e ANTHROPIC_API_KEY=sk-ant-... \
-    -- node /absolute/path/to/pattern-mcp/dist/index.js
-  ```
-  This registers under `--scope local` (the default) — tied to the
-  current project directory only. Add `--scope user` (or `-s user`)
-  instead to make it available across **all** your projects:
-  ```bash
-  claude mcp add pattern \
-    -e ANTHROPIC_API_KEY=sk-ant-... \
-    --scope user \
-    -- node /absolute/path/to/pattern-mcp/dist/index.js
-  ```
-  **Flag order matters here.** `-e`/`--env` and `-s`/`--scope` must come
-  *before* the `--` separator and command — `claude mcp add`'s
-  `[args...]` capture is variadic, so a flag placed *after* the command
-  (e.g. `node dist/index.js --scope user`) is liable to be swallowed as
-  an argument to `node` itself instead of being parsed as a flag for
-  `claude mcp add`. Keep all your flags on the left of `--`, the command
-  and its own args on the right.
+```
+ANTHROPIC_API_KEY
+```
 
-  `claude mcp add` stores this in `~/.claude.json` (a local- or
-  user-scoped entry depending on `--scope`), not in a project file —
-  check with `claude mcp list` (should show
-  `pattern ... ✔ Connected`). Avoid `claude mcp get
-  pattern` if you can — it prints your key back to the
-  terminal in plaintext, so `claude mcp list`'s connection status is
-  usually enough without that risk.
-- Cursor: `.cursor/mcp.json`
-- Codex CLI: `~/.codex/config.toml` (global) or `.codex/config.json`
-  (project-level) — same `mcpServers` shape, TOML or JSON depending on file
-- Claude Desktop: its MCP settings file
+The API account associated with this key pays for the requests Pattern
+makes (see [Cost](#cost) below).
+
+You get the key from the Anthropic Console under Settings → API Keys.
+API billing is separate from Claude.ai or Claude Code subscriptions. A
+Claude Pro or Max subscription does not include API usage.
+
+### Connect Pattern to your MCP client
+
+Pattern is a standard MCP server, so it works with MCP-compatible
+clients.
+
+The server command is:
+
+```
+node /absolute/path/to/pattern-mcp/dist/index.js
+```
+
+#### Claude Code
+
+You can add Pattern to your project's `.mcp.json` or register it with the
+CLI.
+
+For the current project:
+
+```bash
+claude mcp add pattern \
+  -e ANTHROPIC_API_KEY=sk-ant-... \
+  -- node /absolute/path/to/pattern-mcp/dist/index.js
+```
+
+This uses the default local scope, so the server is available to the
+current project.
+
+To make Pattern available across your projects:
+
+```bash
+claude mcp add pattern \
+  -e ANTHROPIC_API_KEY=sk-ant-... \
+  --scope user \
+  -- node /absolute/path/to/pattern-mcp/dist/index.js
+```
+
+**Important:** put `-e`/`--env` and `--scope` before the `--`. Everything
+after `--` is treated as the command and its arguments.
+
+Check the connection with:
+
+```bash
+claude mcp list
+```
+
+You should see Pattern with a `✔ Connected` status.
+
+`claude mcp add` stores the configuration in `~/.claude.json`. Avoid
+`claude mcp get pattern` when possible because it can print your API key
+in plaintext.
+
+#### Cursor
+
+Add Pattern to:
+
+```
+.cursor/mcp.json
+```
+
+#### Codex CLI
+
+Pattern can be configured globally in:
+
+```
+~/.codex/config.toml
+```
+
+or at the project level in:
+
+```
+.codex/config.json
+```
+
+Use the MCP configuration format supported by your Codex CLI version.
+
+#### Claude Desktop
+
+Add Pattern through Claude Desktop's MCP settings.
+
+The configuration looks like:
 
 ```json
 {
@@ -110,48 +227,65 @@ and key:
     "pattern": {
       "command": "node",
       "args": ["/absolute/path/to/pattern-mcp/dist/index.js"],
-      "env": { "ANTHROPIC_API_KEY": "sk-ant-..." }
+      "env": {
+        "ANTHROPIC_API_KEY": "sk-ant-..."
+      }
     }
   }
 }
 ```
 
-Restart your MCP client, then confirm it picked up the tool — ask your
-agent to list its available MCP tools and look for `recommend_component`.
-For Claude Code specifically, `claude mcp list` will show a health-checked
-`✔ Connected` status without needing to ask the agent directly.
+Restart your MCP client after adding Pattern.
+
+Then ask your agent to list its available MCP tools and look for:
+
+```
+recommend_component
+```
 
 ## Try it
 
-Ask your agent something like: *"Use recommend_component to find me a UI
-component for a price breakdown showing nightly rate, cleaning fee, service
-fee, and taxes — I'm building an Airbnb-style booking checkout in React with
-Tailwind."* The agent should call the tool and act on the verdict directly
-(install a real component, or start from the returned checklist and
-Mobbin/Figma Community reference) rather than just describing what it
-found.
+Give your agent a specific UI need, for example:
 
-**What you'll actually see:** both verdict paths now include a written,
-grounded description, not just a bare link or install command. A
-`use_existing` verdict includes `component_description` — what the
-recommended component actually does and looks like, described before the
-agent installs anything. A `custom_build` verdict includes
-`reference_description` for each reference it found — what that Mobbin
-screen or Figma Community file actually shows. Either way, testers get a
-specific, readable description grounded in what the model actually found
-during search, not generic filler.
+> Use recommend_component to find me a UI component for a price breakdown
+> showing nightly rate, cleaning fee, service fee, and taxes. I'm building
+> an Airbnb-style booking checkout in React with Tailwind.
 
-If you want to sanity-check the tool itself rather than a real feature,
-these five needs are the ones this project's own validation was built
-against, spanning the full range of outcomes (clean commodity match,
-false-positive-prone case, zero candidates, and boundary/near-tie cases):
-price breakdown with fees and taxes, cancellation policy display, host
-earnings dashboard, image gallery for a property listing, and a host-guest
-messaging inbox — all in the same Airbnb-style rental marketplace domain.
+The agent should use the result to make the next decision:
+
+- Install or use the recommended component, or
+- Start a custom build using the returned requirements and product
+  references.
+
+Pattern returns useful descriptions for both paths.
+
+- For an existing component, `component_description` explains what the
+  component does and looks like before the agent installs it.
+- For a custom build, `reference_description` explains what each Mobbin
+  or Figma Community reference actually shows.
+
+These descriptions are grounded in what Pattern found during the search
+rather than generic descriptions.
+
+## Validation examples
+
+Pattern's validation suite uses five UI needs from an Airbnb-style rental
+marketplace:
+
+- Price breakdown with fees and taxes
+- Cancellation policy display
+- Host earnings dashboard
+- Property image gallery
+- Host-guest messaging inbox
+
+Together, these cover different outcomes, including clear matches,
+false-positive-prone searches, no candidates, and decisions close to the
+threshold.
 
 ## Tool: `recommend_component`
 
-**Input:**
+### Input
+
 ```json
 {
   "component_need": "price breakdown with fees and taxes",
@@ -161,137 +295,135 @@ messaging inbox — all in the same Airbnb-style rental marketplace domain.
   "project_id": "my-booking-app"
 }
 ```
-`component_need` should be specific, not a category — "price breakdown with
-fees and taxes" not "pricing". Vague category names are what produced
-false-positive matches during validation (a generic SaaS pricing-tier
-component scoring as a match for a booking checkout).
 
-`project_id` is optional — a project name or path the calling agent
-supplies. When present, past decisions recorded for that same `project_id`
-via `record_component_decision` are pulled from
-[per-project decision memory](#per-project-decision-memory) and included in
-the prompt as a *signal, not a rule*: the model is instructed to weigh
-consistency with a highly similar past decision, but never to let it
-override a genuinely better match this search finds, and never to skip
-searching or scoring because a past decision exists. Coverage is still
-computed fresh on every call regardless — see
-[No caching, by design](#known-limitations).
-Omit `project_id` to skip memory entirely; there's no shared/global bucket
-it falls back to.
+`component_need` should describe the actual UI you need, not just a
+category.
 
-**Output:** JSON matching:
+Good: `price breakdown with fees and taxes`
+Too vague: `pricing`
+
+Vague requests can produce misleading matches. For example, a generic
+SaaS pricing table may look like a match for "pricing" even though it
+doesn't work for a booking checkout.
+
+#### `project_id`
+
+`project_id` is optional.
+
+When provided, Pattern can use decisions previously recorded for the
+same project (see [Per-project decision memory](#per-project-decision-memory))
+as a consistency signal.
+
+A previous decision can help the model stay consistent with similar UI
+decisions, but it cannot override a better match found in the current
+search.
+
+Pattern still searches and scores every request from scratch. Past
+decisions never cause a search to be skipped.
+
+If you leave out `project_id`, Pattern does not use project memory.
+
+### Output
+
 ```json
 {
   "verdict": "use_existing | custom_build",
   "confidence": "high | medium | low",
   "reason": "scored | no_candidates_found | skip_list",
   "computed_at": "2026-08-23",
-  "requirements_checked": [ { "requirement": "...", "met": true, "evidence": "..." } ],
+  "requirements_checked": [
+    {
+      "requirement": "...",
+      "met": true,
+      "evidence": "..."
+    }
+  ],
   "coverage": "5/7 (71%)",
   "recommendation": {
     "source": "21st.dev | shadcn | null",
     "install_command": "string | null",
-    "component_description": "string (use_existing only) | null",
+    "component_description": "string | null",
     "reference": {
       "source": "Mobbin | Figma Community",
       "url": "...",
-      "flow_name": "... (Mobbin only)",
-      "file_name": "... (Figma Community only)",
+      "flow_name": "...",
+      "file_name": "...",
       "reference_description": "...",
       "url_type": "deep_link | entry_point"
     }
   },
-  "ensemble": { "triggered": false },
-  "past_decision_signal": { "considered": true, "note": "..." }
+  "ensemble": {
+    "triggered": false
+  }
 }
 ```
-`ensemble.triggered` is `false` on the normal single-pass path. On a
-boundary-risk coverage result it becomes
-`{ "triggered": true, "runs": ["use_existing", "custom_build", "use_existing"], "agreement": "2/3" }`
-— see [Ensemble cost](#ensemble-cost-boundary-risk-cases-only) below.
 
-`past_decision_signal` only appears when `project_id` was provided **and**
-that project has at least one past decision recorded — omitted entirely
-otherwise, never a hollow `{ "considered": false }` on a call with nothing
-to consider. `considered` is `true` only when a past decision was
-genuinely similar enough to factor into scoring or recommendation, not
-just present in the list; `note` names which decision and how, or why none
-applied. This is enforced server-side, not just prompted: a
-`considered`/`note` pair the model returns on a call that had no
-past-decision context in its prompt is discarded rather than trusted — see
-[Per-project decision memory](#per-project-decision-memory).
+The `past_decision_signal` field is included only when there is a
+relevant previous decision for the supplied `project_id`.
 
-**`recommendation.reference` shape depends on how many sources actually
-grounded**, not just on the verdict. On a `custom_build` verdict:
-- Both Mobbin and Figma Community returned a real, grounded result:
-  `reference` is an **array of both** objects.
-- Only one of the two grounded: `reference` is a **single object**, same
-  shape as before this feature existed — never a one-element array.
-- Neither grounded: `reference` is `null`, same as today's
-  no-fabrication rule for a Mobbin-only lookup that found nothing.
+### Reference links
 
-No new credentials are required for the Figma Community reference — it
-uses the same `web_search` mechanism as every other lookup in this tool,
-not the Figma API, so there's no separate token to configure.
+When Pattern recommends a custom build, it may return references from
+Mobbin, Figma Community, or both.
 
-**`reference.url_type` tells you whether the URL is a deep link or just a
-search entry point.** A Mobbin or Figma Community search result is very
-often a category/browse page (e.g.
-`mobbin.com/explore/mobile/screens/notifications`), not a direct link to
-the specific screen or flow the model actually identified (e.g. "Saturn
-Calendar - Notifications List") — the original gap this field exists to
-disclose. On a `custom_build` verdict:
+The `reference` field can be:
 
-- **Mobbin**: the server fetches the search result page (via the
-  `web_fetch` tool) and looks for a more specific permalink to the
-  identified screen/flow actually written on that page. Found and
-  confirmed → `url_type: "deep_link"` and `url` is that permalink. Not
-  found (including when the fetch itself fails) → `url_type:
-  "entry_point"`, `url` stays the category/search page, and
-  `reference_description` is guaranteed to say so explicitly (append or
-  auto-generated server-side, never left to the model alone) — so a
-  reader always knows whether they're getting the exact screen or a
-  browse page they'll need to search themselves.
-- **Figma Community**: a result URL containing `/community/file/` is
-  already file-specific by Figma's own URL structure, so it's treated as
-  `url_type: "deep_link"` without spending a fetch on it. A result that
-  *isn't* a `/community/file/` URL (an occasional browse/tag page) goes
-  through the same fetch-and-verify path as Mobbin. In practice a Figma
-  fetch will almost always fail regardless — `figma.com/robots.txt`
-  disallows `ClaudeBot` site-wide — so a non-file Figma result reliably
-  ends up `entry_point`, honestly.
+- An array when both sources returned useful results.
+- A single object when only one source returned a useful result.
+- `null` when neither source produced a grounded reference.
 
-This is enforced the same way as every other grounding rule in this
-project: **server-side, not just prompt instruction.** A claimed deep
-link is only kept if it's literally present in the text of a page the
-server actually fetched; a claim that fails that check is silently
-replaced with a real URL from an actual search/fetch result (never
-discarded to a guess), and the entry-point caveat is force-appended to
-`reference_description` if the model's own text didn't already disclose
-it. `src/index.ts`'s `applyDeepLinkGrounding` is the single place this
-happens — see its comments for the exact rules, including why a
-model-guessed URL-pattern retry (e.g. stripping a path segment after a
-fetch fails) is both prompted against and independently rejected by the
-`web_fetch` tool itself (`url_not_in_prior_context`).
+#### Deep links vs. entry points
 
-**`install_command` is untrusted text.** It's derived from a web search
-result the model read, not a verified package registry, and the server
-does not execute or validate it. The calling agent is instructed (in the
-tool description and system prompt) to always display it to the user for
-confirmation before running it, and never execute it automatically or
-silently — this is expected agent behavior this project depends on, not
-something the server enforces. See [SECURITY.md](./SECURITY.md).
+Pattern tells you whether a reference URL points directly to the
+identified screen or flow.
+
+`"url_type": "deep_link"` means Pattern verified that the URL points to
+the specific reference.
+
+`"url_type": "entry_point"` means the URL is a search or browse page. The
+agent may need to find the specific screen or flow from there.
+
+For Mobbin, Pattern fetches the search result page and looks for a more
+specific link to the screen or flow it identified.
+
+For Figma Community, URLs containing `/community/file/` are already
+specific to a file and are treated as deep links. Other Figma URLs are
+checked like Mobbin URLs.
+
+Pattern never invents a URL. If it cannot verify a specific link, it
+keeps the real search result URL and clearly identifies it as an entry
+point.
+
+### Installation commands are not trusted
+
+The `install_command` comes from search results. It is not verified
+against a package registry, and Pattern does not execute it.
+
+The calling agent should:
+
+1. Show the command to the user.
+2. Get confirmation.
+3. Run it only after confirmation.
+
+See [SECURITY.md](./SECURITY.md) for more details.
 
 ## Tool: `record_component_decision`
 
-Records a decision the calling agent has actually acted on — call it
-**after** installing an existing component or finishing a custom build, not
-on every `recommend_component` verdict returned. Its only job is appending
-one entry to local [per-project decision memory](#per-project-decision-memory);
-it runs no judgment logic and makes no Anthropic API call, so it's
-effectively free and instant.
+Use this tool after the agent has actually acted on a component
+decision.
 
-**Input:**
+For example, call it after:
+
+- Installing an existing component
+- Completing a custom build
+
+Do not call it for every recommendation.
+
+The tool only saves the decision. It does not run a judgment or make an
+Anthropic API call.
+
+### Input
+
 ```json
 {
   "project_id": "my-booking-app",
@@ -302,32 +434,38 @@ effectively free and instant.
   "timestamp": "2026-08-25T14:32:00.000Z"
 }
 ```
-- `project_id` (required) — must match the `project_id` you pass to
-  `recommend_component` for this decision to ever be surfaced there. Use a
-  stable value, e.g. the project's directory path or name.
-- `component_need` (required), `domain` (optional) — same fields as
-  `recommend_component`'s input; free text, not matched against anything
-  server-side.
-- `action` (required) — `"installed"` or `"custom_built"`.
-- `source` (required) — e.g. `"shadcn"`, `"21st.dev"`, or `"custom"` for a
-  custom build.
-- `timestamp` (optional) — ISO 8601; defaults to the current time if
-  omitted.
 
-**Output:**
+- `project_id` is required and should be stable. A project directory
+  path or project name works well.
+- `action` must be `"installed"` or `"custom_built"`.
+- `source` can be `"shadcn"`, `"21st.dev"`, or `"custom"`.
+- `timestamp` is optional. If omitted, Pattern uses the current time.
+
+### Output
+
 ```json
-{ "status": "recorded", "project_id": "my-booking-app", "entry": { "...": "..." } }
+{
+  "status": "recorded",
+  "project_id": "my-booking-app",
+  "entry": { "..." }
+}
 ```
 
 ## Per-project decision memory
 
-`record_component_decision` appends to a local JSON file, default path
-`~/.pattern/memory.json`, overridable via
-`PATTERN_MEMORY_PATH` — same override pattern as
-[`PATTERN_LOG_PATH`](#local-call-log). It's a flat object keyed by
-`project_id`, each value an array of decision entries in the same shape as
-`record_component_decision`'s input (minus `project_id` itself, since
-that's the key):
+Pattern stores confirmed decisions locally in:
+
+```
+~/.pattern/memory.json
+```
+
+You can change the location with:
+
+```
+PATTERN_MEMORY_PATH
+```
+
+The file is organized by project:
 
 ```json
 {
@@ -343,35 +481,41 @@ that's the key):
 }
 ```
 
-Each project's array is capped at the **50 most recent entries** — once a
-project hits the cap, the oldest entry is dropped as a new one is added, so
-the file stays bounded for a long-lived project without manual cleanup.
+Each project keeps its 50 most recent decisions. Older entries are
+removed as new ones are added.
 
-**Only explicitly confirmed decisions are stored here — not every verdict
-`recommend_component` returns.** The server never writes to this file on
-its own; `recommend_component` only ever *reads* it (when `project_id` is
-provided) and never writes to it. A verdict you don't act on, or act on
-differently than recommended, leaves no trace here unless you call
-`record_component_decision` yourself to say what you actually did.
+Only decisions explicitly recorded through `record_component_decision`
+are saved. Pattern does not automatically save recommendations.
 
-**This is local-only plaintext**, same caveat pattern as the
-[local call log](#local-call-log): nothing in this file is sent anywhere by
-this server. `component_need` and `domain` are written here the same way
-they're written to `calls.log` — see
-[SECURITY.md](./SECURITY.md#what-actually-leaves-your-machine) before
-putting anything sensitive in those fields. A write failure (disk full,
-read-only filesystem, permissions) surfaces as a tool error on
-`record_component_decision` itself, since — unlike the best-effort call
-log — writing the decision *is* that tool's entire job, not a side effect
-of it.
+If an agent ignores or changes a recommendation, nothing is recorded
+unless the agent explicitly calls `record_component_decision` with what
+it actually did.
 
-**This does not weaken the no-verdict-caching rule.** Memory only ever adds
-past-decision context to the prompt for a fresh judgment pass — see
-[No caching, by design](#known-limitations)
-and the `project_id` note under
-[Tool: `recommend_component`](#tool-recommend_component). Coverage is
-recomputed from a real search every single call, with or without a
-`project_id`.
+The memory file is local plaintext. Pattern does not send it anywhere.
+
+`component_need` and `domain` are stored in this file, so avoid putting
+sensitive information in them. See [SECURITY.md](./SECURITY.md).
+
+A failure to write the decision file is returned as an error from
+`record_component_decision`.
+
+**No caching, by design.** Project memory does not cache recommendations.
+A previous decision is only additional context for a new judgment. Every
+`recommend_component` call performs a fresh search and recalculates
+coverage. This means Pattern can use past decisions to improve
+consistency without letting stale decisions replace current evidence —
+see [Known limitations](#known-limitations) for more.
+
+## Security and privacy
+
+Pattern uses the Anthropic API and web search to make its
+recommendations.
+
+Local project memory and the local call log are stored on the machine
+running Pattern. They are not sent anywhere by Pattern itself.
+
+Review [SECURITY.md](./SECURITY.md) before putting sensitive information
+into fields such as `component_need`, `domain`, or project IDs.
 
 ## Cost
 

@@ -25,7 +25,7 @@ happens upstream.
 
 ## API keys in MCP config files
 
-Setup (see [README](./README.md#setup--quickstart)) has you paste a real
+Setup (see [README](./README.md#setup)) has you paste a real
 `ANTHROPIC_API_KEY` into a config file — `.mcp.json`, `.cursor/mcp.json`,
 `.codex/config.json`, or a Claude Desktop settings file, depending on
 your client. **These files can end up inside a project directory you
