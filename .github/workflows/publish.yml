@@ -20,7 +20,9 @@ jobs:
           registry-url: "https://registry.npmjs.org"
       # actions/setup-node's bundled npm (10.x on Node 20) predates npm's
       # Trusted Publishing/OIDC support (needs npm 11.5.1+) -- without this,
-      # npm publish sends no auth at all and the registry 404s.
-      - run: npm install -g npm@latest
+      # npm publish sends no auth at all and the registry 404s. Pinned to
+      # the 11.x line, not @latest -- npm 12 requires Node >=22, which
+      # this workflow's Node 20 runner doesn't satisfy.
+      - run: npm install -g npm@^11.5.1
       - run: npm ci
       - run: npm publish
