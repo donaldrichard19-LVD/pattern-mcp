@@ -1,147 +1,383 @@
 # Product Brief: AI-Powered Design Component Recommendations
 
-## Bottom Line
+## Bottom line
 
-I built an MCP tool that lets a coding agent check shadcn/ui and 21st.dev against a real requirements checklist before it writes a UI component from scratch. If a real component covers the need, the tool tells the agent to install it. If nothing covers it, the tool pulls a real screen from Mobbin so the agent builds from a concrete reference instead of guessing.
+Pattern helps coding agents make better UI decisions.
 
-I validated the judgment logic by hand across five test cases, then built and tested a working MCP server against live search data through several rounds in Claude Code. I found and fixed two real bugs (a fabricated reference and an unenforced scoring rule) and one real limitation I can't fully eliminate (the model reads the same evidence differently across runs). I addressed that limitation with a boundary-risk ensemble that re-runs a close call three times and flags disagreement instead of hiding it.
+When an agent needs a component, Pattern checks real components from shadcn/ui and 21st.dev against the actual requirements. If an existing component is a good match, Pattern tells the agent to use it. If not, Pattern finds a real product example from Mobbin or Figma Community so the agent can build from something concrete instead of guessing.
 
-The tool is packaged for local install, works with Claude Code, Cursor, and Codex CLI, and I'm ready to recruit early testers.
+I first validated the judgment logic by hand across five test cases. I then built and tested a working MCP server against live search data in Claude Code.
 
-## Problem
+That testing found two real bugs:
 
-I have an idea for a specific, unique interaction or UI, but bringing it to life through an AI coding agent is hard. My agent can write a functional spec, but the design output tends to be generic and low-quality. I also struggle to describe the design changes I actually want in a prompt.
+* A reference could be fabricated even when no real Mobbin search had happened.
+* The model could return a verdict that did not match its own coverage score.
 
-## Target Segment
+Both are fixed and enforced in code.
 
-**Primary: Early-Stage Founders (EF)** — non-designers building software products who code with AI agents.
+I also found one limitation that cannot be fully eliminated: the model can interpret the same evidence differently across runs. Pattern now detects cases where that variance could change the verdict, runs the judgment three times, and surfaces disagreement instead of hiding it.
 
-Other segments I considered, ranked by impact and reach:
-- Early-Stage Founders (EF) — highest impact, I picked this one
-- Independent Freelancers (IF) — close second on impact and reach
-- Personal/Hobbyist Builders (PB) — lower priority
-- Employed Engineers/Developers building for employers (EE) — lower priority
+The tool is packaged for local installation and works with Claude Code, Cursor, and Codex CLI. It is ready for early testers.
 
-I ruled out designers (they already do this well, so the pain is lower) and PMs (lower frequency of need).
+## The problem
 
-## Pain Points Within the EF Segment
+I have a specific idea for an interaction or UI, but getting an AI coding agent to build it well is difficult.
 
-Once an EF starts agent-assisted coding, five recurring pain points show up:
+The agent can usually write a functional implementation. The problem is the design. The result often looks generic or low-quality.
 
-| # | Pain Point | Description |
-|---|---|---|
-| A | Agent Design Capabilities | The agent builds a spec, but the design output is generic and low-quality |
-| B | Agent Prompting Skills | The EF struggles to describe the desired design changes to the agent |
-| C | Design Component Search | The EF manually searches 21st.dev, shadcn, and Mobbin for matching components, which takes real time |
-| D | Design Component Management | The EF saves found components to a markdown file for later reuse |
-| E | Agent Prompting for Reuse | The EF points the agent back to that file to apply or change the current design |
+I also have trouble describing exactly what I want changed in a prompt. I may know that something should feel more like Airbnb, for example, without knowing the right design language to give the agent.
 
-I prioritized by severity and frequency. A, B, and C are high severity and high frequency, so I put them at the top of the cluster. D is lower severity but still high frequency.
+The result is a gap between **what I want the product to look like** and **what the coding agent knows how to build**.
 
-## Proposed Solution
+## Who I'm building for
 
-I focused on Design Component Search & Discovery, which addresses pain point C directly and B and A indirectly.
+### Primary segment: early-stage founders
 
-**Core flow:** the agent hits a component need mid-build and calls an MCP tool with that need and the project context. The tool returns a verdict: install this existing component, or build this one custom from a reference. The agent acts on the verdict directly. The EF never manually searches shadcn, 21st.dev, or Mobbin themselves.
+The initial target is **early-stage founders who are building software with AI coding agents but are not designers**.
 
-I evaluated three solution options on effort and impact:
-1. A full component library organized by use case — higher effort
-2. An "explore" library — I deprioritized this one
-3. Access to designer skills or expertise — lower impact
+I considered four segments:
 
-I picked the agent-invoked recommendation approach. It's the lowest-effort, highest-impact option of the three.
+| Segment                         | Priority  |
+| ------------------------------- | --------- |
+| Early-stage founders            | Primary   |
+| Independent freelancers         | Secondary |
+| Personal / hobbyist builders    | Lower     |
+| Employed engineers / developers | Lower     |
 
-## Delivery Model: MCP Tool
+I ruled out designers because they are already good at finding and evaluating design patterns themselves.
 
-I built the judgment layer as an MCP tool the agent calls, not a human-facing search or comparison UI. This follows directly from the EF segment profile. EFs already delegate implementation to a coding agent, so the natural point of intervention is the agent's own workflow, not a separate app that pulls the EF out of their flow.
+I deprioritized PMs because this problem happens less frequently in their day-to-day work.
 
-### When the Agent Should Call the Tool
+## The five pain points
 
-The agent should call the tool when:
-1. A UI component need comes up that nothing in the current codebase already satisfies — the agent is about to scaffold something new rather than reuse or extend an existing component.
-2. The agent's own confidence in producing a well-designed result is low — generic, boilerplate-looking UI is a signal to check for a better real option before shipping a first draft.
-3. The request references a specific pattern or comparison point, like "make this look like Airbnb's calendar."
+Once a founder starts building with an AI coding agent, five related problems show up:
 
-The agent should generally skip the tool for:
-- Trivial, single-purpose primitives with no meaningful internal structure: button, input, checkbox, label, badge, spinner, loader, tooltip, avatar, icon. These don't have a multi-field checklist to score, so the tool adds nothing. I built this as a static skip-list rather than a runtime judgment call, because deciding "is this trivial" at runtime would require its own judgment step and defeat the purpose of skipping it. I plan to revisit the list once I have real usage data.
-- Repeat calls for the same component need within one session. The agent should hold its own verdict in memory for the build (see Caching below).
+**A. Agent design capabilities**
+The agent can create a functional spec, but the resulting UI is often generic.
 
-### Caching
+**B. Prompting the agent**
+The founder struggles to describe the design changes they actually want.
 
-The tool itself never caches. It computes fresh every time and returns a `computed_at` timestamp, because a `custom_build` verdict can go stale as component libraries ship new work. I confirmed this directly: shadcn shipped real chat primitives partway through my testing and turned a likely custom-build messaging component into a near-perfect match. Persisting a stale verdict would eventually hand someone a wrong answer.
+**C. Finding components**
+The founder manually searches 21st.dev, shadcn/ui, and Mobbin for examples. This takes time and still requires judgment.
 
-Session-level caching, if any, belongs to the calling agent. The agent can hold its own verdict in memory for one build session to avoid asking twice, but that cache should never persist across sessions or builds.
+**D. Managing components**
+The founder saves useful components and references somewhere, often in a markdown file, so they can reuse them later.
 
-### Input Contract
+**E. Prompting for reuse**
+The founder has to point the agent back to those saved references when they want to reuse or modify something.
+
+A, B, and C are the biggest problems because they are both frequent and painful. D is less painful but happens often.
+
+## The solution
+
+Pattern focuses on **component search and discovery**.
+
+It directly solves the search problem and also helps with the prompting and design-quality problems.
+
+The core workflow is simple:
+
+1. The agent encounters a UI need while building.
+2. It calls Pattern with the need and the product context.
+3. Pattern searches real component libraries and evaluates what it finds against the requirements.
+4. Pattern returns a decision:
+
+   * **Use an existing component**
+   * **Build it custom**
+   * **No suitable candidate found**
+5. The agent acts on the decision.
+
+The founder does not need to leave the coding workflow and manually search shadcn/ui, 21st.dev, or Mobbin.
+
+## Why an agent-invoked tool
+
+I considered three other approaches:
+
+* **A full component library organized by use case** — useful, but much more work to build.
+* **An explore library** — interesting, but less directly connected to the moment when the agent needs to make a decision.
+* **Designer skills or expertise on demand** — potentially valuable, but less direct impact on the core problem.
+
+Pattern puts the recommendation directly inside the agent's workflow.
+
+That matters because the target user is already delegating implementation to an AI coding agent. The best place to intervene is where the agent is making the design decision, not in a separate application the founder has to manage.
+
+## When the agent should use Pattern
+
+Pattern should be called when:
+
+* The current codebase does not already satisfy a UI need and the agent is about to build something new.
+* The agent is likely to produce generic or boilerplate UI and could benefit from a real component or product reference.
+* The request points to a specific pattern or comparison, such as "make this feel like Airbnb's calendar."
+
+### When the agent should skip Pattern
+
+Pattern should generally be skipped for simple primitives such as:
+
+`button`, `input`, `checkbox`, `label`, `badge`, `spinner`, `loader`, `tooltip`, `avatar`, `icon`
+
+These do not have enough internal structure for meaningful requirement scoring.
+
+Pattern handles them with a static skip-list instead of asking the model to decide whether something is trivial. That avoids spending a judgment step to decide whether another judgment step is necessary.
+
+The skip-list is intentionally a starting point. It will be validated and updated once there is real usage data.
+
+The agent should also avoid repeating the same recommendation within a build session. If it already has a verdict, it can keep that result in its own session memory.
+
+## Caching
+
+Pattern itself **never caches recommendations**.
+
+Every call searches and scores from scratch and returns a `computed_at` timestamp.
+
+This is intentional. Component libraries change.
+
+During testing, shadcn/ui shipped new chat primitives. A messaging component that had previously looked like a custom-build case became a near-perfect existing-component match.
+
+Persisting the old verdict would eventually give the agent the wrong answer.
+
+If the calling agent wants to avoid asking the same question twice during one build, it can keep the result in session memory.
+
+That cache should not persist across sessions or builds.
+
+## Input
+
+Pattern takes a specific component need plus the product context:
 
 ```json
 {
-  "component_need": "string, required — a specific description, not a category. e.g. 'price breakdown with fees and taxes' not 'pricing'",
+  "component_need": "price breakdown with fees and taxes",
   "context": {
-    "domain": "string, required — the product type, e.g. 'Airbnb-style rental marketplace'",
-    "framework": "string, required — e.g. 'React + Tailwind', 'Vue 3'",
-    "existing_stack": "string, optional — e.g. 'already using shadcn/ui', used only as a tiebreaker between similarly-scored candidates"
+    "domain": "Airbnb-style rental marketplace",
+    "framework": "React + Tailwind",
+    "existing_stack": "already using shadcn/ui"
   }
 }
 ```
 
-I made `component_need` free text instead of a category enum. My test cases showed that vague category names like "pricing" produce false-positive matches during requirement extraction, so forcing specificity at the input level carries real weight, not just style. `domain` and `framework` are required because they directly shape requirement extraction and candidate search. `existing_stack` only breaks ties. I left out a budget or effort field on purpose. None of my five validated test cases needed one, and coverage plus confidence already carry the decision the agent needs.
+### Why the input is specific
 
-### How the Agent Uses the Verdict
+`component_need` is free text, but it should describe the actual UI need.
 
-- `use_existing`: the agent installs the recommended component with the returned install command. No further judgment needed.
-- `custom_build`: the agent treats the returned requirement checklist as its build spec and the Mobbin reference as its visual guide, instead of inventing requirements on its own.
-- `no_candidates_found`: the agent should not silently guess. It should either build custom using its own judgment, which is clearly worse-informed than a `custom_build` verdict with a checklist, or flag the gap back to the EF.
+Good:
 
-## Validation and Build History
+```text
+price breakdown with fees and taxes
+```
 
-I validated the judgment logic by hand first, across five test cases spanning the full range of outcomes:
+Not:
 
-| Case | Coverage | Verdict | What it showed |
-|---|---|---|---|
-| Image gallery | 100% | use_existing, high confidence | True commodity match |
-| Host-guest messaging | 100% | use_existing, high confidence | Ecosystem shift flipped a likely custom build into a match |
-| Host earnings dashboard | 71% | use_existing, low confidence | Partial match with real gaps |
-| Price breakdown | 37% | custom_build | Caught a false-positive-prone case correctly |
-| Cancellation policy | 0%, no candidates | custom_build | Zero real candidates existed |
+```text
+pricing
+```
 
-Once I built the actual MCP server and ran it against live search data in Claude Code, I found two real bugs:
+Testing showed that vague categories can create false-positive matches. For example, a generic SaaS pricing table can look relevant to "pricing" even though it is not appropriate for a booking checkout.
 
-1. **Fabricated Mobbin references.** The tool returned a specific Mobbin URL and flow name even when it never ran a search against mobbin.com. I fixed this by reserving a dedicated search allowance for the Mobbin lookup and refusing to populate a reference unless a real, grounded search succeeded.
-2. **Unenforced scoring threshold.** The model sometimes stated a verdict that didn't match its own coverage percentage, and the code trusted that self-report. I fixed this by recomputing the coverage fraction from the model's own evidence array and applying the threshold in code, not by trusting what the model says about itself.
+Requiring specificity at the input level improves the quality of the judgment.
 
-After fixing both, I found a deeper issue: the same component need can produce a different verdict across separate runs with no code change between them. I traced this to the model reading identical evidence differently from one run to the next, not to search inconsistency. I confirmed this directly: two runs found the exact same named component through the exact same search queries, but one run read a specific feature as present and the other read it as absent.
+`domain` and `framework` are required because they directly affect both requirement extraction and component search.
 
-I addressed this with a boundary-risk ensemble. When a call's coverage lands close enough to a threshold to plausibly flip the verdict, the tool automatically re-runs the judgment two more times and takes the majority verdict. A 2-of-3 split ships with low confidence and an `agreement` field so the calling agent knows it was a close call. Calls that land clearly inside a threshold band stay single-run. Measured across a real test batch, this adds about 1.9x average cost, not the 3x worst case, since only about half of calls actually trigger it.
+`existing_stack` is optional and is used as a tiebreaker between similarly scored candidates.
+
+I intentionally left out budget and implementation effort. None of the five validated test cases needed those inputs, and coverage plus confidence already give the agent the decision it needs.
+
+## How the agent uses the result
+
+### `use_existing`
+
+The agent uses the recommended component and can install it using the returned command.
+
+No additional design judgment is needed.
+
+### `custom_build`
+
+The agent uses:
+
+* The returned requirement checklist as the build specification.
+* The Mobbin or Figma Community reference as the visual guide.
+
+Instead of inventing the requirements itself, the agent has both a concrete checklist and a real product example.
+
+### `no_candidates_found`
+
+The agent should not quietly pretend it found a good match.
+
+It can either:
+
+* Build something custom using its own judgment, with the understanding that it has no strong reference.
+* Tell the founder that no suitable existing candidate was found.
+
+The important distinction is that **"nothing found" is not treated as "bad match."**
+
+## Validation
+
+I first tested the judgment logic by hand across five cases designed to cover different outcomes:
+
+| Case                    |          Coverage | Result                          | What it tested                             |
+| ----------------------- | -----------------:| -------------------------------- | ------------------------------------------- |
+| Image gallery           |               100% | `use_existing`, high confidence | Clear commodity match                      |
+| Host-guest messaging    |               100% | `use_existing`, high confidence | New ecosystem component changed the answer |
+| Host earnings dashboard |                71% | `use_existing`, low confidence  | Partial match with real gaps               |
+| Price breakdown         |                37% | `custom_build`                  | False-positive-prone case                  |
+| Cancellation policy     | 0%, no candidates  | `custom_build`                  | No real candidate existed                  |
+
+I then built the MCP server and tested it against live search data in Claude Code.
+
+That testing uncovered two real bugs.
+
+### Bug 1: Fabricated references
+
+The tool returned a specific Mobbin URL and flow name even though it had not actually searched Mobbin.
+
+**Fix:** Mobbin references now require a dedicated search. Pattern only returns a reference when it has real search evidence behind it.
+
+### Bug 2: The threshold was not enforced
+
+The model could return a verdict that did not match its own coverage percentage because the code trusted the model's stated verdict.
+
+**Fix:** Pattern now recalculates coverage from the individual requirements and applies the verdict threshold in code.
+
+The model cannot override the threshold by simply returning a different verdict.
+
+## The deeper reliability problem
+
+After fixing those bugs, I found a harder problem.
+
+The same input could produce a different verdict across runs, even when nothing in the code changed.
+
+I traced this to the model's interpretation of evidence, not the search.
+
+Two runs could:
+
+* Find the same component.
+* Use the same search queries.
+* See the same evidence.
+
+But the model could interpret one feature differently between runs.
+
+For example, one run might read an `Export` action as present while another reads it as absent.
+
+This is a limitation of model-based judgment. It cannot be completely removed through deterministic code.
+
+## How Pattern handles uncertainty
+
+Pattern uses a **boundary-risk ensemble**.
+
+If coverage is close enough to a decision threshold that one changed requirement could flip the verdict, Pattern runs the judgment two additional times.
+
+It then takes the majority result.
+
+For example:
+
+```json
+{
+  "ensemble": {
+    "triggered": true,
+    "runs": [
+      "use_existing",
+      "custom_build",
+      "use_existing"
+    ],
+    "agreement": "2/3"
+  }
+}
+```
+
+If the three runs disagree, Pattern returns `confidence: low`.
+
+The goal is not to pretend the model is perfectly consistent. The goal is to make uncertainty visible to the agent.
+
+Results that are clearly inside a threshold stay single-pass.
+
+Testing showed that the ensemble adds about **1.9x average cost**, rather than 3x, because only a subset of calls trigger it.
 
 ## Distribution
 
-I decided to ship the first version as a local npm package. Each developer installs it and supplies their own Anthropic API key, rather than me running a hosted service. This is the cheapest path to real testers and matches the architecture I already built. A hosted version would need auth, per-tester rate limits, and me covering everyone's API cost, none of which I need for early testing.
+The first version is a **local npm package**.
 
-I confirmed the tool works with Claude Code, Cursor, and Codex CLI, since it's a standard MCP server and not tied to one client. The setup and cost stay the same across all three. Only the config file path and format differ.
+Each developer installs Pattern and provides their own Anthropic API key.
 
-## Why This Matters
+This is the simplest way to get the tool into real developers' hands without first building:
 
-This extends my original UI component aggregator idea, an "OpenRouter for design components" that routes a stated need across shadcn, 21st.dev, and Mobbin. I validated the judgment logic across five hand-tested cases and then again through multiple rounds of live testing, catching and fixing two real bugs along the way and building a working answer to the one limitation I couldn't code away.
+* Authentication
+* User accounts
+* Rate limits
+* Hosted infrastructure
+* Billing
+* API cost management
 
-## Status and Next Steps
+It also matches the architecture already built.
 
-| Phase | Item | Status |
-|---|---|---|
-| P0 | Judgment logic validated by hand (5 cases) | Done |
-| P0 | MCP server built and compiling | Done |
-| P0 | Live testing against real search data | Done |
-| P0 | Mobbin fabrication bug | Fixed and verified |
-| P0 | Threshold enforcement bug | Fixed and verified |
-| P0 | Verdict-flip reliability issue | Addressed with boundary-risk ensemble |
-| P1 | Package metadata, README, GitHub repo | Done |
-| P1 | Multi-client support (Claude Code, Cursor, Codex) | Confirmed |
-| P1 | Local usage logging | In progress with Claude Code |
-| P2 | Cold-start test from a clean install | Not yet run |
-| P2 | Recruit early testers | Twitter thread drafted, not yet posted |
-| P3 | Validate skip-list against real usage | Needs real call volume |
-| P3 | Validate EF demand specifically vs. IF | Needs real call volume |
+Pattern is a standard MCP server, so it works with:
 
-**Validate the skip-list** once real calls exist. Log every call and whether it hit the skip-list. Watch for two failure signals: the agent calling the tool anyway on a skip-listed item, or the agent shipping generic UI for something that should have been skipped. Review after real call volume builds up, not on a calendar date.
+* Claude Code
+* Cursor
+* Codex CLI
 
-**Validate EF demand specifically**, since IF scored similarly on impact and reach. The cheapest test is shipping to a small number of EFs on real projects and watching whether they actually hit `custom_build` moments the tool catches. Real demand looks like repeat, voluntary use across multiple projects. A signal against it looks like usage mostly landing on the skip-list or high-confidence `use_existing` cases, rarely reaching `custom_build`.
+The underlying server and costs are the same across clients. Only the configuration differs.
+
+## Why this matters
+
+Pattern started as an idea for an "OpenRouter for design components": route a UI need across sources such as shadcn/ui, 21st.dev, and Mobbin.
+
+The testing changed the emphasis.
+
+The valuable part is not simply finding components.
+
+It is **making the design decision**:
+
+> Does something already exist that actually fits this product need, or should the agent build something new?
+
+That judgment happens inside the agent's workflow, using real component evidence and real product references.
+
+The validation work has shown that this approach can work in practice, while also making the important limitations visible.
+
+## Current status
+
+| Phase | Item                                                       | Status                                |
+| ----- | ----------------------------------------------------------- | -------------------------------------- |
+| P0    | Judgment logic validated by hand across 5 cases             | Done                                   |
+| P0    | MCP server built and compiling                              | Done                                   |
+| P0    | Live testing against real search data                       | Done                                   |
+| P0    | Mobbin fabrication bug                                       | Fixed and verified                     |
+| P0    | Threshold enforcement bug                                    | Fixed and verified                     |
+| P0    | Verdict-flip reliability issue                               | Addressed with boundary-risk ensemble  |
+| P1    | Package metadata, README, GitHub repo                        | Done                                   |
+| P1    | Claude Code, Cursor, Codex support                            | Confirmed                              |
+| P1    | Local usage logging                                           | In progress                            |
+| P2    | Clean-install test                                            | Not yet run                            |
+| P2    | Recruit early testers                                         | Ready                                  |
+| P3    | Validate skip-list with real usage                            | Not yet validated                      |
+| P3    | Validate demand from early-stage founders vs. freelancers     | Not yet validated                      |
+
+## Next steps
+
+### 1. Test the skip-list with real usage
+
+Track which calls hit the skip-list.
+
+Look for two signals:
+
+* Agents are calling Pattern for things that should have been skipped.
+* Agents are building generic UI for things that should have been on the skip-list.
+
+The list should evolve based on real usage rather than assumptions.
+
+### 2. Test demand with early-stage founders
+
+Independent freelancers were close to early-stage founders in the initial segment analysis, so real usage is needed to validate the target.
+
+The first test is simple: put Pattern in the hands of a small group of early-stage founders building real products and see what they actually do.
+
+The strongest signal is **repeat, voluntary use across multiple projects**.
+
+A weaker signal would be usage concentrated around trivial components or high-confidence existing matches, with very few cases where the agent needs a custom build.
+
+### 3. Run a clean-install test
+
+Validate that someone who has never seen the project can install Pattern from scratch, configure their MCP client, and get a successful recommendation without help.
+
+### 4. Recruit early testers
+
+The core product is working. The next important question is no longer whether the judgment layer can be built.
+
+It is whether developers actually want an agent to make this design decision for them while they build.
