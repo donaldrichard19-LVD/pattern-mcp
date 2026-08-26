@@ -69,9 +69,9 @@ export function Guidance() {
 
         <Reveal>
           <p style={{ ...BODY, fontSize: "var(--text-body-sm)", maxWidth: 720 }}>
-            One limitation is worth knowing before you start: the model can judge the same evidence differently between runs on identical input. The
-            ensemble catches cases where that could flip a verdict and reports them as <span style={MONO}>confidence: &quot;low&quot;</span> instead of
-            hiding the disagreement.
+            Model judgment can vary: two runs can find the same components through the same searches but judge the same evidence differently. The
+            boundary-risk ensemble exists to detect and surface that uncertainty, reporting it as{" "}
+            <span style={MONO}>confidence: &quot;low&quot;</span> rather than hiding it.
           </p>
         </Reveal>
       </div>
