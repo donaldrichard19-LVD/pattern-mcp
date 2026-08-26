@@ -47,7 +47,11 @@ const BEATS = [
   },
   {
     title: "It remembers what this project already decided",
-    body: "record_component_decision logs decisions the agent actually acted on, per project. A later call can use a similar past decision as a signal, never as a rule and never instead of searching and scoring again",
+    body: [
+      "record_component_decision saves the component decisions an agent actually acted on, organized by project.",
+      "Later, the agent can use similar past decisions as a signal when making a new decision. But past decisions never become rules. The agent still searches for current options and scores them against the requirements every time.",
+      "This gives the agent useful project context without locking it into an old choice.",
+    ],
     label: "record_component_decision",
   },
 ];
