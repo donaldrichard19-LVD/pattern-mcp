@@ -1,21 +1,18 @@
 # Pattern
 
-MCP server exposing two tools. `recommend_component` judges whether a UI
-component need should be met with an existing shadcn/ui or 21st.dev
-component, or requires a custom build guided by a real-app reference from
-Mobbin and/or Figma Community. Returns a structured verdict, not a list of
-search results — built for an agent to consume mid-build, not for a human
-to browse. `record_component_decision` records a decision the calling agent
-has actually acted on, so a later `recommend_component` call in the same
-project can weigh it as a consistency signal — see
-[Per-project decision memory](#per-project-decision-memory).
+Pattern is an MCP server that helps coding agents make better UI component
+decisions.
 
-This implements the judgment layer validated in the product brief: field/
-requirement coverage scored against real component evidence, thresholded
-into `use_existing` / `custom_build`, with a `no_candidates_found` bucket
-kept distinct from low coverage, a static skip-list for trivial primitives,
-and a `computed_at` timestamp since coverage is a snapshot, not a permanent
-fact.
+Instead of returning a list of search results, Pattern looks at what you
+need, checks real components against that need, and tells the agent
+whether to:
+
+- **Use an existing component** from shadcn/ui or 21st.dev
+- **Build a custom component**, using a real product reference from
+  Mobbin and/or Figma Community
+
+Pattern is designed for agents to use **while they are building**, not
+for people to browse.
 
 ## How it works
 
