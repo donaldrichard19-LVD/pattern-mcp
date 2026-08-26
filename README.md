@@ -119,11 +119,26 @@ threshold.
 ### 1. Install
 
 ```bash
+npm install pattern-mcp
+```
+
+This installs the `pattern-mcp` command via `npx` (or your project's
+local `node_modules/.bin`), used in the client configs below.
+
+<details>
+<summary>Build from source instead</summary>
+
+```bash
 git clone <this repo>
 cd pattern-mcp
 npm install
 npm run build
 ```
+
+Use `node /absolute/path/to/pattern-mcp/dist/index.js` as the server
+command in place of `npx pattern-mcp` in the examples below.
+
+</details>
 
 ### 2. Add your Anthropic API key
 
@@ -148,7 +163,7 @@ clients.
 The server command is:
 
 ```
-node /absolute/path/to/pattern-mcp/dist/index.js
+npx pattern-mcp
 ```
 
 #### Claude Code
@@ -161,7 +176,7 @@ For the current project:
 ```bash
 claude mcp add pattern \
   -e ANTHROPIC_API_KEY=sk-ant-... \
-  -- node /absolute/path/to/pattern-mcp/dist/index.js
+  -- npx pattern-mcp
 ```
 
 This uses the default local scope, so the server is available to the
@@ -173,7 +188,7 @@ To make Pattern available across your projects:
 claude mcp add pattern \
   -e ANTHROPIC_API_KEY=sk-ant-... \
   --scope user \
-  -- node /absolute/path/to/pattern-mcp/dist/index.js
+  -- npx pattern-mcp
 ```
 
 **Important:** put `-e`/`--env` and `--scope` before the `--`. Everything
@@ -225,8 +240,8 @@ The configuration looks like:
 {
   "mcpServers": {
     "pattern": {
-      "command": "node",
-      "args": ["/absolute/path/to/pattern-mcp/dist/index.js"],
+      "command": "npx",
+      "args": ["pattern-mcp"],
       "env": {
         "ANTHROPIC_API_KEY": "sk-ant-..."
       }
