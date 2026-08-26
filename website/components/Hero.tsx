@@ -35,12 +35,6 @@ const VERDICT_LINES = [
 
 const INSTALL_LINES = ["npm install pattern-mcp"];
 
-const MCP_LINES = [
-  "claude mcp add pattern \\",
-  "  -e ANTHROPIC_API_KEY=sk-ant-... \\",
-  "  -- node /absolute/path/to/pattern-mcp/dist/index.js",
-];
-
 const AGENT_PROMPT =
   "Use recommend_component before picking a UI component: pass the specific need, my domain, and framework, then act on the verdict. Install what it recommends, or build from the reference it returns";
 
@@ -114,7 +108,7 @@ export function Hero() {
               </span>
               <p style={{ ...MONO, margin: 0, fontSize: 12, lineHeight: 1.6, color: "var(--text-secondary)" }}>{AGENT_PROMPT}</p>
             </div>
-            <CopyBlock label="install, any MCP client" lines={MCP_LINES} />
+            <CopyBlock label="install command" lines={INSTALL_LINES} />
           </div>
         </Reveal>
       </div>
