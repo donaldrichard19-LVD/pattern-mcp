@@ -3,7 +3,7 @@
 import { AlertTriangle, Check, CircleSlash, Code, Loader, Minus, MessageSquare, type LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { useIsMobile, useScrollProgress } from "./hooks";
-import { BODY, H2, LABEL, MONO, PANEL, SECTION } from "./tokens";
+import { BODY, H2, MONO, PANEL, SECTION } from "./tokens";
 import { Chip } from "./ui";
 
 const BEATS = [
@@ -298,7 +298,7 @@ function DesktopDemo() {
   return (
     <section id="demo" ref={wrap} style={{ borderTop: "1px solid var(--border-subtle)", background: "#fff" }}>
       <div className="pt-sec" style={{ ...SECTION, padding: "72px 32px 0" }}>
-        <div style={LABEL}>How it works</div>
+        <h2 style={H2}>How it works</h2>
       </div>
       <div className="pt-sec" style={{ ...SECTION, padding: "24px 32px 96px", display: "grid", gridTemplateColumns: "1fr 1.05fr", gap: 64, alignItems: "start" }}>
         <div className="pt-stage" style={{ display: "grid", gap: 12 }}>
@@ -318,7 +318,17 @@ function DesktopDemo() {
                   transition: "transform .5s cubic-bezier(.2,.7,.2,1)",
                 }}
               >
-                <h2 style={{ ...H2, fontFamily: "inherit", fontWeight: 500, color: "var(--text-primary)" }}>{b.title}</h2>
+                <h2
+                  style={{
+                    ...H2,
+                    fontFamily: "inherit",
+                    fontWeight: 500,
+                    fontSize: "clamp(20px, 3vw, 24px)",
+                    color: "var(--text-primary)",
+                  }}
+                >
+                  {b.title}
+                </h2>
                 <p style={{ ...BODY, fontSize: "var(--text-body-lg)", color: "var(--text-primary)" }}>{b.body}</p>
               </div>
             </div>
@@ -347,7 +357,7 @@ function MobileDemo() {
   return (
     <section id="demo" ref={wrap} style={{ position: "relative", height: BEATS.length * 100 + "svh", borderTop: "1px solid var(--border-subtle)", background: "#fff" }}>
       <div className="pt-sec" style={{ ...SECTION, padding: "20px 32px 0" }}>
-        <div style={LABEL}>How it works</div>
+        <h2 style={H2}>How it works</h2>
       </div>
       <div className="pt-mstage" style={stageStyle}>
         <div style={{ flex: "0 1 auto", minHeight: 0, overflow: "hidden", display: "grid", alignContent: "start", gap: 10 }}>
@@ -355,7 +365,7 @@ function MobileDemo() {
           <AgentThread beat={beat} />
         </div>
         <div key={beat} className="pt-msg" style={{ flex: "0 0 auto", paddingTop: 2 }}>
-          <h2 style={{ ...H2, fontFamily: "inherit", fontWeight: 500, fontSize: "clamp(19px, 5.2vw, 26px)" }}>{b.title}</h2>
+          <h2 style={{ ...H2, fontFamily: "inherit", fontWeight: 500, fontSize: "clamp(16px, 4.4vw, 21px)" }}>{b.title}</h2>
           <p style={{ ...BODY, margin: "2px 0 0", fontSize: "var(--text-body-sm)", lineHeight: 1.5, color: "var(--text-primary)" }}>{b.body}</p>
         </div>
         <div style={{ marginTop: "auto" }}>

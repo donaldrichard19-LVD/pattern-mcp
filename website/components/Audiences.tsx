@@ -2,12 +2,11 @@
 
 import { Check } from "lucide-react";
 import { DOCS } from "./constants";
-import { H2, LABEL, SECTION } from "./tokens";
+import { H2, SECTION } from "./tokens";
 import { Button, Reveal } from "./ui";
 
 const AUDIENCES = [
   {
-    h: "You already build with Claude Code, Cursor, or Codex CLI",
     points: [
       "One config block, any MCP client. It's a standard server, not a plugin for one tool",
       "Your agent stops inventing generic UI when something real already fits",
@@ -24,12 +23,11 @@ export function Audiences() {
     <section id="audiences" className="pt-pad-y" style={{ padding: "80px 0", borderTop: "1px solid var(--border-subtle)" }}>
       <div className="pt-sec" style={{ ...SECTION, display: "grid", gap: 48, maxWidth: 720 }}>
         <Reveal>
-          <div style={LABEL}>Who it&apos;s for</div>
+          <h2 style={H2}>Who it&apos;s for</h2>
         </Reveal>
         {AUDIENCES.map((a, i) => (
-          <Reveal key={a.h} delay={i * 100}>
+          <Reveal key={a.cta} delay={i * 100}>
             <div style={{ display: "grid", gap: 14, alignContent: "start" }}>
-              <h2 style={H2}>{a.h}</h2>
               <div style={{ display: "grid", gap: 10, marginTop: 2 }}>
                 {a.points.map((p) => (
                   <div key={p} style={{ display: "flex", gap: 9, fontSize: "var(--text-body-md)", color: "var(--text-secondary)", lineHeight: "var(--leading-body)" }}>

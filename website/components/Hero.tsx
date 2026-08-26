@@ -1,7 +1,7 @@
 "use client";
 
 import { Terminal } from "lucide-react";
-import { BODY, LABEL, MONO, PANEL, SECTION } from "./tokens";
+import { BODY, H2, LABEL, MONO, PANEL, SECTION } from "./tokens";
 import { CopyBlock, Reveal } from "./ui";
 
 const CALL_LINES = [
@@ -101,9 +101,9 @@ export function Hero() {
           </div>
         </Reveal>
         <Reveal delay={220}>
-          <div id="install" style={LABEL}>
+          <h2 id="install" style={H2}>
             Installation
-          </div>
+          </h2>
         </Reveal>
         <Reveal delay={260}>
           <div className="pt-cols-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, alignItems: "start" }}>

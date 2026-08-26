@@ -2,7 +2,7 @@
 
 import { Activity, CircleSlash, History, Link as LinkIcon, ListChecks, Receipt } from "lucide-react";
 import type { ReactNode } from "react";
-import { BODY, H2, LABEL, SECTION } from "./tokens";
+import { BODY, H2, SECTION } from "./tokens";
 import { Reveal } from "./ui";
 
 const CAPS: { icon: ReactNode; h: string; p: [string, string] }[] = [
@@ -62,8 +62,7 @@ export function Capabilities() {
       <div className="pt-sec" style={{ ...SECTION, display: "grid", gap: 36 }}>
         <Reveal>
           <div style={{ display: "grid", gap: 12 }}>
-            <div style={LABEL}>Capabilities</div>
-            <h2 style={{ ...H2, maxWidth: 620 }}>Find the right component, or know when to build</h2>
+            <h2 style={{ ...H2, maxWidth: 620 }}>Capabilities</h2>
             <p style={{ ...BODY, maxWidth: 620, fontSize: "var(--text-body-lg)" }}>
               Pattern evaluates components against your product&apos;s actual requirements, shows the evidence behind each decision, and makes
               uncertainty clear.
