@@ -290,6 +290,28 @@ Results that are clearly inside a threshold stay single-pass.
 
 Testing showed that the ensemble adds about **1.9x average cost**, rather than 3x, because only a subset of calls trigger it.
 
+## Evaluating a staged pipeline (not shipped)
+
+The verdict-flip problem above raises an obvious question: would splitting the single bundled judgment call into separate stages — extract requirements, search evidence, score coverage — produce more consistent, more diagnosable results?
+
+I ran a structured validation to answer that, rather than assuming staging would help. I built a 25-case hand-graded eval set, tested requirement extraction in isolation, then built the staged pipeline as a full parallel implementation. Before committing to a large comparison run, I ran a 5-case pilot first: 3 repeated runs per case, per architecture, spanning clean, boundary-risk, and genuinely ambiguous cases.
+
+| Case | Bundled | Staged |
+| ---- | ---: | ---: |
+| Search map toggle (clean) | 3/3 correct, 3/3 consistent, 3 calls | 3/3 correct, 3/3 consistent, 12 calls |
+| Image gallery (boundary) | 1/3 correct, split verdict | 3/3 correct, 3/3 consistent, 22 calls |
+| Availability calendar (boundary) | 3/3 correct, 3/3 consistent, 7 calls | 3/3 correct, 3/3 consistent, 23 calls |
+| Date range picker (boundary) | 3/3 correct, 3/3 consistent, 9 calls | 1/3 correct, split verdict, 1 run hard-failed |
+| Host earnings dashboard (boundary) | 1/3 correct, split verdict | 1/3 correct, split verdict (same pattern) |
+
+Totals: bundled scored 11/15 correct (73%) across 37 calls. Staged scored 11/14 correct (79%, one run errored out) across 75 calls — roughly **2x bundled's cost**.
+
+**Result: a wash, not a win.** Staging clearly improved consistency on one case and clearly hurt it on another, including an unhandled fetch failure mid-run. Where both architectures failed on the same case, that points to a hard or ambiguous case rather than an architecture problem. Net accuracy was statistically indistinguishable between the two, and staged cost roughly double throughout — not just on the boundary-risk cases it was expected to help most.
+
+I did not run the full 25-case comparison. The pilot answered the question it was built to answer: on exactly the profiles staging was hypothesized to help — boundary-risk and ambiguous cases — it didn't show a benefit consistent enough to justify double the cost.
+
+**Pattern ships the bundled pipeline.** The staged implementation remains in the repo (`src/staged/`) as an evaluated, unshipped experiment, not a replacement.
+
 ## Distribution
 
 The first version is a **local npm package**.
@@ -341,6 +363,7 @@ The validation work has shown that this approach can work in practice, while als
 | P0    | Mobbin fabrication bug                                       | Fixed and verified                     |
 | P0    | Threshold enforcement bug                                    | Fixed and verified                     |
 | P0    | Verdict-flip reliability issue                               | Addressed with boundary-risk ensemble  |
+| P1    | Staged pipeline evaluated as an alternative architecture     | Evaluated, not adopted (~2x cost, no consistent accuracy or consistency gain) |
 | P1    | Package metadata, README, GitHub repo                        | Done                                   |
 | P1    | Claude Code, Cursor, Codex support                            | Confirmed                              |
 | P1    | Local usage logging                                           | In progress                            |
