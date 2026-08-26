@@ -178,7 +178,7 @@ consistency with a highly similar past decision, but never to let it
 override a genuinely better match this search finds, and never to skip
 searching or scoring because a past decision exists. Coverage is still
 computed fresh on every call regardless — see
-[No caching, by design](#known-limitations-carried-over-from-validation).
+[No caching, by design](#known-limitations).
 Omit `project_id` to skip memory entirely; there's no shared/global bucket
 it falls back to.
 
@@ -370,7 +370,7 @@ of it.
 
 **This does not weaken the no-verdict-caching rule.** Memory only ever adds
 past-decision context to the prompt for a fresh judgment pass — see
-[No caching, by design](#known-limitations-carried-over-from-validation)
+[No caching, by design](#known-limitations)
 and the `project_id` note under
 [Tool: `recommend_component`](#tool-recommend_component). Coverage is
 recomputed from a real search every single call, with or without a
@@ -378,166 +378,333 @@ recomputed from a real search every single call, with or without a
 
 ## Cost
 
-A single pass (search → score → respond) costs roughly $0.06–$0.10 with
-Sonnet 5 at current pricing ($2/M input, $10/M output, $0.01 per
-web_search call) — skip-listed primitives cost $0 since they never reach
-the API. Three things keep a single pass down without touching quality:
+Pattern uses the Anthropic API, so `recommend_component` has a cost.
 
-- **Prompt caching** on the system block (`cache_control: ephemeral`) —
-  the instructions are identical every call, so repeated turns and repeated
-  invocations read from cache instead of re-billing full price.
-- **A 2-search budget** for candidate discovery, plus 2 more reserved
-  specifically for the `custom_build` reference lookups (one each for
-  Mobbin and Figma Community) so neither has to compete with discovery
-  for the same cap — shadcn and 21st.dev are searched in the same turn
-  rather than sequentially, so the growing conversation gets re-sent
-  fewer times per call.
-- **A separate 2-call `web_fetch` budget**, used only for the step-6
-  deep-link check described above (`max_content_tokens: 15000` caps what
-  a single category-page fetch can cost). `web_fetch` itself has no
-  per-call charge beyond the tokens the fetched page adds to context, and
-  the system prompt explicitly reserves this tool for step 6 only — the
-  model is instructed not to reach for it during requirement scoring
-  (step 4), so it doesn't compete with the reference lookups it exists
-  for.
-- **`PATTERN_MODEL` env var** (defaults to `claude-sonnet-5`) — lets you
-  swap in a cheaper model (e.g. Haiku 4.5) without a code change. Before
-  trusting a cheaper model in production, re-run the 5 validated test cases
-  from the product brief (price breakdown, cancellation policy, earnings
-  dashboard, gallery, messaging) and diff the verdicts against Sonnet's —
-  this hasn't been tested, only reasoned about.
+A typical single pass costs about $0.06–$0.10 with Sonnet 5 at current
+pricing. Skip-listed primitives cost $0 because they're handled locally
+and never reach the API.
+
+Three things help keep the cost down without changing the decision process.
+
+### Prompt caching
+
+Pattern caches its system instructions using `cache_control: ephemeral`.
+
+The instructions are the same across calls, so repeated requests don't
+pay the full input cost for that block.
+
+### Search limits
+
+Pattern limits candidate discovery to 2 web searches.
+
+If a custom build is needed, it reserves 2 additional searches for
+references:
+
+- 1 for Mobbin
+- 1 for Figma Community
+
+shadcn/ui and 21st.dev are searched in the same turn rather than
+sequentially, which reduces how much conversation context needs to be
+sent repeatedly.
+
+### Reference verification
+
+Pattern allows up to 2 `web_fetch` calls, used only to verify reference
+URLs.
+
+A fetch can read up to 15,000 content tokens. `web_fetch` has no separate
+per-call fee; the cost comes from the content added to the model's
+context.
+
+Pattern does not use `web_fetch` during requirement scoring. It's
+reserved for verifying reference links.
+
+### Choosing a cheaper model
+
+You can change the model with:
+
+```
+PATTERN_MODEL
+```
+
+It defaults to:
+
+```
+claude-sonnet-5
+```
+
+You could use a cheaper model such as Haiku 4.5 without changing the code.
+
+Before using a cheaper model in production, run the five validation cases
+and compare its results with Sonnet's:
+
+- Price breakdown
+- Cancellation policy
+- Earnings dashboard
+- Image gallery
+- Messaging inbox
+
+The cheaper model hasn't been validated yet, so these results should be
+treated as an open question rather than an established performance claim.
 
 ### Ensemble cost (boundary-risk cases only)
 
-Testing found that a single pass isn't reliable near the verdict
-thresholds: with the requirement checklist fixed at exactly 8 items,
-coverage can only land on one of 9 discrete values (0, 12.5, 25, 37.5,
-50, 62.5, 75, 87.5, 100%), and the 40%/80% thresholds sit *between* two
-of those values (37.5↔50, and 75↔87.5). For met-counts of 3, 4, 6, or 7,
-a single item's met/unmet judgment flipping is enough to change the
-verdict — and it does, run to run, on identical input.
+Pattern uses extra model calls only when a result is close enough to a
+decision threshold that a small change in judgment could change the
+verdict.
 
-To catch that, the server runs a **targeted ensemble**: every pass still
-runs once as normal, but if the result lands on one of those four risky
-met-counts (`isBoundaryRisk` in `src/index.ts`), it triggers 2 additional
-full passes (3 total) and takes the majority verdict. Confidence is
-forced to `"low"` on a genuine 2/3 split, regardless of what any
-individual pass reported — a real disagreement across identical inputs
-is uncertainty the tool should surface, not paper over. Everything else
-(0, 1, 2, 5, 8 met — far enough from both thresholds that a 1-item swing
-can't flip the verdict) returns the single pass as-is, at 1x cost. An
-earlier version also triggered on `reason: "no_candidates_found"`
-(a separate source of run-to-run inconsistency); that trigger was removed
-after testing showed it never actually changed a verdict in this
-session and was pure added cost.
+The requirement checklist has eight items, so coverage can only land on
+these values:
 
-The output includes an `ensemble` field so callers can see whether this
-happened: `{ "triggered": false }` on the fast path, or
-`{ "triggered": true, "runs": ["use_existing", "custom_build", "use_existing"], "agreement": "2/3" }`
-when it fired.
+```
+0%
+12.5%
+25%
+37.5%
+50%
+62.5%
+75%
+87.5%
+100%
+```
 
-**Measured cost, not just worst case:** across the last 5-case × 3-run
-test batch (15 outer calls), 8 stayed single-run and 7 triggered the
-ensemble (21 calls), for **29 total API calls — a ~1.9x blended average
-multiplier**, not the 3x a naive "ensemble triggered" framing implies.
-Worst case is still 3x per call when it triggers; most calls don't.
+The decision thresholds are 40% and 80%.
 
-Ensembling does *not* fully eliminate the underlying variance for the
-hardest cases. When a case's true coverage sits close enough to a
-threshold that per-item judgment is close to a coin flip, majority-of-3
-is a noisy estimator: it protects any single call against one unlucky
-draw, but a *different* set of 3 draws on the next invocation can still
-land on the other side. One case (image gallery) kept flipping across
-outer runs even with the ensemble active, always with a 2/3 split and
-`confidence: "low"` — the tool is correctly reporting low confidence on
-a genuinely ambiguous case rather than a bug to fix with a bigger N.
+That means results at 37.5%, 50%, 75%, and 87.5% are the cases where
+changing the judgment on one requirement can flip the verdict.
+
+For those cases, Pattern runs the full judgment three times and takes
+the majority result.
+
+For example:
+
+```json
+{
+  "ensemble": {
+    "triggered": true,
+    "runs": ["use_existing", "custom_build", "use_existing"],
+    "agreement": "2/3"
+  }
+}
+```
+
+If all three runs agree, the majority verdict is returned normally.
+
+If they split 2/3, Pattern sets confidence to `"low"`. The disagreement
+is surfaced rather than hidden.
+
+Results at 0, 12.5, 25, 62.5, and 100% stay single-pass because one
+changed requirement can't move them across either threshold.
+
+### Measured ensemble cost
+
+The ensemble doesn't mean every call costs 3x.
+
+In the latest five-case validation, Pattern made 15 outer calls:
+
+- 8 stayed single-pass
+- 7 triggered the ensemble
+- 21 model passes were used for those 7 ensemble calls
+- 29 total model calls across the test
+
+That works out to about a 1.9x average multiplier across that test set.
+
+The worst case is still 3x for an individual call when the ensemble is
+triggered.
+
+### What the ensemble can and cannot solve
+
+The ensemble reduces the chance that one unlucky model judgment
+determines the result. It doesn't eliminate uncertainty.
+
+If the underlying evidence is genuinely ambiguous, three runs can still
+disagree.
+
+For example, the image-gallery validation case continued to flip between
+outer runs. When that happened, the ensemble consistently reported a 2/3
+split with `confidence: "low"`.
+
+That's expected behavior: the tool is exposing uncertainty instead of
+presenting an ambiguous result as certain.
 
 ### Session call cap
 
-The server caps itself at **40 calls per process lifetime** by default,
-configurable via `PATTERN_SESSION_CAP`. This protects against a
-*buggy calling agent* looping on the tool — a retry loop, a stuck agent
-re-calling the same need repeatedly — not against normal project usage.
-The number is grounded in real usage, not arbitrary: a full pass through
-a realistic ~25-component project (scaled up from this project's own
-5-case Airbnb-style validation list) costs 25 calls, so 40 leaves
-headroom for iteration on top of that without being so high it fails to
-catch an actual runaway loop before it gets expensive. Skip-listed
-primitives don't count toward the cap, since they never reach the API.
-The counter is in-memory and resets when the server process restarts —
-raise the cap via the env var if 40 is genuinely too low for your
-project, don't just restart repeatedly to reset it.
+Pattern limits the number of API calls to 40 per server process by
+default.
+
+You can change this with:
+
+```
+PATTERN_SESSION_CAP
+```
+
+The cap protects against runaway agents, such as an agent stuck in a
+retry loop or repeatedly asking for the same recommendation.
+
+The 40-call default is based on the project's validation work. A
+realistic project with roughly 25 components would use about 25 calls
+for a full pass, leaving room for iteration.
+
+Skip-listed primitives don't count because they never reach the API.
+
+The counter lives in memory and resets when the server restarts.
+
+If 40 calls is too low for your project, increase `PATTERN_SESSION_CAP`
+rather than repeatedly restarting the server.
 
 ## Local call log
 
-Every call that reaches the API (skip-list hits excluded, same exclusion
-as the session cap) appends one JSON line to a local log file — default
-path `~/.pattern/calls.log`, overridable via
-`PATTERN_LOG_PATH`. This is **local-only**: nothing here is sent
-anywhere by this server, it's purely for your own debugging/usage
-visibility.
+Every API call is recorded in a local log.
 
-Each line looks like:
-```json
-{"timestamp":"2026-08-24T21:12:43.882Z","component_need":"cancellation policy display","domain":"Airbnb-style rental marketplace","framework":"React + Tailwind","verdict":"custom_build","confidence":"high","reason":"scored","coverage":"2/8 (25%)","ensemble_triggered":false,"reference_sources_grounded":["Mobbin","Figma Community"]}
+By default:
+
 ```
-`ensemble_agreement` is only present when `ensemble_triggered` is `true`.
-`reference_sources_grounded` is only present on `custom_build` verdicts,
-and only lists sources (`"Mobbin"`, `"Figma Community"`) that actually
-grounded — matches whatever `recommendation.reference` ended up being
-after grounding is enforced (see the
-[Tool](#tool-recommend_component) section above for the full shape
-rules).
+~/.pattern/calls.log
+```
 
-**Deliberately excluded**: full `requirements_checked` evidence text, and
-the API key — never written here. **Included in plaintext**:
-`component_need` and `domain` — see
-[SECURITY.md](./SECURITY.md#what-actually-leaves-your-machine) before
-putting anything sensitive in those fields. The log directory is created
-automatically if it doesn't exist, and a write failure (disk full,
-read-only filesystem, permissions) is caught and reported to stderr —
-it never breaks the tool call itself.
+You can change the location with:
 
-**Reviewing a log file** — including a tester's, if they send you
-theirs (there's no automatic collection; this project doesn't phone
-home): run `node summarize-log.js [path]`, defaulting to the same
-location the server itself uses. It prints a verdict/confidence/reason
-breakdown, ensemble trigger and agreement rates, reference-source
-grounding rates on `custom_build` verdicts, and flags any
-`component_need` called more than once — a signal worth checking
-against the [session cap](#session-call-cap) if you see it.
+```
+PATTERN_LOG_PATH
+```
 
-## Known limitations (carried over from validation)
+The log is local. Pattern does not send it anywhere.
 
-- **Evidence judgment varies run to run, independent of search results.**
-  Validation traced a real case where two runs found the exact same named
-  candidate components via the exact same search queries, but the model
-  judged the same evidence differently — e.g. reading one candidate's
-  "Export" action as present in one run and absent in another, for the
-  identical component. This isn't a search-consistency or code bug; it's
-  inherent to how the model reads natural-language evidence, and it's what
-  the boundary-risk ensemble exists to catch and disclose (as a 2/3
-  `agreement` split) rather than eliminate. If you see a verdict flip
-  between your own runs on the same input, this is almost certainly why.
-- **No caching, by design.** Every call re-searches and re-scores from
-  scratch. A `custom_build` verdict can go stale as libraries ship new
-  components (validated: shadcn's June 2026 chat primitives turned a likely
-  custom-build messaging component into a near-perfect match). If you add
-  caching at the calling-agent layer, keep it session-scoped only — never
-  persist a verdict across sessions or builds. This still holds with
-  [per-project decision memory](#per-project-decision-memory) in the
-  picture: memory only ever adds context to the prompt for a fresh
-  judgment pass, it never substitutes for one — a `recommend_component`
-  call with a `project_id` still always re-searches and re-scores.
-- **Skip-list is a starting point, not validated against real usage yet.**
-  Log every call and whether it hit the skip-list; watch for agents calling
-  the tool anyway on skip-listed items (list too narrow) or shipping generic
-  UI for something that should've been skipped (list missing an entry).
-- **Not testable end-to-end in a fully sandboxed environment.** This server
-  needs outbound network access to `api.anthropic.com` plus whatever the
-  model's web_search tool reaches — it won't run somewhere that blocks
-  general internet access.
-- **Requirement extraction and coverage scoring are judgment calls made by
-  the model**, not deterministic lookups, even with the ensemble and
-  server-side recount in place. Spot-check early outputs against real
-  components before trusting the pipeline unattended.
+Each API call adds one JSON line, for example:
+
+```json
+{
+  "timestamp": "2026-08-24T21:12:43.882Z",
+  "component_need": "cancellation policy display",
+  "domain": "Airbnb-style rental marketplace",
+  "framework": "React + Tailwind",
+  "verdict": "custom_build",
+  "confidence": "high",
+  "reason": "scored",
+  "coverage": "2/8 (25%)",
+  "ensemble_triggered": false,
+  "reference_sources_grounded": ["Mobbin", "Figma Community"]
+}
+```
+
+Additional fields appear when relevant:
+
+- `ensemble_agreement` appears when the ensemble runs.
+- `reference_sources_grounded` appears for `custom_build` results and
+  lists only sources that produced a grounded reference.
+
+The log deliberately does not contain:
+
+- The full `requirements_checked` evidence
+- Your Anthropic API key
+
+It does contain `component_need` and `domain`, so avoid putting sensitive
+information in those fields. See [SECURITY.md](./SECURITY.md).
+
+The log directory is created automatically.
+
+If Pattern cannot write to the log because of permissions, a read-only
+filesystem, or a full disk, it reports the problem to stderr but does not
+fail the tool call.
+
+### Review a log
+
+You can summarize a log with:
+
+```
+node summarize-log.js [path]
+```
+
+If no path is provided, it uses the same default location as the server.
+
+The summary includes:
+
+- Verdict and confidence breakdown
+- Reason breakdown
+- Ensemble trigger and agreement rates
+- Reference-source grounding rates for custom builds
+- Component needs that were requested more than once
+
+Repeated component needs can be useful to investigate alongside the
+[session call cap](#session-call-cap).
+
+## Known limitations
+
+### Model judgment can vary
+
+Pattern's search results can stay the same while the model's
+interpretation of those results changes between runs.
+
+Validation found cases where two runs found the same named components
+using the same search queries but judged the same evidence differently.
+
+For example, the model interpreted an Export action as present in one
+run and absent in another.
+
+This is a limitation of model-based evidence judgment, not necessarily a
+search or code problem.
+
+The boundary-risk ensemble exists to detect and surface this uncertainty.
+
+### No caching, by design
+
+Every recommendation searches and scores again.
+
+This means a recommendation can change as component libraries change.
+For example, a later shadcn/ui release can introduce a component that
+changes a previous `custom_build` result.
+
+Do not persist a recommendation across sessions or builds at the
+calling-agent layer.
+
+If you add caching, keep it session-scoped.
+
+[Project decision memory](#per-project-decision-memory) does not change
+this. It provides context from previous decisions, but every
+`recommend_component` call still performs a fresh search and scoring
+pass.
+
+### The skip-list is still evolving
+
+The primitive skip-list is a starting point and has not yet been
+validated against broad real-world usage.
+
+Watch for two failure modes:
+
+- Agents calling Pattern for things that should have been skipped.
+- Agents building generic UI for something that should have been on the
+  skip-list.
+
+The local call log can help identify both patterns.
+
+### Pattern needs internet access
+
+Pattern requires outbound access to:
+
+```
+api.anthropic.com
+```
+
+It also depends on whatever external sites the model's `web_search` tool
+can reach.
+
+It will not work in an environment that blocks general outbound internet
+access.
+
+### Requirements and coverage are judgment calls
+
+Requirement extraction and evidence scoring are performed by the model.
+
+Pattern adds safeguards such as:
+
+- Structured requirements
+- Server-side coverage recalculation
+- Decision thresholds
+- Boundary-risk ensembling
+- Grounding checks for reference URLs
+
+But the underlying interpretation of whether evidence satisfies a
+requirement is still model judgment.
+
+When introducing Pattern into a new workflow, spot-check early results
+against the actual components before relying on it unattended.
