@@ -1,13 +1,12 @@
 "use client";
 
-import { Check, Terminal } from "lucide-react";
+import { Check } from "lucide-react";
 import { DOCS } from "./constants";
 import { H2, LABEL, SECTION } from "./tokens";
 import { Button, Reveal } from "./ui";
 
 const AUDIENCES = [
   {
-    label: "For agent users",
     h: "You already build with Claude Code, Cursor, or Codex CLI",
     points: [
       "One config block, any MCP client. It's a standard server, not a plugin for one tool",
@@ -28,12 +27,8 @@ export function Audiences() {
           <div style={LABEL}>Who it&apos;s for</div>
         </Reveal>
         {AUDIENCES.map((a, i) => (
-          <Reveal key={a.label} delay={i * 100}>
+          <Reveal key={a.h} delay={i * 100}>
             <div style={{ display: "grid", gap: 14, alignContent: "start" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, ...LABEL }}>
-                <Terminal size={14} />
-                {a.label}
-              </div>
               <h2 style={H2}>{a.h}</h2>
               <div style={{ display: "grid", gap: 10, marginTop: 2 }}>
                 {a.points.map((p) => (
