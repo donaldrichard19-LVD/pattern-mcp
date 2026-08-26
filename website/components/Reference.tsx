@@ -1,7 +1,7 @@
 "use client";
 
 import type { CSSProperties } from "react";
-import { BODY, H2, LABEL, MONO, PANEL, SECTION } from "./tokens";
+import { H2, LABEL, MONO, PANEL, SECTION } from "./tokens";
 import { Reveal } from "./ui";
 
 const INPUT_ROWS = [
@@ -30,14 +30,6 @@ const CONFIG_ROWS = [
   ["PATTERN_SESSION_CAP", "40", "Per-process call cap, a runaway-agent guard, not a usage budget"],
   ["PATTERN_MEMORY_PATH", "~/.pattern/memory.json", "Where confirmed decisions are stored, local only"],
   ["PATTERN_LOG_PATH", "~/.pattern/calls.log", "One JSON line per API-reaching call, local only"],
-];
-
-const CASES = [
-  ["price breakdown with fees and taxes", "clean commodity match"],
-  ["cancellation policy display", "false-positive-prone"],
-  ["host earnings dashboard", "boundary / near-tie"],
-  ["image gallery for a property listing", "flips even with the ensemble, reported as low confidence"],
-  ["host-guest messaging inbox", "went stale as libraries shipped new components"],
 ];
 
 function Table({ head, rows, mono = 0 }: { head: string[]; rows: string[][]; mono?: number }) {
@@ -114,16 +106,6 @@ export function Reference() {
           <div style={{ display: "grid", gap: 12 }}>
             <div style={LABEL}>Configuration</div>
             <Table head={["Env var", "Default", "Notes"]} rows={CONFIG_ROWS} mono={1} />
-          </div>
-        </Reveal>
-        <Reveal>
-          <div style={{ display: "grid", gap: 12 }}>
-            <div style={LABEL}>The five validated cases</div>
-            <Table head={["Component need", "What it tests"]} rows={CASES} mono={0} />
-            <p style={{ ...BODY, fontSize: "var(--text-body-sm)", color: "var(--text-tertiary)" }}>
-              All five sit in one Airbnb-style rental-marketplace domain and cover the full range of outcomes. Run them before trusting the pipeline
-              unattended, and again after changing models
-            </p>
           </div>
         </Reveal>
       </div>
