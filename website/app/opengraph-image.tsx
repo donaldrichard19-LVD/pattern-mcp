@@ -18,17 +18,19 @@ const MARK_BLOCKS = [
   { x: 40, y: 42, w: 18, h: 12, fill: "#C77D0A", opacity: 0.7 },
 ];
 
-async function loadNunito900() {
-  const css = await fetch("https://fonts.googleapis.com/css2?family=Nunito:wght@900&display=swap").then((res) =>
-    res.text()
-  );
+async function loadGoogleFont(cssUrl: string) {
+  const css = await fetch(cssUrl).then((res) => res.text());
   const fontUrl = css.match(/src: url\(([^)]+)\)/)?.[1];
-  if (!fontUrl) throw new Error("Could not resolve Nunito font URL from Google Fonts CSS");
+  if (!fontUrl) throw new Error(`Could not resolve font URL from Google Fonts CSS: ${cssUrl}`);
   return fetch(fontUrl).then((res) => res.arrayBuffer());
 }
 
 export default async function OpengraphImage() {
-  const nunito900 = await loadNunito900();
+  const [nunito900, instrumentSans, instrumentSansItalic] = await Promise.all([
+    loadGoogleFont("https://fonts.googleapis.com/css2?family=Nunito:wght@900&display=swap"),
+    loadGoogleFont("https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,500&display=swap"),
+    loadGoogleFont("https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@1,500&display=swap"),
+  ]);
   const markSize = 132;
   const gap = markSize * 0.26;
 
@@ -66,18 +68,25 @@ export default async function OpengraphImage() {
         <div
           style={{
             marginTop: 36,
+            fontFamily: "Instrument Sans",
+            fontWeight: 500,
             fontSize: 28,
             color: "#4A5462",
             display: "flex",
           }}
         >
-          Contextual judgment for the components your agent picks
+          Empower your agents to ship great products with&nbsp;
+          <span style={{ fontStyle: "italic" }}>taste</span>
         </div>
       </div>
     ),
     {
       ...size,
-      fonts: [{ name: "Nunito", data: nunito900, weight: 900, style: "normal" }],
+      fonts: [
+        { name: "Nunito", data: nunito900, weight: 900, style: "normal" },
+        { name: "Instrument Sans", data: instrumentSans, weight: 500, style: "normal" },
+        { name: "Instrument Sans", data: instrumentSansItalic, weight: 500, style: "italic" },
+      ],
     }
   );
 }
