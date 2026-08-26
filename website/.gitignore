@@ -4,3 +4,4 @@ out/
 .vercel/
 next-env.d.ts
 *.log
+.vercel

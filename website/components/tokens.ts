@@ -48,3 +48,4 @@ export const PANEL: CSSProperties = {
 export const BLUE = "var(--blue-500)";
 export const GREEN = "var(--green-500)";
 export const AMBER = "var(--amber-500)";
+export const RED = "var(--red-500)";
