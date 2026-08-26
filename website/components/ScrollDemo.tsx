@@ -312,7 +312,7 @@ function DesktopDemo() {
               <div
                 style={{
                   display: "grid",
-                  gap: 8,
+                  gap: 4,
                   maxWidth: 500,
                   transform: i === beat ? "none" : "translateY(12px)",
                   transition: "transform .5s cubic-bezier(.2,.7,.2,1)",
@@ -356,7 +356,7 @@ function MobileDemo() {
         </div>
         <div key={beat} className="pt-msg" style={{ flex: "0 0 auto", paddingTop: 2 }}>
           <h2 style={{ ...H2, fontFamily: "inherit", fontWeight: 500, fontSize: "clamp(19px, 5.2vw, 26px)" }}>{b.title}</h2>
-          <p style={{ ...BODY, margin: "4px 0 0", fontSize: "var(--text-body-sm)", lineHeight: 1.5, color: "var(--text-primary)" }}>{b.body}</p>
+          <p style={{ ...BODY, margin: "2px 0 0", fontSize: "var(--text-body-sm)", lineHeight: 1.5, color: "var(--text-primary)" }}>{b.body}</p>
         </div>
         <div style={{ marginTop: "auto" }}>
           <BeatBar beat={beat} onPick={pick} />

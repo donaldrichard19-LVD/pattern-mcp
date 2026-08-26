@@ -100,6 +100,11 @@ export function Hero() {
             </div>
           </div>
         </Reveal>
+        <Reveal delay={220}>
+          <div id="install" style={LABEL}>
+            Installation
+          </div>
+        </Reveal>
         <Reveal delay={260}>
           <div className="pt-cols-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, alignItems: "start" }}>
             <CopyBlock label="install command" lines={INSTALL_LINES} />

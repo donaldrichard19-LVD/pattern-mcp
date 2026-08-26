@@ -7,6 +7,7 @@ import { SECTION } from "./tokens";
 import { Mark, Wordmark } from "./ui";
 
 const NAV: [string, string][] = [
+  ["Installation", "#install"],
   ["How it works", "#demo"],
   ["Capabilities", "#capabilities"],
   ["Who it's for", "#audiences"],
