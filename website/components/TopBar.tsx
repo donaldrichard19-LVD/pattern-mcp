@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Menu, X } from "lucide-react";
+import { Github, Menu, X } from "lucide-react";
 import { useIsMobile } from "./hooks";
 import { SECTION } from "./tokens";
 import { Mark, Wordmark } from "./ui";
@@ -44,6 +44,28 @@ export function TopBar() {
                 </a>
               );
             })}
+          {isMobile && (
+            <a
+              href="https://github.com/donaldrichard19-LVD/pattern-mcp"
+              target="_blank"
+              rel="noreferrer"
+              aria-label="View pattern-mcp on GitHub"
+              style={{
+                width: 44,
+                height: 44,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                background: "transparent",
+                border: "1px solid var(--border-subtle)",
+                borderRadius: "var(--radius-sm)",
+                color: "var(--text-primary)",
+                flexShrink: 0,
+              }}
+            >
+              <Github size={18} />
+            </a>
+          )}
           {isMobile && (
             <button
               onClick={() => setOpen((v) => !v)}
