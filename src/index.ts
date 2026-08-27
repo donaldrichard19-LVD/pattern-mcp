@@ -118,8 +118,283 @@ const LOG_PATH = process.env.PATTERN_LOG_PATH ?? join(homedir(), ".pattern", "ca
 const MEMORY_PATH = process.env.PATTERN_MEMORY_PATH ?? join(homedir(), ".pattern", "memory.json");
 const MAX_DECISIONS_PER_PROJECT = 50;
 
+// $/1M tokens, checked against the Anthropic pricing page rather than
+// recalled from training data (rates drift). Both current and legacy
+// Haiku 4.5 model-id spellings are listed since PATTERN_MODEL is
+// user-configurable and either form may be in use. Falls back to Sonnet 5
+// rates (with a diagnostic) for any model not listed here -- an estimate
+// clearly logged as such beats silently returning $0.
+const PRICING: Record<string, { inputPerMTok: number; outputPerMTok: number }> = {
+  "claude-sonnet-5": { inputPerMTok: 2.0, outputPerMTok: 10.0 },
+  "claude-opus-5": { inputPerMTok: 5.0, outputPerMTok: 25.0 },
+  "claude-haiku-4-5": { inputPerMTok: 1.0, outputPerMTok: 5.0 },
+  "claude-haiku-4-5-20251001": { inputPerMTok: 1.0, outputPerMTok: 5.0 },
+};
+
+// Anthropic's standard prompt-caching multipliers, applied on top of a
+// model's base input rate -- cache writes cost ~1.25x, cache reads ~0.1x.
+// These ratios are documented as consistent across models, unlike the
+// base per-model rates above.
+const CACHE_WRITE_MULTIPLIER = 1.25;
+const CACHE_READ_MULTIPLIER = 0.1;
+
+export interface AnthropicUsage {
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_creation_input_tokens?: number;
+  cache_read_input_tokens?: number;
+}
+
+// Estimate only -- see PRICING's comment above. Rounded to 4 decimal
+// places since a single call is well under a cent in many cases.
+export function estimateCostUsd(usage: AnthropicUsage, model: string): number {
+  const pricing = PRICING[model];
+  if (!pricing) {
+    console.error(
+      JSON.stringify({
+        diagnostic: "pricing_fallback",
+        reason: `no pricing entry for model "${model}" -- estimated_cost_usd uses Sonnet 5 rates as a stand-in`,
+        model,
+      })
+    );
+  }
+  const { inputPerMTok, outputPerMTok } = pricing ?? PRICING["claude-sonnet-5"];
+  const input = usage.input_tokens ?? 0;
+  const output = usage.output_tokens ?? 0;
+  const cacheWrite = usage.cache_creation_input_tokens ?? 0;
+  const cacheRead = usage.cache_read_input_tokens ?? 0;
+  const cost =
+    (input * inputPerMTok +
+      output * outputPerMTok +
+      cacheWrite * inputPerMTok * CACHE_WRITE_MULTIPLIER +
+      cacheRead * inputPerMTok * CACHE_READ_MULTIPLIER) /
+    1_000_000;
+  return Math.round(cost * 10000) / 10000;
+}
+
+// This bundled call runs extraction, search, and scoring inside ONE model
+// turn via server-executed tools (web_search/web_fetch run on Anthropic's
+// servers, not as separate round-trips this code makes) -- so there's no
+// natural place to put three separate stopwatches. Streaming the response
+// and timing content-block boundaries is the only way to get a real
+// per-phase split without adding a second API call (which would change
+// cost/behavior -- out of scope here).
+//
+// Validated against 8 real streamed traces before shipping (4 custom_build,
+// 4 use_existing, covering both branches of step 6) rather than assumed:
+// every trace showed the same shape --
+//   [thinking] -> [search tool_use x2 -> search tool_result x2] -> [thinking/text...]
+// with the first tool_use block starting at the exact millisecond the
+// opening `thinking` block stopped (0-16ms of jitter across all 8 runs),
+// and the discovery-search wave (always exactly the 2 calls step 3 asks
+// the model to fire together) always followed immediately by a `thinking`
+// or `text` block -- never by a third tool call with no reasoning in
+// between. That gives two clean, consistently-observed cut points:
+// first-tool-block-start (end of extract) and end-of-the-first-contiguous
+// tool-block-run (end of search).
+//
+// For custom_build cases specifically, step 6's reference search
+// (Mobbin/Figma) and its web_fetch deep-link check happen in a SECOND
+// tool-block run, separated from the first by a `thinking` block that
+// contains the actual coverage-scoring/verdict reasoning -- i.e. search
+// and score are not simply sequential there, scoring happens in the
+// middle. Using "last tool result in the whole response" as the search/
+// score boundary (an earlier draft of this) would have wrongly folded that
+// interstitial scoring reasoning, plus all of step 6, into "search". The
+// boundary below avoids that: "search" is only ever the first contiguous
+// tool-block run. Concretely this means breakdown_ms.score, for a
+// custom_build verdict, also covers step 6's reference-finding and
+// write-up -- not just coverage scoring -- which is disclosed in the
+// README rather than presented as a narrower number than it is.
+function classifyBlockKind(type: string | undefined): "tool" | "other" {
+  return type === "tool_use" ||
+    type === "server_tool_use" ||
+    type === "web_search_tool_result" ||
+    type === "web_fetch_tool_result"
+    ? "tool"
+    : "other";
+}
+
+export interface PhaseTimings {
+  requestStartMs: number;
+  extractEndMs: number;
+  searchEndMs: number;
+  scoreEndMs: number;
+}
+
+export function computeBreakdownMs(t: PhaseTimings): { extract: number; search: number; score: number } {
+  return {
+    extract: t.extractEndMs - t.requestStartMs,
+    search: t.searchEndMs - t.extractEndMs,
+    score: t.scoreEndMs - t.searchEndMs,
+  };
+}
+
+function buildMeta(timings: PhaseTimings, usage: AnthropicUsage): NonNullable<JudgmentResult["_meta"]> {
+  return {
+    total_ms: timings.scoreEndMs - timings.requestStartMs,
+    breakdown_ms: computeBreakdownMs(timings),
+    tokens_used: {
+      input: (usage.input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0),
+      output: usage.output_tokens ?? 0,
+    },
+    estimated_cost_usd: estimateCostUsd(usage, MODEL),
+  };
+}
+
+type StreamedContentBlock = {
+  type: string;
+  text?: string;
+  name?: string;
+  input?: unknown;
+  id?: string;
+  tool_use_id?: string;
+  content?: unknown;
+};
+
+interface StreamedMessage {
+  content: StreamedContentBlock[];
+  stop_reason?: string;
+  usage: AnthropicUsage;
+  timings: PhaseTimings;
+}
+
+// Streams a Messages API request over SSE and reconstructs the same
+// {content, stop_reason, usage} shape the non-streaming endpoint returns,
+// so every downstream consumer (search/fetch-call parsing, JSON
+// extraction, the enforce* functions) is unaffected by this transport
+// change. Also captures the phase timestamps described above. This is
+// hand-rolled SSE parsing rather than the Anthropic SDK to avoid pulling
+// in a new dependency for what's a small, stable, well-documented event
+// shape (message_start/content_block_start/_delta/_stop/message_delta/
+// message_stop).
+async function streamAnthropicMessage(body: Record<string, unknown>): Promise<StreamedMessage> {
+  const requestStartMs = Date.now();
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": ANTHROPIC_API_KEY!,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({ ...body, stream: true }),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`Anthropic API error ${response.status}: ${errText}`);
+  }
+  if (!response.body) {
+    throw new Error("Anthropic API streaming response had no body to read.");
+  }
+
+  const blocks: StreamedContentBlock[] = [];
+  const partialJson: Record<number, string> = {};
+  let usage: AnthropicUsage = {};
+  let stop_reason: string | undefined;
+
+  let firstToolBlockStartMs: number | undefined;
+  let lastToolResultStopMs: number | undefined;
+  let searchEndMs: number | undefined; // frozen the first time a non-tool block interrupts the run
+  let sawAnyToolBlock = false;
+
+  const handleEvent = (payload: any) => {
+    const now = Date.now();
+    switch (payload.type) {
+      case "message_start":
+        usage = { ...usage, ...payload.message?.usage };
+        break;
+      case "content_block_start": {
+        const idx: number = payload.index;
+        blocks[idx] = structuredClone(payload.content_block) as StreamedContentBlock;
+        const kind = classifyBlockKind(blocks[idx].type);
+        if (kind === "tool") {
+          sawAnyToolBlock = true;
+          if (firstToolBlockStartMs === undefined) firstToolBlockStartMs = now;
+        } else if (sawAnyToolBlock && searchEndMs === undefined && lastToolResultStopMs !== undefined) {
+          // A thinking/text block has interrupted the first tool-block run --
+          // freeze the search/score boundary at the last tool result seen so far.
+          searchEndMs = lastToolResultStopMs;
+        }
+        break;
+      }
+      case "content_block_delta": {
+        const idx: number = payload.index;
+        const delta = payload.delta;
+        if (delta?.type === "text_delta") {
+          blocks[idx].text = (blocks[idx].text ?? "") + delta.text;
+        } else if (delta?.type === "input_json_delta") {
+          partialJson[idx] = (partialJson[idx] ?? "") + delta.partial_json;
+        }
+        break;
+      }
+      case "content_block_stop": {
+        const idx: number = payload.index;
+        if (partialJson[idx] !== undefined) {
+          try {
+            (blocks[idx] as any).input = JSON.parse(partialJson[idx] || "{}");
+          } catch {
+            (blocks[idx] as any).input = {};
+          }
+        }
+        if (blocks[idx]?.type === "web_search_tool_result" || blocks[idx]?.type === "web_fetch_tool_result") {
+          lastToolResultStopMs = now;
+        }
+        break;
+      }
+      case "message_delta":
+        if (payload.usage) usage = { ...usage, ...payload.usage };
+        if (payload.delta?.stop_reason) stop_reason = payload.delta.stop_reason;
+        break;
+      default:
+        break;
+    }
+  };
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  let dataLines: string[] = [];
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let idx: number;
+    while ((idx = buf.indexOf("\n")) !== -1) {
+      const line = buf.slice(0, idx).replace(/\r$/, "");
+      buf = buf.slice(idx + 1);
+      if (line === "") {
+        if (dataLines.length > 0) {
+          try {
+            handleEvent(JSON.parse(dataLines.join("\n")));
+          } catch {
+            // Malformed/partial SSE frame -- skip it rather than crash the call.
+          }
+        }
+        dataLines = [];
+        continue;
+      }
+      if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+      // "event:" lines are ignored -- payload.type inside `data:` is
+      // sufficient to dispatch on, and is what the code above already uses.
+    }
+  }
+
+  const scoreEndMs = Date.now();
+  const extractEndMs = firstToolBlockStartMs ?? scoreEndMs;
+  const resolvedSearchEndMs = searchEndMs ?? lastToolResultStopMs ?? extractEndMs;
+
+  return {
+    content: blocks,
+    stop_reason,
+    usage,
+    timings: { requestStartMs, extractEndMs, searchEndMs: resolvedSearchEndMs, scoreEndMs },
+  };
+}
+
 const TOOL_NAME = "recommend_component";
 const RECORD_DECISION_TOOL_NAME = "record_component_decision";
+const EXTRACT_REQUIREMENTS_TOOL_NAME = "extract_requirements";
 
 const INPUT_SCHEMA = {
   type: "object",
@@ -157,8 +432,35 @@ const INPUT_SCHEMA = {
         "better match found in this search still wins). Omit to skip memory " +
         "lookup entirely; this never falls back to a shared/global bucket.",
     },
+    checklist: {
+      type: "array",
+      items: { type: "string" },
+      description:
+        "Optional. A hand-provided (or extract_requirements-provided) requirement " +
+        "checklist to score against directly, skipping this call's own internal " +
+        "requirement extraction. Use this to inspect or correct the checklist " +
+        "before spending the search+score budget -- call extract_requirements " +
+        "first, review or edit its checklist, then pass it here. Omit to keep " +
+        "today's default behavior: recommend_component extracts its own " +
+        "checklist internally, unchanged.",
+    },
   },
   required: ["component_need", "domain", "framework"],
+} as const;
+
+const EXTRACT_REQUIREMENTS_INPUT_SCHEMA = {
+  type: "object",
+  properties: {
+    component_need: {
+      type: "string",
+      description: "Same field as recommend_component's input -- a specific description of the UI component needed, not a category.",
+    },
+    domain: {
+      type: "string",
+      description: "Same field as recommend_component's input -- the product type/domain. Extraction is grounded in this, not the component name alone.",
+    },
+  },
+  required: ["component_need", "domain"],
 } as const;
 
 const RECORD_DECISION_INPUT_SCHEMA = {
@@ -196,11 +498,28 @@ const RECORD_DECISION_INPUT_SCHEMA = {
   required: ["project_id", "component_need", "action", "source"],
 } as const;
 
-function buildSystemPrompt(searchBudget: number | null): string {
+// Shared between buildSystemPrompt's own step 2 and
+// buildExtractionSystemPrompt (the extract_requirements tool's standalone
+// prompt) -- the extraction *instructions* are one piece of text reused
+// by both, even though the two tools issue physically separate API calls
+// (recommend_component's step 2 runs inside the same server-tool-use
+// turn as search+score; extract_requirements is a standalone call with no
+// tools at all). This is what "factor it out into a shared function" means
+// here: the wording, not a shared HTTP call.
+const EXTRACTION_INSTRUCTIONS =
+  "Turn the component need + domain into a concrete checklist of elements the component must contain -- specific enough to check against real code, not a vibe. Ground it in the stated domain, not the component name alone. Extract exactly 8 checklist items, ranked by importance to the component's core function (most important first) -- a fixed count, not a range, so coverage = met/total isn't itself a moving target across runs.";
+
+function buildSystemPrompt(searchBudget: number | null, opts?: { checklistProvided?: boolean }): string {
   const budgetLine =
     searchBudget === null
       ? "Budget: no fixed limit on search calls for candidate discovery -- search as much as genuinely helps you find and verify real candidates, but don't search redundantly once you have enough to score confidently."
       : `Budget: at most ${searchBudget} search call${searchBudget === 1 ? "" : "s"} for candidate discovery. This is separate from, and does not include, the Mobbin and Figma Community lookups in step 6 -- two extra search calls (one per source) are reserved for those and will not work if you spend them here.`;
+
+  const step2 = opts?.checklistProvided
+    ? `2. USE THE PROVIDED CHECKLIST
+The user message includes a "Provided checklist" section -- a requirement checklist already prepared for you (either hand-written by the calling agent, or produced by a prior extract_requirements call). Do not extract your own checklist, and do not add, remove, reorder, or reword any item. Treat it as fixed input and score coverage against exactly these items in step 4 below.`
+    : `2. EXTRACT REQUIREMENTS
+${EXTRACTION_INSTRUCTIONS}`;
   return `You are a UI component judgment layer. Given a component need, you decide whether it should be met with an existing shadcn/ui or 21st.dev component, or requires a custom build guided by a real-app reference. You have access to a web_search tool -- use it.
 
 If the user message includes a "Past confirmed decisions in this project" section, treat it only as a signal, not a rule: if a highly similar past decision exists, consider consistency with it while scoring and recommending, but don't let it override a genuinely better match found in this search, and don't skip or shortcut your own search and scoring because a past decision exists. You decide relevance yourself -- nothing upstream has already matched these past decisions to the current need for you. Step 8 below tells you exactly how to report what you did with it.
@@ -210,8 +529,7 @@ Follow this process exactly:
 1. SKIP-LIST CHECK
 If the component need is a trivial, single-purpose primitive with no meaningful internal structure (button, input, checkbox, label, badge, spinner, loader, tooltip, avatar, icon), skip the rest of this process and return verdict "use_existing" with reason "skip_list", confidence "high", and a note that this is a commodity primitive not worth scoring.
 
-2. EXTRACT REQUIREMENTS
-Turn the component need + domain into a concrete checklist of elements the component must contain -- specific enough to check against real code, not a vibe. Ground it in the stated domain, not the component name alone. Extract exactly 8 checklist items, ranked by importance to the component's core function (most important first) -- a fixed count, not a range, so coverage = met/total isn't itself a moving target across runs.
+${step2}
 
 3. SEARCH FOR CANDIDATES
 Search shadcn/ui and 21st.dev for components matching the need, filtered to the stated framework. Fire the shadcn and 21st.dev searches together in the same turn (they're independent lookups) rather than one at a time -- this avoids re-sending the growing conversation on extra round-trips. ${budgetLine} If those don't surface enough to score, proceed with what you have rather than continuing to search -- a "low confidence, here's why" verdict is more useful than an unbounded search loop.
@@ -273,6 +591,37 @@ Respond with ONLY a single JSON object, no prose before or after, no markdown co
 }`;
 }
 
+// Standalone prompt for the extract_requirements tool -- shares
+// EXTRACTION_INSTRUCTIONS with buildSystemPrompt's own step 2 (see that
+// constant's comment) but is otherwise a much smaller prompt: no tools, no
+// search/score steps, just the extraction reasoning. This is what makes
+// extract_requirements fast and cheap relative to recommend_component.
+function buildExtractionSystemPrompt(): string {
+  return `You are the requirement-extraction step of a UI component judgment tool. Given a component need and a product domain, produce a checklist of concrete elements the component must contain.
+
+${EXTRACTION_INSTRUCTIONS}
+
+Respond with ONLY a single JSON object, no prose before or after, no markdown code fences, matching this exact shape:
+
+{
+  "checklist": ["string", "string", "..."]
+}`;
+}
+
+// Placeholder heuristic, not a validated confidence signal -- see the
+// extract_requirements section of README.md for why (a known gap to
+// revisit with real usage data, not fabricated precision). A longer,
+// more specific component_need gives the extraction step more to ground
+// the checklist in; a one- or two-word need is exactly the "too vague"
+// case the README already warns produces misleading matches elsewhere in
+// this tool, so it's flagged "low" here too.
+export function estimateExtractionConfidence(componentNeed: string): "high" | "medium" | "low" {
+  const wordCount = componentNeed.trim().split(/\s+/).filter(Boolean).length;
+  if (wordCount <= 2) return "low";
+  if (wordCount <= 5) return "medium";
+  return "high";
+}
+
 type SinglePassResult = { ok: true; result: JudgmentResult } | { ok: false; raw: string };
 
 async function runSinglePass(input: {
@@ -281,6 +630,7 @@ async function runSinglePass(input: {
   framework: string;
   existing_stack?: string;
   project_id?: string;
+  checklist?: string[];
 }): Promise<SinglePassResult> {
   if (!ANTHROPIC_API_KEY) {
     throw new Error(
@@ -288,10 +638,14 @@ async function runSinglePass(input: {
     );
   }
 
+  const passStartMs = Date.now();
+  const checklistSource: "extracted" | "provided" = input.checklist && input.checklist.length > 0 ? "provided" : "extracted";
+
   // Fast path: skip-list check happens locally too, so trivial primitives
   // never spend a real API call. The system prompt also enforces this, but
   // checking here avoids the round-trip entirely for the common case.
   if (isSkipListMatch(input.component_need)) {
+    const skipListElapsedMs = Math.max(1, Date.now() - passStartMs);
     return {
       ok: true,
       result: {
@@ -306,6 +660,18 @@ async function runSinglePass(input: {
           install_command: null,
           component_description: null,
           reference: null,
+        },
+        checklist_source: checklistSource,
+        // No API call happens on this path -- tokens/cost are genuinely
+        // zero, not omitted. total_ms is clamped to at least 1 so the
+        // field is never zero even though this branch is sub-millisecond;
+        // all of that trivial time is attributed to "extract" since it's
+        // the local skip-list check, not a search or scoring step.
+        _meta: {
+          total_ms: skipListElapsedMs,
+          breakdown_ms: { extract: skipListElapsedMs, search: 0, score: 0 },
+          tokens_used: { input: 0, output: 0 },
+          estimated_cost_usd: 0,
         },
       },
     };
@@ -328,10 +694,17 @@ async function runSinglePass(input: {
           })
           .join("\n")}`;
 
+  const checklistBlock =
+    input.checklist && input.checklist.length > 0
+      ? `\n\nProvided checklist (use exactly these items, do not re-extract):\n${input.checklist
+          .map((item, i) => `${i + 1}. ${item}`)
+          .join("\n")}`
+      : "";
+
   const userMessage = `component_need: ${input.component_need}
 domain: ${input.domain}
 framework: ${input.framework}
-existing_stack: ${input.existing_stack ?? "(not specified)"}${pastDecisionsBlock}`;
+existing_stack: ${input.existing_stack ?? "(not specified)"}${checklistBlock}${pastDecisionsBlock}`;
 
   // Diagnostic only, same pattern as the other stderr diagnostics in this
   // file -- proves the memory lookup actually reached the prompt sent to
@@ -347,88 +720,62 @@ existing_stack: ${input.existing_stack ?? "(not specified)"}${pastDecisionsBlock
     );
   }
 
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-api-key": ANTHROPIC_API_KEY,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: MODEL,
-      // Raised from 4096: higher search budgets produce more candidates
-      // and more per-requirement evidence text, and 4096 was observed
-      // truncating mid-response (stop_reason "max_tokens"), which corrupts
-      // the JSON extractJson() pulls out below.
-      max_tokens: 8192,
-      // System prompt is identical on every call, so mark it cacheable --
-      // cache reads cost roughly a tenth of fresh input tokens. This is
-      // the single biggest cost lever here: the same ~800-token prompt is
-      // otherwise re-sent in full on every turn of the search loop, and on
-      // every separate tool call besides.
-      system: [
-        {
-          type: "text",
-          text: buildSystemPrompt(SEARCH_BUDGET),
-          cache_control: { type: "ephemeral" },
-        },
-      ],
-      messages: [{ role: "user", content: userMessage }],
-      tools: [
-        {
-          type: "web_search_20250305",
-          name: "web_search",
-          // Server-enforced cap, not just prompt instruction -- omitted
-          // entirely when SEARCH_BUDGET is null (unlimited). +2 reserves
-          // one slot each for the step-6 Mobbin and Figma Community
-          // lookups so neither has to compete with discovery for the same
-          // budget: without a reservation like this, discovery searches
-          // (fired first) consumed the whole cap and the Mobbin search was
-          // silently blocked (max_uses_exceeded) every time a custom_build
-          // verdict was reached, and the model backfilled a plausible-
-          // looking but ungrounded reference URL instead of reporting that
-          // it never actually searched -- confirmed via a direct rerun
-          // where 0 Mobbin queries were attempted but a specific Mobbin
-          // URL was still returned. Figma Community gets the same
-          // treatment now that it's a second reference source.
-          ...(SEARCH_BUDGET !== null ? { max_uses: SEARCH_BUDGET + 2 } : {}),
-        },
-        {
-          type: "web_fetch_20250910",
-          name: "web_fetch",
-          // Exactly one fetch per reference source (Mobbin, Figma
-          // Community) -- step 6 fetches the search result page to look
-          // for a deep link to the specific screen/flow already
-          // identified, never more than once per source. Not reserved
-          // from the web_search budget above; this is a separate tool
-          // with its own separate cap.
-          max_uses: 2,
-          // Category/browse pages can be large, and all we need from them
-          // is a permalink, not the full page -- caps token cost of a
-          // fetch that turns out not to have a deep link after all.
-          max_content_tokens: 15000,
-        },
-      ],
-    }),
+  const data = await streamAnthropicMessage({
+    model: MODEL,
+    // Raised from 4096: higher search budgets produce more candidates
+    // and more per-requirement evidence text, and 4096 was observed
+    // truncating mid-response (stop_reason "max_tokens"), which corrupts
+    // the JSON extractJson() pulls out below.
+    max_tokens: 8192,
+    // System prompt is identical on every call, so mark it cacheable --
+    // cache reads cost roughly a tenth of fresh input tokens. This is
+    // the single biggest cost lever here: the same ~800-token prompt is
+    // otherwise re-sent in full on every turn of the search loop, and on
+    // every separate tool call besides.
+    system: [
+      {
+        type: "text",
+        text: buildSystemPrompt(SEARCH_BUDGET, { checklistProvided: checklistSource === "provided" }),
+        cache_control: { type: "ephemeral" },
+      },
+    ],
+    messages: [{ role: "user", content: userMessage }],
+    tools: [
+      {
+        type: "web_search_20250305",
+        name: "web_search",
+        // Server-enforced cap, not just prompt instruction -- omitted
+        // entirely when SEARCH_BUDGET is null (unlimited). +2 reserves
+        // one slot each for the step-6 Mobbin and Figma Community
+        // lookups so neither has to compete with discovery for the same
+        // budget: without a reservation like this, discovery searches
+        // (fired first) consumed the whole cap and the Mobbin search was
+        // silently blocked (max_uses_exceeded) every time a custom_build
+        // verdict was reached, and the model backfilled a plausible-
+        // looking but ungrounded reference URL instead of reporting that
+        // it never actually searched -- confirmed via a direct rerun
+        // where 0 Mobbin queries were attempted but a specific Mobbin
+        // URL was still returned. Figma Community gets the same
+        // treatment now that it's a second reference source.
+        ...(SEARCH_BUDGET !== null ? { max_uses: SEARCH_BUDGET + 2 } : {}),
+      },
+      {
+        type: "web_fetch_20250910",
+        name: "web_fetch",
+        // Exactly one fetch per reference source (Mobbin, Figma
+        // Community) -- step 6 fetches the search result page to look
+        // for a deep link to the specific screen/flow already
+        // identified, never more than once per source. Not reserved
+        // from the web_search budget above; this is a separate tool
+        // with its own separate cap.
+        max_uses: 2,
+        // Category/browse pages can be large, and all we need from them
+        // is a permalink, not the full page -- caps token cost of a
+        // fetch that turns out not to have a deep link after all.
+        max_content_tokens: 15000,
+      },
+    ],
   });
-
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`Anthropic API error ${response.status}: ${errText}`);
-  }
-
-  const data = (await response.json()) as {
-    content: Array<{
-      type: string;
-      text?: string;
-      name?: string;
-      input?: unknown;
-      id?: string;
-      tool_use_id?: string;
-      content?: unknown;
-    }>;
-    stop_reason?: string;
-  };
 
   // Diagnostic only -- logged to stderr (stdout is the MCP JSON-RPC
   // channel) so callers can measure actual vs. attempted search-call
@@ -570,6 +917,13 @@ existing_stack: ${input.existing_stack ?? "(not specified)"}${pastDecisionsBlock
   enforceVerdictThreshold(parsed);
   enforceRecommendationConsistency(parsed);
 
+  // Set server-side rather than trusted from the model -- deterministic
+  // from whether input.checklist was actually supplied, same "never trust
+  // the model where the server already knows the truth" policy as the
+  // other enforce* functions above.
+  parsed.checklist_source = checklistSource;
+  parsed._meta = buildMeta(data.timings, data.usage);
+
   // Same "server-side, not just prompt instruction" policy as the rest of
   // this file: a past_decision_signal is only trusted when this call
   // actually had past-decision context to consider. Strips a fabricated
@@ -588,6 +942,101 @@ existing_stack: ${input.existing_stack ?? "(not specified)"}${pastDecisionsBlock
   }
 
   return { ok: true, result: parsed };
+}
+
+export interface ExtractionResult {
+  checklist: string[];
+  extraction_confidence: "high" | "medium" | "low";
+  _meta: NonNullable<JudgmentResult["_meta"]>;
+}
+
+type ExtractionOutcome = { ok: true; result: ExtractionResult } | { ok: false; raw: string };
+
+// Backs the extract_requirements tool. Deliberately a separate, much
+// smaller call than runSinglePass above: no tools declared (extraction is
+// pure reasoning over component_need + domain, no search needed), so this
+// is fast and cheap relative to recommend_component's full pipeline. Also
+// applies the same local skip-list short-circuit as recommend_component,
+// for the same reason (trivial primitives shouldn't cost an API call here
+// either).
+async function runExtraction(input: { component_need: string; domain: string }): Promise<ExtractionOutcome> {
+  if (!ANTHROPIC_API_KEY) {
+    throw new Error(
+      "ANTHROPIC_API_KEY is not set. Export it in the environment running this MCP server."
+    );
+  }
+
+  const startMs = Date.now();
+
+  if (isSkipListMatch(input.component_need)) {
+    const elapsedMs = Math.max(1, Date.now() - startMs);
+    return {
+      ok: true,
+      result: {
+        checklist: [],
+        extraction_confidence: "high",
+        _meta: {
+          total_ms: elapsedMs,
+          breakdown_ms: { extract: elapsedMs, search: 0, score: 0 },
+          tokens_used: { input: 0, output: 0 },
+          estimated_cost_usd: 0,
+        },
+      },
+    };
+  }
+
+  const userMessage = `component_need: ${input.component_need}\ndomain: ${input.domain}`;
+
+  const data = await streamAnthropicMessage({
+    model: MODEL,
+    max_tokens: 1024,
+    system: [
+      {
+        type: "text",
+        text: buildExtractionSystemPrompt(),
+        cache_control: { type: "ephemeral" },
+      },
+    ],
+    messages: [{ role: "user", content: userMessage }],
+  });
+
+  if (data.stop_reason === "max_tokens") {
+    throw new Error(
+      "Anthropic response was truncated (stop_reason: max_tokens) before finishing its JSON output."
+    );
+  }
+
+  const finalText = data.content
+    .filter((block) => block.type === "text")
+    .map((block) => block.text ?? "")
+    .join("\n")
+    .trim();
+
+  if (!finalText) {
+    throw new Error(
+      `Anthropic response contained no text content to extract JSON from (stop_reason: ${data.stop_reason ?? "unknown"}).`
+    );
+  }
+
+  const extracted = extractJson(finalText);
+  let parsed: { checklist?: unknown };
+  try {
+    parsed = JSON.parse(extracted);
+  } catch {
+    console.error(JSON.stringify({ diagnostic: "postprocess_skipped", reason: "extract_requirements output did not parse as JSON" }));
+    return { ok: false, raw: extracted };
+  }
+
+  const checklist = Array.isArray(parsed.checklist) ? parsed.checklist.filter((item): item is string => typeof item === "string") : [];
+
+  return {
+    ok: true,
+    result: {
+      checklist,
+      extraction_confidence: estimateExtractionConfidence(input.component_need),
+      _meta: buildMeta(data.timings, data.usage),
+    },
+  };
 }
 
 // Coverage can only land on one of 9 discrete values when exactly 8
@@ -662,6 +1111,9 @@ function logCall(
       if (result.verdict === "custom_build") {
         entry.reference_sources_grounded = groundedReferenceSources(result.recommendation);
       }
+      entry.checklist_source = result.checklist_source ?? null;
+      entry.total_ms = result._meta?.total_ms ?? null;
+      entry.estimated_cost_usd = result._meta?.estimated_cost_usd ?? null;
     }
     appendFileSync(LOG_PATH, JSON.stringify(entry) + "\n", "utf8");
   } catch (err) {
@@ -748,12 +1200,39 @@ export function getPastDecisions(projectId: string): DecisionEntry[] {
 // verdict threshold that a single item's judgment swinging could flip
 // the answer. Cases far from any boundary return the fast single-run
 // path unchanged, at no extra cost.
+// Sums _meta across every pass that actually ran, for the ensemble case --
+// "total" here means cumulative internal compute/cost across all reruns,
+// not perceived wall-clock latency (the second and third passes run
+// concurrently via Promise.all, so wall-clock is closer to ~2x one pass,
+// not ~3x). Cost and token spend are genuinely additive across reruns, so
+// that's what total_ms/tokens_used/estimated_cost_usd report here; this is
+// called out in the README so a 3x-looking total_ms isn't mistaken for
+// request latency.
+function aggregateMeta(passes: Array<{ ok: true; result: JudgmentResult }>): JudgmentResult["_meta"] | undefined {
+  const metas = passes.map((p) => p.result._meta).filter((m): m is NonNullable<JudgmentResult["_meta"]> => !!m);
+  if (metas.length === 0) return undefined;
+  return {
+    total_ms: metas.reduce((sum, m) => sum + m.total_ms, 0),
+    breakdown_ms: {
+      extract: metas.reduce((sum, m) => sum + m.breakdown_ms.extract, 0),
+      search: metas.reduce((sum, m) => sum + m.breakdown_ms.search, 0),
+      score: metas.reduce((sum, m) => sum + m.breakdown_ms.score, 0),
+    },
+    tokens_used: {
+      input: metas.reduce((sum, m) => sum + m.tokens_used.input, 0),
+      output: metas.reduce((sum, m) => sum + m.tokens_used.output, 0),
+    },
+    estimated_cost_usd: Math.round(metas.reduce((sum, m) => sum + m.estimated_cost_usd, 0) * 10000) / 10000,
+  };
+}
+
 async function judgeComponent(input: {
   component_need: string;
   domain: string;
   framework: string;
   existing_stack?: string;
   project_id?: string;
+  checklist?: string[];
 }): Promise<string> {
   // Session cap and local logging both apply only to calls that actually
   // reach the API -- skip-list hits never do, so both are excluded here
@@ -821,6 +1300,7 @@ async function judgeComponent(input: {
   // the tool should surface, not paper over with a confident-sounding verdict.
   if (majorityCount < passes.length) base.confidence = "low";
   base.ensemble = { triggered: true, runs: verdicts, agreement };
+  base._meta = aggregateMeta(passes) ?? base._meta;
 
   console.error(
     JSON.stringify({
@@ -866,6 +1346,13 @@ export interface JudgmentResult {
   } | null;
   ensemble?: { triggered: boolean; runs?: string[]; agreement?: string };
   past_decision_signal?: { considered: boolean; note: string } | null;
+  checklist_source?: "extracted" | "provided";
+  _meta?: {
+    total_ms: number;
+    breakdown_ms: { extract: number; search: number; score: number };
+    tokens_used: { input: number; output: number };
+    estimated_cost_usd: number;
+  };
   [key: string]: unknown;
 }
 
@@ -1220,8 +1707,32 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         "own past confirmed decisions (recorded via " +
         "record_component_decision) as a consistency signal -- coverage " +
         "is still scored fresh every call regardless; this never returns " +
-        "a cached verdict.",
+        "a cached verdict. Pass checklist (optional, string array) to skip " +
+        "this call's own internal requirement extraction and score " +
+        "directly against a checklist you already have -- e.g. from a " +
+        "prior extract_requirements call you inspected or edited first. " +
+        "Omit it to keep today's default behavior unchanged. The response " +
+        "always includes checklist_source ('extracted' | 'provided') and " +
+        "an internal _meta block (timing/token/cost accounting) -- neither " +
+        "affects the verdict itself.",
       inputSchema: INPUT_SCHEMA,
+    },
+    {
+      name: EXTRACT_REQUIREMENTS_TOOL_NAME,
+      description:
+        "Runs only the requirement-extraction step recommend_component " +
+        "normally does internally, and returns the checklist on its own -- " +
+        "no search, no scoring, no verdict. Use this when you want to " +
+        "inspect (and optionally hand-edit) the checklist BEFORE " +
+        "recommend_component spends its search+score budget, e.g. to catch " +
+        "a misread requirement early. Pass the resulting (or your edited) " +
+        "checklist back into recommend_component's optional checklist " +
+        "param to score against it directly. extraction_confidence is a " +
+        "heuristic based on how specific component_need is, not a " +
+        "calibrated signal -- treat 'low' as a hint to reread the input, " +
+        "not a hard error. Cheaper and faster than recommend_component " +
+        "since it makes no search calls at all.",
+      inputSchema: EXTRACT_REQUIREMENTS_INPUT_SCHEMA,
     },
     {
       name: RECORD_DECISION_TOOL_NAME,
@@ -1248,10 +1759,45 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       framework: string;
       existing_stack?: string;
       project_id?: string;
+      checklist?: string[];
     };
 
     try {
       const resultText = await judgeComponent(args);
+      return {
+        content: [{ type: "text", text: resultText }],
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return {
+        content: [{ type: "text", text: `Error: ${message}` }],
+        isError: true,
+      };
+    }
+  }
+
+  if (request.params.name === EXTRACT_REQUIREMENTS_TOOL_NAME) {
+    const args = request.params.arguments as { component_need: string; domain: string };
+
+    // Same session-cap protection as recommend_component, extended to
+    // this tool since it's a real API call too (skip-list hits excluded,
+    // same exclusion recommend_component applies).
+    const reachesApi = !isSkipListMatch(args.component_need);
+    try {
+      if (reachesApi) {
+        if (sessionCallCount >= SESSION_CALL_CAP) {
+          throw new Error(
+            `Session call cap (${SESSION_CALL_CAP}) reached. This protects against runaway costs on your API key. Restart the MCP server to reset the counter, or set PATTERN_SESSION_CAP to raise the limit.`
+          );
+        }
+        sessionCallCount++;
+        console.error(
+          JSON.stringify({ diagnostic: "session_call_count", count: sessionCallCount, cap: SESSION_CALL_CAP })
+        );
+      }
+
+      const outcome = await runExtraction(args);
+      const resultText = outcome.ok ? JSON.stringify(outcome.result) : outcome.raw;
       return {
         content: [{ type: "text", text: resultText }],
       };

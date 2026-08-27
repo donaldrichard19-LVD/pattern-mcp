@@ -111,6 +111,12 @@ if (customBuildEntries.length > 0) {
   }
 }
 
+const withCost = resultEntries.filter((e) => typeof e.estimated_cost_usd === "number");
+if (withCost.length > 0) {
+  const totalCost = withCost.reduce((sum, e) => sum + e.estimated_cost_usd, 0);
+  console.log(`\nEstimated cost (entries with _meta cost data): $${totalCost.toFixed(4)} total across ${withCost.length} call(s), avg $${(totalCost / withCost.length).toFixed(4)}/call`);
+}
+
 // Repeated component_need calls can indicate a calling agent stuck in a
 // retry loop -- exactly the failure mode the session cap protects
 // against (see README's Session call cap section). Surfacing it here so

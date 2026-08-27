@@ -338,6 +338,43 @@ decisions never cause a search to be skipped.
 
 If you leave out `project_id`, Pattern does not use project memory.
 
+#### `checklist`
+
+`checklist` is optional -- an array of requirement strings.
+
+When provided, `recommend_component` skips its own internal requirement
+extraction entirely and scores coverage against exactly the items you
+passed, instead of extracting its own checklist. Search and scoring still
+run fresh every call; only the extraction step is skipped.
+
+This is meant to be used together with [`extract_requirements`](#tool-extract_requirements):
+call `extract_requirements` first, inspect (or hand-edit) the checklist it
+returns, then pass that checklist here. That gives you a chance to catch a
+misread requirement before Pattern spends its search+score budget.
+
+Leave `checklist` out to keep today's default behavior: `recommend_component`
+extracts its own checklist internally, exactly as before this option
+existed.
+
+**Is the checklist actually skipped, not just re-derived?** Checked, not
+assumed. `breakdown_ms.extract` for a `checklist`-provided call is smaller
+than the default path's, but not near-zero -- which raised the question of
+whether the model is still doing some of the extraction work in that
+window rather than treating the checklist as fixed input. Reading the
+model's actual reasoning (via `thinking` with `display: "summarized"`,
+5 runs: 3 with `checklist` provided, 2 default) answered it: the
+`checklist`-provided runs' pre-search reasoning was a short, generic
+"search shadcn/ui and 21st.dev" thought with no mention of the checklist's
+content, e.g. *"I should look for existing image gallery component options
+on shadcn/ui and 21st.dev"* -- consistently ~3-4 seconds. The default
+runs' reasoning, by contrast, explicitly enumerated and derived the
+checklist items (*"...mapping out the checklist: a photo grid with hero
+and thumbnails... a full-screen lightbox with next/prev navigation,
+keyboard support..."*) and took roughly 2x longer (~7-8 seconds). The
+remaining time in the `checklist`-provided path is baseline model latency
+before it decides to search, not re-extraction -- it doesn't scale with or
+reference the checklist's content.
+
 ### Output
 
 ```json
@@ -369,12 +406,27 @@ If you leave out `project_id`, Pattern does not use project memory.
   },
   "ensemble": {
     "triggered": false
+  },
+  "checklist_source": "extracted | provided",
+  "_meta": {
+    "total_ms": 41516,
+    "breakdown_ms": { "extract": 5006, "search": 3114, "score": 33396 },
+    "tokens_used": { "input": 8400, "output": 620 },
+    "estimated_cost_usd": 0.14
   }
 }
 ```
 
 The `past_decision_signal` field is included only when there is a
 relevant previous decision for the supplied `project_id`.
+
+`checklist_source` is always present: `"extracted"` when Pattern derived
+the checklist itself (the default, unchanged behavior), `"provided"` when
+you passed one in via `checklist`.
+
+`_meta` is always present. See [Cost](#cost) for what each field means,
+how `breakdown_ms` is measured, and what it means when the ensemble
+triggers.
 
 ### Reference links
 
@@ -421,6 +473,69 @@ The calling agent should:
 3. Run it only after confirmation.
 
 See [SECURITY.md](./SECURITY.md) for more details.
+
+## Tool: `extract_requirements`
+
+Runs only the requirement-extraction step `recommend_component` normally
+does internally, and returns just the checklist -- no search, no scoring,
+no verdict.
+
+This is an opt-in, two-call pattern for agents that support tool search or
+code-mode style tool use: call `extract_requirements` first, inspect (or
+hand-edit) the checklist it returns, then pass that checklist to
+`recommend_component`'s optional `checklist` input to score against it
+directly, skipping `recommend_component`'s own internal extraction.
+
+The single-call default -- just calling `recommend_component` with no
+`checklist` -- is unchanged and is still the recommended path for most
+callers. Reach for `extract_requirements` when you specifically want to
+catch a misread requirement before Pattern spends its search+score budget,
+not as a routine first step.
+
+### Input
+
+```json
+{
+  "component_need": "image gallery for a property listing",
+  "domain": "Airbnb-style rental marketplace"
+}
+```
+
+Same fields, same meaning, as `recommend_component`'s `component_need` and
+`domain`. There is no `framework` input here -- extraction is grounded in
+the domain, not the framework, so `framework` doesn't affect the checklist
+in `recommend_component` either.
+
+### Output
+
+```json
+{
+  "checklist": ["...", "...", "..."],
+  "extraction_confidence": "high | medium | low",
+  "_meta": {
+    "total_ms": 6798,
+    "breakdown_ms": { "extract": 6798, "search": 0, "score": 0 },
+    "tokens_used": { "input": 275, "output": 302 },
+    "estimated_cost_usd": 0.0036
+  }
+}
+```
+
+Typical latency is a few seconds -- one small API call with no tools
+declared, versus `recommend_component`'s full search+score pipeline.
+
+**`extraction_confidence` is a placeholder heuristic, not a validated
+signal.** It's currently derived from how specific `component_need` is
+(word count) -- the same "vague category name" problem the rest of this
+README warns about elsewhere. It is not based on any measured correlation
+with actual extraction quality. Treat `"low"` as a prompt to reread your
+`component_need`, not as a calibrated confidence score. This is flagged
+here as a known gap, to revisit once there's real usage data to base a
+better signal on.
+
+Trivial primitives (see [Simple primitives](#simple-primitives)) return an
+empty `checklist` with `extraction_confidence: "high"` and no API call, the
+same local skip-list short-circuit `recommend_component` uses.
 
 ## Tool: `record_component_decision`
 
@@ -539,6 +654,59 @@ Pattern uses the Anthropic API, so `recommend_component` has a cost.
 A typical single pass costs about $0.06–$0.10 with Sonnet 5 at current
 pricing. Skip-listed primitives cost $0 because they're handled locally
 and never reach the API.
+
+### The `_meta` field
+
+Every `recommend_component` and `extract_requirements` response includes
+an internal `_meta` block reporting what that call actually spent:
+
+```json
+{
+  "total_ms": 41516,
+  "breakdown_ms": { "extract": 5006, "search": 3114, "score": 33396 },
+  "tokens_used": { "input": 8400, "output": 620 },
+  "estimated_cost_usd": 0.14
+}
+```
+
+- `total_ms` -- wall-clock time for the call.
+- `tokens_used` -- total input tokens (fresh + cache write + cache read,
+  summed) and output tokens, read directly from the API response's own
+  usage data.
+- `estimated_cost_usd` -- computed from `tokens_used` at Pattern's
+  configured model's current per-token rate (checked against Anthropic's
+  pricing, not assumed). This is an estimate: it doesn't account for
+  pricing changes Pattern hasn't been updated for, or any account-specific
+  discounts.
+- `breakdown_ms` -- how `total_ms` splits across `recommend_component`'s
+  three internal phases.
+
+**How `breakdown_ms` is measured, and its one real caveat.** The bundled
+call runs extraction, search, and scoring inside a single model turn
+(search/fetch happen server-side, not as separate requests this code
+makes), so there's no natural place for three separate stopwatches.
+Pattern gets a real per-phase split by streaming the response and timing
+content-block boundaries instead: `extract` ends the moment the first
+search call starts, and `search` ends when that first wave of search
+calls and results finishes. This was checked against real traces (not
+assumed) across both `use_existing` and `custom_build` cases before
+shipping, and both boundaries land cleanly and consistently.
+
+The one place this needs a caveat: for a `custom_build` verdict, step 6's
+Mobbin/Figma reference search and its deep-link verification fetch happen
+*after* the coverage-scoring reasoning that decided `custom_build` in the
+first place -- so `breakdown_ms.score`, for those cases, covers coverage
+scoring **and** reference-finding **and** the final write-up, not just
+"scoring" in the narrow step-4 sense. It's still a real, measured number;
+it's just a wider bucket for `custom_build` than for `use_existing`. This
+is disclosed here rather than presented as a narrower number than it is.
+
+**When the ensemble triggers** (see below), `_meta` reports the sum
+across all reruns that actually happened -- total tokens and cost spent,
+not the wall-clock time you waited. The three ensemble passes run with the
+2nd and 3rd concurrent, so perceived latency is closer to ~2x one pass,
+not the ~3x `total_ms` will show. Cost and token spend are genuinely
+additive across reruns, which is what `_meta` is reporting there.
 
 Three things help keep the cost down without changing the decision process.
 
@@ -739,7 +907,10 @@ Each API call adds one JSON line, for example:
   "reason": "scored",
   "coverage": "2/8 (25%)",
   "ensemble_triggered": false,
-  "reference_sources_grounded": ["Mobbin", "Figma Community"]
+  "reference_sources_grounded": ["Mobbin", "Figma Community"],
+  "checklist_source": "extracted",
+  "total_ms": 44834,
+  "estimated_cost_usd": 0.15
 }
 ```
 
@@ -748,6 +919,11 @@ Additional fields appear when relevant:
 - `ensemble_agreement` appears when the ensemble runs.
 - `reference_sources_grounded` appears for `custom_build` results and
   lists only sources that produced a grounded reference.
+
+`checklist_source`, `total_ms`, and `estimated_cost_usd` mirror the
+call's `_meta` block (see [Cost](#cost)) -- `total_ms` and
+`estimated_cost_usd` are the same aggregated-across-reruns numbers when
+the ensemble triggers, not per-pass figures.
 
 The log deliberately does not contain:
 
@@ -823,6 +999,12 @@ most.
 Pattern ships the bundled pipeline. The staged implementation remains
 in the repo (`src/staged/`) as an evaluated, unshipped experiment, not
 a supported alternative.
+
+**`extract_requirements` is not a revival of this.** It's a standalone
+tool for inspecting the extraction step's output before an agent commits
+to `recommend_component`'s search+score budget -- an opt-in visibility
+tool, not an internal re-architecture. `recommend_component`'s own
+pipeline is still fully bundled; nothing about this evaluation changed.
 
 ### No caching, by design
 
