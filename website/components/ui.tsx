@@ -1,8 +1,13 @@
 "use client";
 
+import posthog from "posthog-js";
 import { useState, type CSSProperties, type ReactNode } from "react";
 import { useReveal } from "./hooks";
 import { MONO, PANEL } from "./tokens";
+
+export function trackClick(event: string, props?: Record<string, string>) {
+  posthog.capture(event, props);
+}
 
 export function Reveal({
   delay = 0,
@@ -37,6 +42,7 @@ export function CopyBlock({ lines, label, height }: { lines: string[]; label: st
     if (navigator.clipboard) navigator.clipboard.writeText(text);
     setDone(true);
     setTimeout(() => setDone(false), 1400);
+    trackClick("install_command_copied", { label });
   };
   return (
     <div style={{ ...PANEL, overflow: "hidden" }}>

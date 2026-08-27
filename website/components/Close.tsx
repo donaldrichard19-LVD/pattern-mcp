@@ -2,7 +2,7 @@
 
 import { DOCS, REPO } from "./constants";
 import { H2, SECTION } from "./tokens";
-import { Button, Divider, Mark, Wordmark } from "./ui";
+import { Button, Divider, Mark, Wordmark, trackClick } from "./ui";
 import { Reveal } from "./ui";
 
 export function Close() {
@@ -14,10 +14,23 @@ export function Close() {
         </Reveal>
         <Reveal delay={100}>
           <div className="pt-stack" style={{ display: "flex", gap: 12, flexShrink: 0, flexWrap: "wrap" }}>
-            <Button size="lg" onClick={() => window.open(REPO, "_blank")}>
+            <Button
+              size="lg"
+              onClick={() => {
+                trackClick("cta_click", { label: "Get the repo", destination: REPO });
+                window.open(REPO, "_blank");
+              }}
+            >
               Get the repo
             </Button>
-            <Button variant="secondary" size="lg" onClick={() => window.open(DOCS, "_blank")}>
+            <Button
+              variant="secondary"
+              size="lg"
+              onClick={() => {
+                trackClick("cta_click", { label: "Read the docs", destination: DOCS });
+                window.open(DOCS, "_blank");
+              }}
+            >
               Read the docs
             </Button>
           </div>
