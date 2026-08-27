@@ -5,13 +5,14 @@ import type { ReactNode } from "react";
 import { BODY, H2, SECTION } from "./tokens";
 import { Reveal } from "./ui";
 
-const CAPS: { icon: ReactNode; h: string; p: [string, string] }[] = [
+const CAPS: { icon: ReactNode; h: string; p: [string, string] | [string, string, string] }[] = [
   {
     icon: <ListChecks size={18} />,
     h: "Checks requirements against real evidence",
     p: [
       "Pattern breaks your UI need into specific requirements and checks each one against what it actually finds. It then calculates coverage and uses clear thresholds to recommend an existing component or a custom build.",
       "This is not a similarity score. It is a requirement-by-requirement judgment.",
+      "Call extract_requirements on its own to see—or correct—that checklist before Pattern spends its search-and-score budget on it.",
     ],
   },
   {
@@ -50,8 +51,8 @@ const CAPS: { icon: ReactNode; h: string; p: [string, string] }[] = [
     icon: <Receipt size={18} />,
     h: "Makes costs visible",
     p: [
-      "Pattern keeps a local log of every API call, limits each session to 40 calls by default, caches repeated instructions, and uses a bounded search budget.",
-      "Simple primitives are handled locally, so they never reach the API.",
+      "Every response carries its own accounting: time spent, tokens used, and an estimated dollar cost—not just an aggregate budget you have to trust.",
+      "Pattern also keeps a local log of every call, limits each session to 40 calls by default, caches repeated instructions, and uses a bounded search budget. Simple primitives are handled locally, so they never reach the API.",
     ],
   },
 ];

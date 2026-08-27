@@ -10,6 +10,7 @@ const INPUT_ROWS = [
   ["framework", "string", "e.g. React + Tailwind"],
   ["existing_stack", "string", "e.g. already using shadcn/ui"],
   ["project_id", "string, optional", "Enables per-project decision memory. Omit to skip memory entirely"],
+  ["checklist", "string[], optional", "Skip internal extraction and score against this instead. Pairs with extract_requirements"],
 ];
 
 const OUTPUT_ROWS = [
@@ -22,6 +23,19 @@ const OUTPUT_ROWS = [
   ["reference.url_type", "deep_link | entry_point", "Whether the URL is the actual screen or a browse page"],
   ["ensemble", "{ triggered, runs, agreement }", "Present on every response; runs and agreement only when it fired"],
   ["past_decision_signal", "{ considered, note }", "Only when project_id was passed and a real past decision applied"],
+  ["checklist_source", "extracted | provided", "Which path actually produced the checklist that got scored"],
+  ["_meta", "{ total_ms, breakdown_ms, tokens_used, estimated_cost_usd }", "Real timing, tokens, and cost for this call. Summed across all 3 runs when the ensemble fires"],
+];
+
+const EXTRACT_INPUT_ROWS = [
+  ["component_need", "string, required", "Same field as recommend_component's input"],
+  ["domain", "string, required", "Extraction is grounded in this, not the component name alone"],
+];
+
+const EXTRACT_OUTPUT_ROWS = [
+  ["checklist", "string[]", "Exactly 8 items, ranked most-important first, unless the need hit the skip-list"],
+  ["extraction_confidence", "high | medium | low", "A word-count heuristic today, not a calibrated signal. Treat low as a prompt to reread the input"],
+  ["_meta", "{ total_ms, tokens_used, estimated_cost_usd }", "No search happens here, so this is typically a few seconds and a fraction of a cent"],
 ];
 
 const CONFIG_ROWS = [
@@ -100,6 +114,18 @@ export function Reference() {
           <div style={{ display: "grid", gap: 12 }}>
             <div style={LABEL}>recommend_component output</div>
             <Table head={["Field", "Values", "Notes"]} rows={OUTPUT_ROWS} mono={1} />
+          </div>
+        </Reveal>
+        <Reveal>
+          <div style={{ display: "grid", gap: 12 }}>
+            <div style={LABEL}>extract_requirements input — optional, runs extraction on its own</div>
+            <Table head={["Field", "Type", "Notes"]} rows={EXTRACT_INPUT_ROWS} mono={1} />
+          </div>
+        </Reveal>
+        <Reveal>
+          <div style={{ display: "grid", gap: 12 }}>
+            <div style={LABEL}>extract_requirements output</div>
+            <Table head={["Field", "Values", "Notes"]} rows={EXTRACT_OUTPUT_ROWS} mono={1} />
           </div>
         </Reveal>
         <Reveal>
