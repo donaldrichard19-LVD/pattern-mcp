@@ -14,10 +14,13 @@ whether to:
 Pattern is designed for agents to use **while they are building**, not
 for people to browse.
 
-It exposes two tools:
+It exposes three tools:
 
 - `recommend_component` — evaluates a UI component need and returns a
   structured recommendation.
+- `extract_requirements` — runs just the requirement-extraction step on
+  its own, so you can inspect or hand-edit the checklist before
+  `recommend_component` spends its search+score budget on it.
 - `record_component_decision` — records what the agent actually did so
   future recommendations in the same project can take that decision into
   account.
