@@ -103,8 +103,17 @@ Results that are clearly inside a threshold don't trigger extra runs — see
 
 These are handled locally without an API call:
 
-`button`, `input`, `checkbox`, `label`, `badge`, `spinner`, `tooltip`,
-`avatar`, `icon`
+| Primitive | Use it for |
+| --- | --- |
+| `button` | A clickable action trigger |
+| `input` | A single-line text entry field |
+| `checkbox` | A binary on/off toggle |
+| `label` | A caption for a field or control |
+| `badge` | A small status or count indicator |
+| `spinner` | An indeterminate loading indicator |
+| `tooltip` | A contextual hover/focus hint |
+| `avatar` | A user or entity image, or initials |
+| `icon` | A single glyph or symbol |
 
 This keeps trivial requests fast and avoids unnecessary API usage.
 
