@@ -8,7 +8,7 @@
 npm install pattern-mcp
 ```
 
-See [Setup](#setup) below to add your Anthropic API key and connect
+See [Quick Start](#quick-start) below to add your Anthropic API key and connect
 Pattern to your MCP client.
 
 Instead of returning a list of search results, Pattern looks at what you
@@ -135,7 +135,7 @@ The model returns structured JSON. Pattern then applies important checks
 itself, including recalculating coverage and applying the decision
 threshold.
 
-## Setup
+## Quick Start
 
 ### 1. Install
 
