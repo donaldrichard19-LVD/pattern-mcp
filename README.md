@@ -11,6 +11,8 @@ npm install pattern-mcp
 See [Quick Start](#quick-start) below to add your Anthropic API key and connect
 Pattern to your MCP client.
 
+## What Pattern Does
+
 Instead of returning a list of search results, Pattern looks at what you
 need, checks real components against that need, and tells the agent
 whether to:
