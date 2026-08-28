@@ -1,7 +1,15 @@
 # Pattern
 
-Pattern is an MCP server that helps coding agents make better UI component
-decisions.
+![Pattern](docs/images/readme-hero.png)
+
+## Install
+
+```bash
+npm install pattern-mcp
+```
+
+See [Setup](#setup) below to add your Anthropic API key and connect
+Pattern to your MCP client.
 
 Instead of returning a list of search results, Pattern looks at what you
 need, checks real components against that need, and tells the agent
@@ -26,6 +34,8 @@ It exposes three tools:
   account.
 
 ## How it works
+
+![How it works](docs/images/how-it-works.png)
 
 For each `recommend_component` call, Pattern:
 
