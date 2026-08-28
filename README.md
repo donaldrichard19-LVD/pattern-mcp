@@ -31,7 +31,8 @@ For each `recommend_component` call, Pattern:
 
 1. Checks whether the need is a simple primitive that doesn't require a
    search.
-2. Turns the request into a set of specific requirements.
+2. Turns the request into a set of specific requirements, unless a
+   checklist was already supplied (see [`checklist`](#checklist)).
 3. Searches for matching shadcn/ui and 21st.dev components.
 4. Checks each candidate against the requirements using evidence from the
    actual component.
@@ -55,8 +56,15 @@ A result can also be:
 finding a candidate is different from finding candidates that don't cover
 the requirements.
 
-Every result includes `computed_at` because coverage is a snapshot of the
-search at that point in time, not a permanent fact.
+If `project_id` is supplied, Pattern also checks for past confirmed
+decisions on that project and factors them in as a consistency signal —
+never a rule that overrides a genuinely better match found in the current
+search.
+
+Every result includes `computed_at`, because coverage is a snapshot of the
+search at that point in time, not a permanent fact. Every result also
+includes `_meta` — the timing and token cost of that specific call (see
+[Cost](#cost)).
 
 ### Boundary-risk checks
 
