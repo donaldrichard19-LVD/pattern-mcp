@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Github, Menu, X } from "lucide-react";
+import { REPO } from "./constants";
 import { useIsMobile } from "./hooks";
 import { SECTION } from "./tokens";
 import { Mark, Wordmark } from "./ui";
@@ -11,7 +12,7 @@ const NAV: [string, string][] = [
   ["How it works", "#demo"],
   ["Capabilities", "#capabilities"],
   ["Reference", "#reference"],
-  ["Docs", "#docs"],
+  ["Docs", REPO],
 ];
 
 export function TopBar() {
