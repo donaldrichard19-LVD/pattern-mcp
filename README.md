@@ -19,8 +19,7 @@ whether to:
 - **Build a custom component**, using a real product reference from
   Mobbin and/or Figma Community
 
-Pattern is designed for agents to use **while they are building**, not
-for people to browse.
+Pattern is designed for agents to use **while they are building**.
 
 It exposes three tools:
 
