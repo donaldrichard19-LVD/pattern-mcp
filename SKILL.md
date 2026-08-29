@@ -79,7 +79,9 @@ exception off and force every call to score fresh again.
 
 Every `recommend_component` and `extract_requirements` response carries an
 `_meta` block (`total_ms`, `breakdown_ms`, `tokens_used`,
-`estimated_cost_usd`) so you can see what a call actually spent. See
-[README.md's Cost section](./README.md#cost) for what each field means and
-its one documented caveat (the `score` bucket is wider for `custom_build`
-verdicts than for `use_existing` ones).
+`estimated_cost_usd`) so you can see what a call actually spent. **Surface
+`_meta.estimated_cost_usd` to the user after the call** -- it's real spend
+against their own API key, not internal bookkeeping to keep from them.
+See [README.md's Cost section](./README.md#cost) for what each field means
+and its one documented caveat (the `score` bucket is wider for
+`custom_build` verdicts than for `use_existing` ones).

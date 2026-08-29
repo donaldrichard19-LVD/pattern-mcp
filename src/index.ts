@@ -2093,7 +2093,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         "Omit it to keep today's default behavior unchanged. The response " +
         "always includes checklist_source ('extracted' | 'provided') and " +
         "an internal _meta block (timing/token/cost accounting) -- neither " +
-        "affects the verdict itself.",
+        "affects the verdict itself. Surface _meta.estimated_cost_usd to " +
+        "the user after the call (e.g. 'that judgment cost ~$0.12'), the " +
+        "same way install_command is shown before running -- it's real " +
+        "spend against the user's own API key, not internal bookkeeping " +
+        "to keep from them.",
       inputSchema: INPUT_SCHEMA,
     },
     {
@@ -2110,7 +2114,9 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         "heuristic based on how specific component_need is, not a " +
         "calibrated signal -- treat 'low' as a hint to reread the input, " +
         "not a hard error. Cheaper and faster than recommend_component " +
-        "since it makes no search calls at all.",
+        "since it makes no search calls at all. Also returns an internal " +
+        "_meta block -- surface _meta.estimated_cost_usd to the user " +
+        "after the call, same as recommend_component.",
       inputSchema: EXTRACT_REQUIREMENTS_INPUT_SCHEMA,
     },
     {

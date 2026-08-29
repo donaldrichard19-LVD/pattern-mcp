@@ -852,7 +852,14 @@ also costs $0, for the same reason -- no API call happens.
 ### The `_meta` field
 
 Every `recommend_component` and `extract_requirements` response includes
-an internal `_meta` block reporting what that call actually spent:
+an internal `_meta` block reporting what that call actually spent. This
+is not shown to the user automatically -- the calling agent has to
+surface it, the same way it's separately instructed to show
+`install_command` before running it (see
+[above](#installation-commands-are-not-trusted)). Both tool descriptions
+say so explicitly: surface `_meta.estimated_cost_usd` after the call,
+since it's real spend against the user's own API key, not internal
+bookkeeping.
 
 ```json
 {
