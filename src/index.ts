@@ -495,6 +495,15 @@ const RECORD_DECISION_INPUT_SCHEMA = {
       type: "string",
       description: "Optional. ISO 8601 timestamp of the decision. Defaults to the current time if omitted.",
     },
+    time_saved_minutes: {
+      type: "number",
+      description:
+        "Optional. Your own estimate, in minutes, of the time this decision saved you by having " +
+        "Pattern's verdict instead of researching candidates and judging fit yourself from scratch. " +
+        "This is self-reported by the calling agent -- Pattern has no way to measure a counterfactual, " +
+        "so it never computes this itself (unlike _meta, which is Pattern's own real cost/latency). " +
+        "Omit if you don't have a meaningful estimate; never guess a number just to fill the field.",
+    },
   },
   required: ["project_id", "component_need", "action", "source"],
 } as const;
@@ -538,7 +547,9 @@ Search shadcn/ui, 21st.dev, and ReUI (reui.io) for components matching the need,
 If search returns zero real candidates -- not just weak matches, but nothing relevant at all (e.g. only vendor policy pages, unrelated components) -- stop here and return verdict "custom_build" with reason "no_candidates_found". Do not fabricate a coverage score in this case; omit requirements_checked and coverage entirely.
 
 4. SCORE COVERAGE AGAINST THE CHECKLIST
-For each real candidate, evaluate against the checklist using actual evidence you can find about the component's real props/structure/code -- not just its marketing description, since descriptions can claim functionality the component doesn't actually have. Mark each requirement met or not-met with a one-line reason. Compute coverage = (requirements met) / (total requirements) for the best-fitting candidate. Base this only on your web_search results from step 3 -- do not use the web_fetch tool here or anywhere in steps 2-5; it is reserved entirely for step 6's reference deep-link check below, and using it earlier can starve that reserved budget.
+For each real candidate, evaluate against the checklist using actual evidence you can find about the component's real props/structure/code -- not just its marketing description, since descriptions can claim functionality the component doesn't actually have. Mark each requirement met or not-met with a one-line reason. Compute coverage = (requirements met) / (total requirements) for the best-fitting candidate.
+
+Before finalizing that coverage score, fetch the best-fitting candidate's own real docs/source page ONCE with the web_fetch tool -- a reserved slot exists for exactly this, separate from step 6's reference-verification budget below, so using it here will not starve that reserved budget. Re-check every requirement against what that fetched page actually says, not just the web_search snippet/description you started with -- a search result can describe functionality a component doesn't actually have, or omit a real prop/feature it does have, and only the fetched page is real evidence either way. Only fetch a URL that a real search result in step 3 actually returned -- never construct or guess one. If the fetch fails, or there's no confirmed URL to fetch, score from the web_search evidence alone and say so in the affected items' evidence text. This one candidate-verification fetch is the only exception to "no web_fetch in steps 2-5" -- it remains reserved for step 6's reference deep-link check otherwise.
 
 5. APPLY VERDICT THRESHOLDS
 coverage >= 80% -> verdict "use_existing", confidence "high"
@@ -763,13 +774,20 @@ existing_stack: ${input.existing_stack ?? "(not specified)"}${checklistBlock}${p
       {
         type: "web_fetch_20250910",
         name: "web_fetch",
-        // Exactly one fetch per reference source (Mobbin, Figma
-        // Community) -- step 6 fetches the search result page to look
-        // for a deep link to the specific screen/flow already
-        // identified, never more than once per source. Not reserved
-        // from the web_search budget above; this is a separate tool
-        // with its own separate cap.
-        max_uses: 2,
+        // 3 reserved slots, same "reserve, don't let an earlier step
+        // starve a later one's budget" pattern as web_search's
+        // SEARCH_BUDGET + 2 above: 1 for step 4's single candidate-
+        // verification fetch (re-checking the best-fitting candidate's
+        // real docs against the checklist, added to catch evidence
+        // errors search-snippet-only scoring was producing -- confirmed
+        // live: an invented feature claim and a missed real one, both on
+        // the same case, both from trusting search snippets over the
+        // actual page), and 2 for step 6's Mobbin + Figma Community
+        // deep-link checks (exactly one fetch per reference source,
+        // never more than once per source). Not reserved from the
+        // web_search budget above; this is a separate tool with its own
+        // separate cap.
+        max_uses: 3,
         // Category/browse pages can be large, and all we need from them
         // is a permalink, not the full page -- caps token cost of a
         // fetch that turns out not to have a deep link after all.
@@ -924,6 +942,7 @@ existing_stack: ${input.existing_stack ?? "(not specified)"}${checklistBlock}${p
   // other enforce* functions above.
   parsed.checklist_source = checklistSource;
   parsed._meta = buildMeta(data.timings, data.usage);
+  parsed._meta.scoring_fetch = findScoringFetch(fetchCallDetails);
 
   // Same "server-side, not just prompt instruction" policy as the rest of
   // this file: a past_decision_signal is only trusted when this call
@@ -1134,6 +1153,9 @@ export interface DecisionEntry {
   action: "installed" | "custom_built";
   source: string;
   timestamp: string;
+  // Self-reported by the calling agent, never computed by Pattern -- see
+  // RECORD_DECISION_INPUT_SCHEMA's time_saved_minutes description.
+  time_saved_minutes?: number;
 }
 
 type MemoryFile = Record<string, DecisionEntry[]>;
@@ -1172,6 +1194,7 @@ function recordDecision(input: {
   action: "installed" | "custom_built";
   source: string;
   timestamp?: string;
+  time_saved_minutes?: number;
 }): DecisionEntry {
   const entry: DecisionEntry = {
     component_need: input.component_need,
@@ -1179,6 +1202,13 @@ function recordDecision(input: {
     action: input.action,
     source: input.source,
     timestamp: input.timestamp ?? new Date().toISOString(),
+    // Finite-number guard only -- no range/sanity clamp, since a caller's
+    // own estimate isn't Pattern's to second-guess. NaN/Infinity would
+    // corrupt memory.json's JSON on write, so those alone are rejected.
+    time_saved_minutes:
+      typeof input.time_saved_minutes === "number" && Number.isFinite(input.time_saved_minutes)
+        ? input.time_saved_minutes
+        : undefined,
   };
   const memory = readMemory();
   const existing = memory[input.project_id] ?? [];
@@ -1301,7 +1331,15 @@ async function judgeComponent(input: {
   // the tool should surface, not paper over with a confident-sounding verdict.
   if (majorityCount < passes.length) base.confidence = "low";
   base.ensemble = { triggered: true, runs: verdicts, agreement };
+  // Captured before aggregateMeta overwrites base._meta (same object as
+  // winningPass.result._meta) with a fresh summed-across-passes object --
+  // scoring_fetch isn't summed like cost/tokens, it describes whichever
+  // single pass's evidence actually became requirements_checked/
+  // recommendation below, so it must come from the winning pass
+  // specifically, not be dropped by aggregateMeta not knowing about it.
+  const winningScoringFetch = winningPass.result._meta?.scoring_fetch;
   base._meta = aggregateMeta(passes) ?? base._meta;
+  if (base._meta) base._meta.scoring_fetch = winningScoringFetch;
 
   console.error(
     JSON.stringify({
@@ -1353,6 +1391,15 @@ export interface JudgmentResult {
     breakdown_ms: { extract: number; search: number; score: number };
     tokens_used: { input: number; output: number };
     estimated_cost_usd: number;
+    // Diagnostic only, mirrors search_calls/fetch_calls stderr diagnostics
+    // -- whether step 4's single candidate-verification fetch (see
+    // buildSystemPrompt step 4) actually happened and succeeded. No
+    // requirement-level auto-correction is attempted when it didn't (no
+    // safe fallback value exists for an unverified met/not-met judgment,
+    // unlike step 6's reference URLs which fall back to the category
+    // page) -- this exists so evals can measure whether fetch-grounded
+    // scoring actually ran, not to fix the response itself.
+    scoring_fetch?: { attempted: boolean; succeeded: boolean; url: string | null };
   };
   [key: string]: unknown;
 }
@@ -1515,6 +1562,24 @@ export const DOMAIN_FOR_SOURCE_KEYWORD: Record<string, string> = {
   mobbin: "mobbin.com",
   figma: "figma.com",
 };
+
+// Distinguishes step 4's single candidate-verification fetch from step 6's
+// Mobbin/Figma reference fetches -- both use the same web_fetch tool and
+// the same reserved budget's underlying diagnostics, so this identifies
+// step 4's fetch as whichever call (if any) targets a domain that ISN'T a
+// reference source. Diagnostic only, feeding _meta.scoring_fetch -- never
+// used to correct or invalidate individual requirement judgments (see that
+// field's own comment for why there's no safe fallback to correct to).
+export function findScoringFetch(
+  fetchCallDetails: Array<{ url?: string; succeeded: boolean }>
+): { attempted: boolean; succeeded: boolean; url: string | null } {
+  const referenceDomains = Object.values(DOMAIN_FOR_SOURCE_KEYWORD);
+  const candidateFetch = fetchCallDetails.find(
+    (d) => d.url && !referenceDomains.some((domain) => d.url!.includes(domain))
+  );
+  if (!candidateFetch) return { attempted: false, succeeded: false, url: null };
+  return { attempted: true, succeeded: candidateFetch.succeeded, url: candidateFetch.url ?? null };
+}
 
 // Figma Community's own URL structure makes a "/community/file/<id>/<slug>"
 // URL inherently specific to one file -- unlike Mobbin's "/explore/..."
@@ -1747,7 +1812,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         "calls with the same project_id will see this decision as a " +
         "consistency signal, not a binding rule. Use a stable project_id " +
         "(e.g. the project's directory path or name) so decisions are " +
-        "grouped correctly and never mixed with another project's.",
+        "grouped correctly and never mixed with another project's. Pass " +
+        "time_saved_minutes (optional) if you have a genuine estimate of how " +
+        "much time this decision saved you -- this is your own self-reported " +
+        "number, never computed or verified by Pattern.",
       inputSchema: RECORD_DECISION_INPUT_SCHEMA,
     },
   ],
@@ -1820,6 +1888,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       action: "installed" | "custom_built";
       source: string;
       timestamp?: string;
+      time_saved_minutes?: number;
     };
 
     try {

@@ -600,7 +600,8 @@ Anthropic API call.
   "domain": "Airbnb-style rental marketplace",
   "action": "custom_built",
   "source": "custom",
-  "timestamp": "2026-08-25T14:32:00.000Z"
+  "timestamp": "2026-08-25T14:32:00.000Z",
+  "time_saved_minutes": 25
 }
 ```
 
@@ -609,6 +610,15 @@ Anthropic API call.
 - `action` must be `"installed"` or `"custom_built"`.
 - `source` can be `"shadcn"`, `"21st.dev"`, `"reui"`, or `"custom"`.
 - `timestamp` is optional. If omitted, Pattern uses the current time.
+- `time_saved_minutes` is optional -- the calling agent's own estimate,
+  in minutes, of how much time this decision saved by having Pattern's
+  verdict instead of researching candidates and judging fit from scratch.
+  This is entirely self-reported. Pattern has no way to measure a
+  counterfactual ("how long would this have taken without Pattern?"), so
+  unlike `_meta` (Pattern's own real cost/latency for the call that
+  produced the verdict), this number is never computed or verified --
+  it's just recorded as-given. Omit it rather than guess a number to fill
+  the field.
 
 ### Output
 
@@ -644,11 +654,15 @@ The file is organized by project:
       "domain": "Airbnb-style rental marketplace",
       "action": "custom_built",
       "source": "custom",
-      "timestamp": "2026-08-25T14:32:00.000Z"
+      "timestamp": "2026-08-25T14:32:00.000Z",
+      "time_saved_minutes": 25
     }
   ]
 }
 ```
+
+`time_saved_minutes` is omitted from an entry entirely when the calling
+agent didn't provide one -- it's never backfilled or estimated by Pattern.
 
 Each project keeps its 50 most recent decisions. Older entries are
 removed as new ones are added.
@@ -704,7 +718,8 @@ an internal `_meta` block reporting what that call actually spent:
   "total_ms": 41516,
   "breakdown_ms": { "extract": 5006, "search": 3114, "score": 33396 },
   "tokens_used": { "input": 8400, "output": 620 },
-  "estimated_cost_usd": 0.14
+  "estimated_cost_usd": 0.14,
+  "scoring_fetch": { "attempted": true, "succeeded": true, "url": "https://ui.shadcn.com/docs/components/..." }
 }
 ```
 
@@ -719,6 +734,14 @@ an internal `_meta` block reporting what that call actually spent:
   discounts.
 - `breakdown_ms` -- how `total_ms` splits across `recommend_component`'s
   three internal phases.
+- `scoring_fetch` -- whether step 4's single candidate-verification fetch
+  (see [Fetch-grounded scoring](#fetch-grounded-scoring-and-reference-verification)
+  below) actually happened for this response. `url` is `null` when
+  `attempted` is `false` (no real candidate to verify, e.g. `reason:
+  "no_candidates_found"` or `"skip_list"`). This is a diagnostic only --
+  Pattern never uses it to auto-correct `requirements_checked` after the
+  fact, since there's no safe fallback value for an unverified met/not-met
+  call the way there is for a reference URL.
 
 **How `breakdown_ms` is measured, and its one real caveat.** The bundled
 call runs extraction, search, and scoring inside a single model turn
@@ -746,6 +769,10 @@ not the wall-clock time you waited. The three ensemble passes run with the
 2nd and 3rd concurrent, so perceived latency is closer to ~2x one pass,
 not the ~3x `total_ms` will show. Cost and token spend are genuinely
 additive across reruns, which is what `_meta` is reporting there.
+`scoring_fetch` is the one exception -- it isn't summed (a fetch either
+happened for the specific pass whose evidence became the returned
+`requirements_checked`, or it didn't), so it reports that winning pass's
+own value, not an aggregate across all three.
 
 Three things help keep the cost down without changing the decision process.
 
@@ -770,17 +797,32 @@ shadcn/ui, 21st.dev, and ReUI are searched in the same turn rather than
 sequentially, which reduces how much conversation context needs to be
 sent repeatedly.
 
-### Reference verification
+### Fetch-grounded scoring and reference verification
 
-Pattern allows up to 2 `web_fetch` calls, used only to verify reference
-URLs.
+Pattern allows up to 3 `web_fetch` calls per pass: 1 reserved for scoring,
+2 reserved for reference verification (1 for Mobbin, 1 for Figma
+Community).
+
+Before finalizing coverage, Pattern fetches the best-fitting candidate's
+own real docs/source page once and re-checks the checklist against that
+page, not just the search-result snippet it started with. This exists
+because search-result descriptions can both overstate a component's real
+capabilities and miss real ones it actually has -- both were observed in
+testing on the same case (an invented feature claim and a missed real
+one). If the fetch fails, or there's no confirmed URL to fetch, Pattern
+falls back to search-only evidence and says so in the affected items.
+
+Each result's `_meta.scoring_fetch` reports whether this fetch actually
+happened for that response (`{ attempted, succeeded, url }`) -- it's a
+diagnostic, not something Pattern uses to auto-correct individual
+requirement judgments. Unlike a reference URL (which has a safe fallback:
+the category page), there's no safe fallback for an unverified met/not-met
+call, so nothing is silently corrected -- `scoring_fetch` just tells you
+whether the grounding actually ran.
 
 A fetch can read up to 15,000 content tokens. `web_fetch` has no separate
 per-call fee; the cost comes from the content added to the model's
 context.
-
-Pattern does not use `web_fetch` during requirement scoring. It's
-reserved for verifying reference links.
 
 ### Choosing a cheaper model
 

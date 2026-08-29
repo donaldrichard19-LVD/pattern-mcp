@@ -1,0 +1,186 @@
+{
+  "_meta": {
+    "description": "Second, parallel eval set alongside eval/eval-set.json (Airbnb domain, do not modify). Covers the Shelfline e-commerce domain: a white-label storefront + seller-console SaaS brief (Google Drive doc product-brief-shelfline.md), written explicitly to generate a realistic spread of UI component needs for testing Pattern's recommend_component judgment.",
+    "domain": "Shelfline -- white-label e-commerce storefront + seller dashboard SaaS for independent brands (apparel, home goods, specialty food), starter tier (<500 SKUs)",
+    "framework": "Next.js (App Router) + Tailwind, TypeScript",
+    "verification_note": "Two tiers of gold quality, distinguished per-item by the 'verified' field. verified:true items were independently confirmed by fetching the actual cited candidate's real docs page (WebFetch, not through Pattern) and hand-checking the requirement against real content -- see 'verification_source'. verified:false or absent means the gold value is a prediction (either this brief's own stated expectation, or an observation from a live run) that has NOT been independently confirmed against a real component's actual capabilities -- treat these the same as eval-set.json's original unverified gold answers, not as ground truth.",
+    "known_findings": "The brief predicted checkout, stepper, and uploader would need custom builds. All three independently verified as genuine use_existing matches against a real library (ReUI, reui.io) -- the brief's prediction was wrong, not Pattern's verdict. But the same independent check caught two real evidence errors inside Pattern's own requirements_checked for these cases: an invented 'nonInteractive' stepper mode that isn't real (the real docs only show a more limited 'disabled' prop), and a missed real 'maxFiles' cap parameter on the uploader that Pattern incorrectly marked as unsupported. These two are the seed regression cases for testing whether fetch-grounded scoring (see the project plan) fixes them.",
+    "created": "2026-08-29"
+  },
+  "cases": [
+    {
+      "id": "checkout",
+      "category": "likely_custom",
+      "component_need": "Multi-step checkout (shipping info -> payment -> review) for a simple single-address, single-payment-method flow -- no split payments, no multi-currency, no saved-address book beyond what Stripe Elements already handles",
+      "gold": {
+        "verdict": "use_existing",
+        "reason": "scored",
+        "confidence_expected": "low",
+        "coverage_estimate": "6/8 (75%)",
+        "rationale": "Brief predicted custom_build. Independently confirmed via reui.io/blocks/ecommerce/checkout: real 4-step flow (contact/delivery/payment/review), sticky order summary with tax/discount lines, and card/PayPal/Apple Pay switching all real. No Stripe Elements wiring included, matching Pattern's own NOT MET call on that item.",
+        "verification_source": "https://reui.io/blocks/ecommerce/checkout",
+        "requirements": [
+          { "requirement": "Step indicator/progress UI showing shipping -> payment -> review stages", "expected_met": true, "verified": true },
+          { "requirement": "Shipping address form with validation", "expected_met": true, "verified": true },
+          { "requirement": "Payment step integrated with Stripe Elements (PaymentElement or similar)", "expected_met": false, "verified": true },
+          { "requirement": "Review step showing order summary, address, payment method, totals", "expected_met": true, "verified": true },
+          { "requirement": "Navigation between steps (next/back) with state persistence", "expected_met": true, "verified": false },
+          { "requirement": "Form validation and error handling per step", "expected_met": true, "verified": false },
+          { "requirement": "Order total calculation display (subtotal, shipping, tax, total)", "expected_met": true, "verified": true },
+          { "requirement": "Final submit/place order action that creates a payment intent / confirms order", "expected_met": false, "verified": true }
+        ]
+      }
+    },
+    {
+      "id": "stepper",
+      "category": "likely_custom",
+      "component_need": "Fulfillment-status stepper (pending -> packed -> shipped -> delivered) for an order detail view",
+      "gold": {
+        "verdict": "use_existing",
+        "reason": "scored",
+        "confidence_expected": "high",
+        "coverage_estimate": "7/8 (87.5%)",
+        "rationale": "Brief predicted custom_build. Independently confirmed via reui.io/docs/stepper: real Stepper built on Base UI/Radix with StepperItem/StepperIndicator/StepperSeparator/StepperTitle/StepperDescription sub-components, horizontal+vertical orientation, active/completed/inactive/loading states -- all real. KNOWN ERROR: Pattern's own run claimed a 'nonInteractive' read-only mode 'intended for status/order-tracking displays' -- the real docs describe no such mode, only a more limited 'disabled' prop on StepperItem. This is an invented feature, the seed regression case for the fetch-grounded-scoring fix.",
+        "verification_source": "https://reui.io/docs/stepper",
+        "requirements": [
+          { "requirement": "Displays a sequence of discrete fulfillment stages (pending, packed, shipped, delivered) as ordered steps", "expected_met": true, "verified": true },
+          { "requirement": "Distinct visual indicator per state (pending/upcoming, current/active, completed)", "expected_met": true, "verified": true },
+          { "requirement": "Checkmark or icon confirmation for completed steps", "expected_met": true, "verified": true },
+          { "requirement": "Connector line between steps reflecting progress", "expected_met": true, "verified": true },
+          { "requirement": "Per-step label with associated date/timestamp (e.g. 'Shipped Aug 12')", "expected_met": false, "verified": false },
+          { "requirement": "Responsive layout switching between horizontal and vertical orientation", "expected_met": true, "verified": true },
+          { "requirement": "Support for exception/edge states (cancelled, delayed, returned) beyond the happy path", "expected_met": true, "verified": false },
+          { "requirement": "Accessible semantic markup and state handling for screen readers", "expected_met": true, "verified": false }
+        ],
+        "known_error_note": "Pattern's clean-baseline component_description claimed a 'nonInteractive' read-only status-tracking mode. Verified false -- not documented anywhere on reui.io/docs/stepper. This is an evidence fabrication, not a requirements_checked item per se (it appeared in component_description prose), but is the primary regression signal for this case: rerun after the fetch-grounded-scoring fix and confirm this claim no longer appears."
+      }
+    },
+    {
+      "id": "uploader",
+      "category": "likely_custom",
+      "component_need": "Drag-to-reorder image uploader for a product's photo set, capped at 8 images",
+      "gold": {
+        "verdict": "use_existing",
+        "reason": "scored",
+        "confidence_expected": "low",
+        "coverage_estimate": "5/8 (62.5%)",
+        "rationale": "Brief predicted custom_build. Independently confirmed via reui.io/docs/file-upload: real File Upload component with a 'Sortable Upload' variant, click+drag-and-drop, per-image remove and progress. KNOWN ERROR: Pattern's own run marked 'hard cap enforcement' NOT MET, claiming 'no mention of a configurable max-count prop' -- the real docs document a maxFiles parameter (type: number, default: Infinity) directly contradicting that. This is the second seed regression case. The Sortable Upload sub-component's specific drag mechanics (keyboard accessibility, exact reorder behavior) could not be independently confirmed -- that page renders client-side and WebFetch only sees static HTML; treat those specific items as unverified, not confirmed either way.",
+        "verification_source": "https://reui.io/docs/file-upload",
+        "requirements": [
+          { "requirement": "Drag-and-drop reordering of image thumbnails in a grid", "expected_met": true, "verified": false, "verification_note": "Sortable Upload variant exists and is named for this purpose, but its specific page renders client-side -- WebFetch could not confirm the reorder mechanics directly." },
+          { "requirement": "Multi-file upload via click-to-browse and OS drag-and-drop", "expected_met": true, "verified": true },
+          { "requirement": "Hard cap enforcement (exactly 8 images, disables further uploads past limit)", "expected_met": true, "verified": true, "verification_note": "KNOWN ERROR CASE: Pattern's clean-baseline run marked this NOT MET. Real docs document a maxFiles parameter (type: number, default: Infinity) that satisfies this -- Pattern missed a real capability." },
+          { "requirement": "Per-image remove/delete control", "expected_met": true, "verified": false },
+          { "requirement": "Per-image upload progress indicator", "expected_met": true, "verified": false },
+          { "requirement": "Primary/cover image designation (e.g., first photo flagged as main product image)", "expected_met": false, "verified": false },
+          { "requirement": "Consistent-aspect-ratio thumbnail grid layout for product photos", "expected_met": false, "verified": false },
+          { "requirement": "Keyboard-accessible drag-and-drop reordering (a11y)", "expected_met": false, "verified": false }
+        ]
+      }
+    },
+    {
+      "id": "hero-banner",
+      "category": "clean_match",
+      "component_need": "Hero banner with a full-bleed background image, centered headline/subhead, and a single CTA button, for a brand's homepage",
+      "gold": {
+        "verdict": "use_existing",
+        "reason": "scored",
+        "confidence_expected": "high",
+        "coverage_estimate": null,
+        "rationale": "Brief's own 'likely clean match' category. Live run (2026-08-28) returned use_existing at 4/8 (50%), low confidence -- lower than the brief's own expectation for a case it called a clean match. Not independently re-verified against a real candidate's docs this pass; flagged as worth a closer look given the gap between predicted and observed confidence.",
+        "requirements": null
+      }
+    },
+    {
+      "id": "toast-system",
+      "category": "clean_match",
+      "component_need": "Toast notification system for confirming actions (item added to cart, product saved, order updated) across both storefront and console",
+      "gold": {
+        "verdict": "use_existing",
+        "reason": "scored",
+        "confidence_expected": "high",
+        "coverage_estimate": "7/7 (100%)",
+        "rationale": "Brief's own 'likely clean match' category, and the live run (2026-08-28) matched that expectation exactly: 100% coverage, high confidence, no ensemble trigger. Not independently re-verified against a real candidate's docs this pass.",
+        "requirements": null
+      }
+    },
+    {
+      "id": "empty-states",
+      "category": "clean_match",
+      "component_need": "Empty-state pattern (icon, short message, single CTA) for a category with no products, an order list with no orders, and a review section with no reviews yet",
+      "gold": {
+        "verdict": "use_existing",
+        "reason": "scored",
+        "confidence_expected": "high",
+        "coverage_estimate": "7/7 (100%)",
+        "rationale": "Brief's own 'likely clean match' category, matched by the live run (2026-08-28): 100% coverage, high confidence, no ensemble trigger. Not independently re-verified against a real candidate's docs this pass.",
+        "requirements": null
+      }
+    },
+    {
+      "id": "tabbed-settings",
+      "category": "clean_match",
+      "component_need": "Tabbed settings layout (Store details, Shipping, Payments, Notifications) for the seller console settings page",
+      "gold": {
+        "verdict": "use_existing",
+        "reason": "scored",
+        "confidence_expected": "high",
+        "coverage_estimate": "6/7 (85.7%)",
+        "rationale": "Brief's own 'likely clean match' category, roughly matched by the live run (2026-08-28): high confidence, 85.7% coverage, though the ensemble did trigger (close to the 80% threshold). Not independently re-verified against a real candidate's docs this pass.",
+        "requirements": null
+      }
+    },
+    {
+      "id": "filter-sidebar",
+      "category": "proportionality_risk",
+      "component_need": "Category page filter sidebar with checkbox groups for size, color, and price range, collapsible on mobile into a slide-over panel",
+      "gold": {
+        "verdict": "use_existing",
+        "reason": "scored",
+        "confidence_expected": "high",
+        "coverage_estimate": "7/7 (100%)",
+        "rationale": "Brief flagged this category specifically to watch for Pattern recommending something heavier than a starter-tier need requires (the same proportionality-mismatch failure pattern documented for the original Airbnb eval set's date-range-picker/availability-calendar cases). Live run (2026-08-28) returned 100% coverage, high confidence -- but whether the cited candidate is actually right-sized (not an enterprise data-grid style component) was NOT independently checked this pass. This is the highest-priority case to verify next given the brief's explicit warning.",
+        "requirements": null
+      }
+    },
+    {
+      "id": "product-table",
+      "category": "proportionality_risk",
+      "component_need": "Product list table with inline status toggle (active/draft), thumbnail, name, price, and inventory count, for a catalog of roughly 50-500 products, with basic column sort but no need for column reordering, grouping, or pivoting",
+      "gold": {
+        "verdict": "use_existing",
+        "reason": "scored",
+        "confidence_expected": "high",
+        "coverage_estimate": "7/7 (100%)",
+        "rationale": "Same proportionality-risk category as filter-sidebar above -- the brief explicitly calls out product/order tables as the case most likely to produce a scope mismatch (recommending column reordering/grouping/pivoting machinery a 50-500 row starter-tier catalog doesn't need). Live run (2026-08-28) returned 100% coverage, high confidence. NOT independently checked against the real cited candidate's actual feature surface this pass -- high priority for the next verification round.",
+        "requirements": null
+      }
+    },
+    {
+      "id": "order-table",
+      "category": "proportionality_risk",
+      "component_need": "Order list table with filter by status and date range, and search by order number or customer name, for order volumes in the low thousands per month at this tier",
+      "gold": {
+        "verdict": "use_existing",
+        "reason": "scored",
+        "confidence_expected": "high",
+        "coverage_estimate": "7/7 (100%)",
+        "rationale": "Same proportionality-risk category as filter-sidebar and product-table above. Live run (2026-08-28) returned 100% coverage, high confidence. NOT independently checked against the real cited candidate's actual feature surface this pass.",
+        "requirements": null
+      }
+    },
+    {
+      "id": "bare-table",
+      "category": "vague_contrast",
+      "component_need": "table",
+      "gold": {
+        "verdict": "use_existing",
+        "reason": "scored",
+        "confidence_expected": "low",
+        "coverage_estimate": "5/7 (71.4%)",
+        "rationale": "Brief's vague-vs-specific contrast pair against product-table and order-table above. Live run (2026-08-28) returned 71.4% coverage, low confidence -- meaningfully lower than either specific counterpart's 100%, consistent with the README's warning that vague category names produce weaker/more misleading matches, though not low enough to flip the verdict to custom_build in this case. Not independently re-verified against a real candidate's docs this pass.",
+        "requirements": null
+      }
+    }
+  ]
+}
