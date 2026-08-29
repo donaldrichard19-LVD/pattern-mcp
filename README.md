@@ -6,11 +6,7 @@
 [![MIT license](https://img.shields.io/badge/license-MIT-111111.svg)](./LICENSE)
 
 Pattern is an MCP server that helps coding agents make better UI
-component decisions. Instead of returning a list of search results,
-Pattern looks at what designs you need, checks real components against
-those needs, and tells the agent exactly which existing components to
-install from shadcn/ui and 21st.dev UI libraries or build custom based
-on references from Mobbin or Figma Community.
+component decisions.
 
 [Website](https://usepattern.sh) · [npm](https://www.npmjs.com/package/pattern-mcp) · [Report an issue](https://github.com/donaldrichard19-LVD/pattern-mcp/issues/new/choose)
 
