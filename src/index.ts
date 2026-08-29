@@ -3,13 +3,13 @@
  * Pattern
  *
  * MCP server exposing two tools. `recommend_component` judges whether a UI
- * component need should be met with an existing shadcn/ui or 21st.dev
- * component, or requires a custom build guided by a real-app reference
- * from Mobbin. `record_component_decision` appends a confirmed decision to
- * local per-project memory (see MEMORY_PATH below), which recommend_component
- * can optionally read back (via project_id) as consistency context for a
- * future call -- never as a cached verdict; coverage is still scored fresh
- * every time.
+ * component need should be met with an existing shadcn/ui, 21st.dev, or
+ * ReUI (reui.io) component, or requires a custom build guided by a
+ * real-app reference from Mobbin. `record_component_decision` appends a
+ * confirmed decision to local per-project memory (see MEMORY_PATH below),
+ * which recommend_component can optionally read back (via project_id) as
+ * consistency context for a future call -- never as a cached verdict;
+ * coverage is still scored fresh every time.
  *
  * The judgment logic (extract requirements -> search -> score real code ->
  * threshold into a verdict) is delegated to a single Anthropic API call
@@ -35,12 +35,13 @@ export const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 // messaging) and diff verdicts before trusting it in production.
 export const MODEL = process.env.PATTERN_MODEL ?? "claude-sonnet-5";
 
-// Search budget for candidate discovery. Defaults to 2, matching the
-// process the system prompt was originally validated against. Set to
-// "unlimited" to remove the cap entirely (enforced server-side via the
-// web_search tool's max_uses -- not just prompt instruction, since models
-// don't reliably self-limit against a purely textual budget).
-const SEARCH_BUDGET_RAW = process.env.PATTERN_SEARCH_BUDGET ?? "2";
+// Search budget for candidate discovery. Defaults to 3 -- one search per
+// source (shadcn/ui, 21st.dev, ReUI), fired together in the same turn per
+// the system prompt's step 3. Set to "unlimited" to remove the cap
+// entirely (enforced server-side via the web_search tool's max_uses --
+// not just prompt instruction, since models don't reliably self-limit
+// against a purely textual budget).
+const SEARCH_BUDGET_RAW = process.env.PATTERN_SEARCH_BUDGET ?? "3";
 const SEARCH_BUDGET: number | null =
   SEARCH_BUDGET_RAW.trim().toLowerCase() === "unlimited"
     ? null
@@ -488,7 +489,7 @@ const RECORD_DECISION_INPUT_SCHEMA = {
     },
     source: {
       type: "string",
-      description: "Where it came from, e.g. 'shadcn', '21st.dev', or 'custom' for a custom build.",
+      description: "Where it came from, e.g. 'shadcn', '21st.dev', 'reui', or 'custom' for a custom build.",
     },
     timestamp: {
       type: "string",
@@ -520,7 +521,7 @@ function buildSystemPrompt(searchBudget: number | null, opts?: { checklistProvid
 The user message includes a "Provided checklist" section -- a requirement checklist already prepared for you (either hand-written by the calling agent, or produced by a prior extract_requirements call). Do not extract your own checklist, and do not add, remove, reorder, or reword any item. Treat it as fixed input and score coverage against exactly these items in step 4 below.`
     : `2. EXTRACT REQUIREMENTS
 ${EXTRACTION_INSTRUCTIONS}`;
-  return `You are a UI component judgment layer. Given a component need, you decide whether it should be met with an existing shadcn/ui or 21st.dev component, or requires a custom build guided by a real-app reference. You have access to a web_search tool -- use it.
+  return `You are a UI component judgment layer. Given a component need, you decide whether it should be met with an existing shadcn/ui, 21st.dev, or ReUI (reui.io) component, or requires a custom build guided by a real-app reference. You have access to a web_search tool -- use it.
 
 If the user message includes a "Past confirmed decisions in this project" section, treat it only as a signal, not a rule: if a highly similar past decision exists, consider consistency with it while scoring and recommending, but don't let it override a genuinely better match found in this search, and don't skip or shortcut your own search and scoring because a past decision exists. You decide relevance yourself -- nothing upstream has already matched these past decisions to the current need for you. Step 8 below tells you exactly how to report what you did with it.
 
@@ -532,7 +533,7 @@ If the component need is a trivial, single-purpose primitive with no meaningful 
 ${step2}
 
 3. SEARCH FOR CANDIDATES
-Search shadcn/ui and 21st.dev for components matching the need, filtered to the stated framework. Fire the shadcn and 21st.dev searches together in the same turn (they're independent lookups) rather than one at a time -- this avoids re-sending the growing conversation on extra round-trips. ${budgetLine} If those don't surface enough to score, proceed with what you have rather than continuing to search -- a "low confidence, here's why" verdict is more useful than an unbounded search loop.
+Search shadcn/ui, 21st.dev, and ReUI (reui.io) for components matching the need, filtered to the stated framework. Fire the shadcn, 21st.dev, and ReUI searches together in the same turn (they're independent lookups) rather than one at a time -- this avoids re-sending the growing conversation on extra round-trips. ${budgetLine} If those don't surface enough to score, proceed with what you have rather than continuing to search -- a "low confidence, here's why" verdict is more useful than an unbounded search loop.
 
 If search returns zero real candidates -- not just weak matches, but nothing relevant at all (e.g. only vendor policy pages, unrelated components) -- stop here and return verdict "custom_build" with reason "no_candidates_found". Do not fabricate a coverage score in this case; omit requirements_checked and coverage entirely.
 
@@ -656,7 +657,7 @@ async function runSinglePass(input: {
         requirements_checked: null,
         coverage: null,
         recommendation: {
-          source: "shadcn/ui or 21st.dev (commodity primitive)",
+          source: "shadcn/ui, 21st.dev, or ReUI (commodity primitive)",
           install_command: null,
           component_description: null,
           reference: null,
@@ -1680,9 +1681,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       name: TOOL_NAME,
       description:
         "Judges whether a UI component need should be met with an existing " +
-        "shadcn/ui or 21st.dev component, or requires a custom build guided " +
-        "by a real-app reference from Mobbin. Returns a structured verdict " +
-        "(use_existing | custom_build), not a list of search results. Call " +
+        "shadcn/ui, 21st.dev, or ReUI (reui.io) component, or requires a " +
+        "custom build guided by a real-app reference from Mobbin. Returns " +
+        "a structured verdict (use_existing | custom_build), not a list " +
+        "of search results. Call " +
         "this whenever you are about to scaffold a new, non-trivial UI " +
         "component from scratch, when you're unsure your own default output " +
         "will look production-quality, or when the user references a " +

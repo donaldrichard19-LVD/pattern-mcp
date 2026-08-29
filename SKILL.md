@@ -1,6 +1,6 @@
 ---
 name: pattern
-description: Judge whether a UI component need should use an existing shadcn/ui or 21st.dev component, or requires a custom build guided by a real-app reference from Mobbin/Figma Community.
+description: Judge whether a UI component need should use an existing shadcn/ui, 21st.dev, or ReUI component, or requires a custom build guided by a real-app reference from Mobbin/Figma Community.
 ---
 
 # Pattern
@@ -18,8 +18,9 @@ Full behavior, output schemas, and cost details are in
 
 ### `recommend_component` (primary tool -- start here)
 
-The single-call default. Extracts requirements, searches shadcn/ui and
-21st.dev, scores coverage against real evidence, and returns a verdict.
+The single-call default. Extracts requirements, searches shadcn/ui,
+21st.dev, and ReUI, scores coverage against real evidence, and returns a
+verdict.
 This is the recommended path for most callers -- call it directly with
 `component_need`, `domain`, and `framework`.
 

@@ -25,7 +25,7 @@ Instead of returning a list of search results, Pattern looks at what you
 need, checks real components against that need, and tells the agent
 whether to:
 
-- **Use an existing component** from shadcn/ui or 21st.dev
+- **Use an existing component** from shadcn/ui, 21st.dev, or ReUI
 - **Build a custom component**, using a real product reference from
   Mobbin and/or Figma Community
 
@@ -52,7 +52,7 @@ For each `recommend_component` call, Pattern:
    search.
 2. Turns the request into a set of specific requirements, unless a
    checklist was already supplied (see [`checklist`](#checklist)).
-3. Searches for matching shadcn/ui and 21st.dev components.
+3. Searches for matching shadcn/ui, 21st.dev, and ReUI components.
 4. Checks each candidate against the requirements using evidence from the
    actual component.
 5. Calculates how much of the requirement is covered.
@@ -128,7 +128,7 @@ This keeps trivial requests fast and avoids unnecessary API usage.
 
 ### What powers the search
 
-Pattern does not scrape shadcn/ui, 21st.dev, Mobbin, or Figma Community
+Pattern does not scrape shadcn/ui, 21st.dev, ReUI, Mobbin, or Figma Community
 itself.
 
 Each tool call makes one or more requests to the Anthropic Messages API,
@@ -431,7 +431,7 @@ reference the checklist's content.
   ],
   "coverage": "5/7 (71%)",
   "recommendation": {
-    "source": "21st.dev | shadcn | null",
+    "source": "21st.dev | shadcn | reui | null",
     "install_command": "string | null",
     "component_description": "string | null",
     "reference": {
@@ -607,7 +607,7 @@ Anthropic API call.
 - `project_id` is required and should be stable. A project directory
   path or project name works well.
 - `action` must be `"installed"` or `"custom_built"`.
-- `source` can be `"shadcn"`, `"21st.dev"`, or `"custom"`.
+- `source` can be `"shadcn"`, `"21st.dev"`, `"reui"`, or `"custom"`.
 - `timestamp` is optional. If omitted, Pattern uses the current time.
 
 ### Output
@@ -758,7 +758,7 @@ pay the full input cost for that block.
 
 ### Search limits
 
-Pattern limits candidate discovery to 2 web searches.
+Pattern limits candidate discovery to 3 web searches -- one per source.
 
 If a custom build is needed, it reserves 2 additional searches for
 references:
@@ -766,7 +766,7 @@ references:
 - 1 for Mobbin
 - 1 for Figma Community
 
-shadcn/ui and 21st.dev are searched in the same turn rather than
+shadcn/ui, 21st.dev, and ReUI are searched in the same turn rather than
 sequentially, which reduces how much conversation context needs to be
 sent repeatedly.
 

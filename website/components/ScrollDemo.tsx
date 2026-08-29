@@ -19,7 +19,7 @@ const BEATS = [
   {
     title: "Judgment against requirements, not keywords",
     body: [
-      "Pattern turns each component need into a requirements checklist. It searches shadcn/ui and 21st.dev, then checks each requirement against the evidence it finds.",
+      "Pattern turns each component need into a requirements checklist. It searches shadcn/ui, 21st.dev, and ReUI, then checks each requirement against the evidence it finds.",
       "Coverage is calculated from the checklist, not a percentage the model reports.",
     ],
     label: "coverage scoring",
@@ -94,7 +94,7 @@ function rowsForBeat(beat: number): Row[] {
     rows.push({ k: "call", text: 'recommend_component({ component_need: "price breakdown with fees and taxes", … })' });
   }
   if (beat === 1) {
-    rows.push({ k: "work", text: "Searching shadcn/ui and 21st.dev · 2-search budget" });
+    rows.push({ k: "work", text: "Searching shadcn/ui, 21st.dev, and ReUI · 3-search budget" });
   }
   if (beat === 2) {
     rows.push({ k: "ok", text: "6/8 (75%) covered by 21st.dev pricing-detail block" });
