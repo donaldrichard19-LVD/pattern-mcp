@@ -6,13 +6,11 @@
 [![MIT license](https://img.shields.io/badge/license-MIT-111111.svg)](./LICENSE)
 
 Pattern is an MCP server that helps coding agents make better UI
-component decisions.
-
-Instead of returning a list of search results, Pattern looks at what
-designs you need, checks real components against those needs, and tells
-the agent exactly which existing components to install from shadcn/ui
-and 21st.dev UI libraries or build custom based on references from
-Mobbin or Figma Community.
+component decisions. Instead of returning a list of search results,
+Pattern looks at what designs you need, checks real components against
+those needs, and tells the agent exactly which existing components to
+install from shadcn/ui and 21st.dev UI libraries or build custom based
+on references from Mobbin or Figma Community.
 
 [Website](https://usepattern.sh) · [npm](https://www.npmjs.com/package/pattern-mcp) · [Report an issue](https://github.com/donaldrichard19-LVD/pattern-mcp/issues/new/choose)
 
@@ -608,7 +606,8 @@ Anthropic API call.
   "domain": "Airbnb-style rental marketplace",
   "action": "custom_built",
   "source": "custom",
-  "timestamp": "2026-08-25T14:32:00.000Z"
+  "timestamp": "2026-08-25T14:32:00.000Z",
+  "time_saved_minutes": 25
 }
 ```
 
@@ -617,6 +616,15 @@ Anthropic API call.
 - `action` must be `"installed"` or `"custom_built"`.
 - `source` can be `"shadcn"`, `"21st.dev"`, or `"custom"`.
 - `timestamp` is optional. If omitted, Pattern uses the current time.
+- `time_saved_minutes` is optional -- the calling agent's own estimate,
+  in minutes, of how much time this decision saved by having Pattern's
+  verdict instead of researching candidates and judging fit from scratch.
+  This is entirely self-reported. Pattern has no way to measure a
+  counterfactual ("how long would this have taken without Pattern?"), so
+  unlike `_meta` (Pattern's own real cost/latency for the call that
+  produced the verdict), this number is never computed or verified --
+  it's just recorded as-given. Omit it rather than guess a number to fill
+  the field.
 
 ### Output
 
@@ -652,11 +660,15 @@ The file is organized by project:
       "domain": "Airbnb-style rental marketplace",
       "action": "custom_built",
       "source": "custom",
-      "timestamp": "2026-08-25T14:32:00.000Z"
+      "timestamp": "2026-08-25T14:32:00.000Z",
+      "time_saved_minutes": 25
     }
   ]
 }
 ```
+
+`time_saved_minutes` is omitted from an entry entirely when the calling
+agent didn't provide one -- it's never backfilled or estimated by Pattern.
 
 Each project keeps its 50 most recent decisions. Older entries are
 removed as new ones are added.
