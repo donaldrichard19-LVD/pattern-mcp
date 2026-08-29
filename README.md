@@ -750,6 +750,15 @@ Any mismatch on the criteria above -- a different `domain`, a changed
 `existing_stack`, an entry that's gone stale, or one that wasn't
 high-confidence -- falls through to a normal, fresh search+score call.
 
+### Turning the cache-hit exception off
+
+Set `PATTERN_NO_LEDGER_CACHE_HIT` (any truthy value) to restore
+"every `recommend_component` call always scores fresh" without removing
+any ledger code. This disables only the cache-hit short-circuit --
+entries are still written to `ledger.jsonl` and `read_ledger` still works
+either way, so the audit trail keeps growing even with the switch on.
+Unset the variable to re-enable cache hits again at any time.
+
 ### Data minimization
 
 Nothing written to the ledger ever contains raw search/fetch content.

@@ -147,6 +147,14 @@ const MAX_DECISIONS_PER_PROJECT = 50;
 // call is about, only the caller-supplied project_id string.
 const LEDGER_PATH = process.env.PATTERN_LEDGER_PATH ?? join(homedir(), ".pattern", "ledger.jsonl");
 const LEDGER_TTL_DAYS = Number(process.env.PATTERN_LEDGER_TTL_DAYS ?? 30);
+// Kill switch for the cache-hit short-circuit specifically -- does NOT
+// disable the ledger itself. Entries still get written and read_ledger
+// still works either way; this only controls whether judgeComponent is
+// allowed to skip a fresh search+score on a matching entry. Set
+// PATTERN_NO_LEDGER_CACHE_HIT (any truthy value) to revert to "every
+// recommend_component call always scores fresh" without removing any
+// ledger code -- flip it back off (unset the var) to re-enable.
+const LEDGER_CACHE_HIT_ENABLED = !process.env.PATTERN_NO_LEDGER_CACHE_HIT;
 
 // $/1M tokens, checked against the Anthropic pricing page rather than
 // recalled from training data (rates drift). Both current and legacy
@@ -1469,8 +1477,10 @@ async function judgeComponent(input: {
   // by exact component_need/domain/framework/conventions match, confidence
   // "high", and LEDGER_TTL_DAYS staleness. Checked before the skip-list
   // fast-path so a skip-list primitive never bothers with a ledger read.
+  // Gated by LEDGER_CACHE_HIT_ENABLED (PATTERN_NO_LEDGER_CACHE_HIT) so the
+  // "always fresh" behavior can be restored without removing this code.
   const ledgerCacheHit =
-    !isSkipListMatch(input.component_need) && input.project_id
+    LEDGER_CACHE_HIT_ENABLED && !isSkipListMatch(input.component_need) && input.project_id
       ? findLedgerCacheHit(input, readLedgerEntries(input.project_id))
       : null;
 

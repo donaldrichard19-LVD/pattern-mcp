@@ -74,7 +74,8 @@ A high-confidence, recent, exactly-matching prior judgment for the same
 check for `reason: "ledger_cache_hit"` / `served_from_ledger: true` in the
 response. It's the one exception to "every call scores fresh"; see
 [README.md's ledger section](./README.md#per-project-judgment-ledger) for
-the exact match rules.
+the exact match rules. Set `PATTERN_NO_LEDGER_CACHE_HIT` to turn this
+exception off and force every call to score fresh again.
 
 Every `recommend_component` and `extract_requirements` response carries an
 `_meta` block (`total_ms`, `breakdown_ms`, `tokens_used`,
