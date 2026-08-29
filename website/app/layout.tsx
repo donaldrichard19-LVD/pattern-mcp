@@ -23,9 +23,9 @@ const nunito = Nunito({
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://usepattern.sh"),
-  title: "Pattern: empower your agents to ship great products with taste",
+  title: "Pattern: catch the wrong UI decision before your agent builds it",
   description:
-    "Pattern gives coding agents better design judgment by searching real component libraries, checking options against your framework, product domain, and requirements, then giving them a recommendation they can act on while they build.",
+    "Pattern checks a UI component need against real, current evidence before your agent commits to it. It finds a component that fits or shows you when nothing does, so you find out before it's built, not after.",
   twitter: {
     card: "summary_large_image",
   },

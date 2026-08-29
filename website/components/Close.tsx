@@ -1,7 +1,7 @@
 "use client";
 
 import { DOCS, REPO } from "./constants";
-import { H2, SECTION } from "./tokens";
+import { BODY, H2, SECTION } from "./tokens";
 import { Button, Divider, Mark, Wordmark, trackClick } from "./ui";
 import { Reveal } from "./ui";
 
@@ -10,7 +10,12 @@ export function Close() {
     <footer id="docs" style={{ borderTop: "1px solid var(--border-subtle)", background: "#fff" }}>
       <div className="pt-sec pt-stack" style={{ ...SECTION, padding: "72px 32px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 32 }}>
         <Reveal style={{ maxWidth: 560 }}>
-          <h2 style={H2}>Agents will keep making design decisions. Make sure they are good ones</h2>
+          <div style={{ display: "grid", gap: 10 }}>
+            <h2 style={H2}>Agents will keep making UI decisions on their own.</h2>
+            <p style={{ ...BODY, fontSize: "var(--text-body-lg)", margin: 0 }}>
+              The question is whether you can afford to find out they were wrong after the fact.
+            </p>
+          </div>
         </Reveal>
         <Reveal delay={100}>
           <div className="pt-stack" style={{ display: "flex", gap: 12, flexShrink: 0, flexWrap: "wrap" }}>

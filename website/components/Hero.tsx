@@ -55,13 +55,13 @@ export function Hero() {
               textWrap: "pretty",
             }}
           >
-            Empower your agents to ship great products with <em>taste</em>
+            Catch the wrong UI decision before your agent builds it
           </h1>
         </Reveal>
         <Reveal delay={80}>
           <p style={{ ...BODY, maxWidth: 640, fontSize: "var(--text-body-lg)" }}>
-            Pattern gives coding agents better design judgment by searching real component libraries, checking options against your
-            framework, product domain, and requirements, then giving them a recommendation they can act on while they build
+            Pattern checks a UI component need against real, current evidence before your agent commits to it. It finds a
+            component that fits or shows you when nothing does, so you find out before it&apos;s built, not after.
           </p>
         </Reveal>
         <Reveal delay={140}>
@@ -98,6 +98,22 @@ export function Hero() {
                 </pre>
               </div>
             </div>
+          </div>
+        </Reveal>
+        <Reveal delay={210}>
+          <div style={{ display: "grid", gap: 10, maxWidth: 640 }}>
+            <span style={LABEL}>Pattern checks</span>
+            <ul style={{ margin: 0, paddingLeft: 20, display: "grid", gap: 6 }}>
+              <li style={{ ...BODY, fontSize: "var(--text-body-sm)" }}>What the component needs to do</li>
+              <li style={{ ...BODY, fontSize: "var(--text-body-sm)" }}>What existing components actually support</li>
+              <li style={{ ...BODY, fontSize: "var(--text-body-sm)" }}>How well each option covers the requirements</li>
+              <li style={{ ...BODY, fontSize: "var(--text-body-sm)" }}>Whether an existing component is the right fit</li>
+              <li style={{ ...BODY, fontSize: "var(--text-body-sm)" }}>What real references to use when nothing fits</li>
+            </ul>
+            <p style={{ ...BODY, fontSize: "var(--text-body-sm)", margin: 0 }}>
+              The agent gets a verdict: <strong>use an existing component</strong> or <strong>build it custom from a real
+              reference</strong>, with the evidence behind the decision.
+            </p>
           </div>
         </Reveal>
         <Reveal delay={220}>

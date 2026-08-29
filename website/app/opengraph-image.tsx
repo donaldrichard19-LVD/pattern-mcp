@@ -26,10 +26,9 @@ async function loadGoogleFont(cssUrl: string) {
 }
 
 export default async function OpengraphImage() {
-  const [nunito900, instrumentSans, instrumentSansItalic] = await Promise.all([
+  const [nunito900, instrumentSans] = await Promise.all([
     loadGoogleFont("https://fonts.googleapis.com/css2?family=Nunito:wght@900&display=swap"),
     loadGoogleFont("https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,500&display=swap"),
-    loadGoogleFont("https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@1,500&display=swap"),
   ]);
   const markSize = 132;
   const gap = markSize * 0.26;
@@ -75,8 +74,7 @@ export default async function OpengraphImage() {
             display: "flex",
           }}
         >
-          Empower your agents to ship great products with&nbsp;
-          <span style={{ fontStyle: "italic" }}>taste</span>
+          Catch the wrong UI decision before your agent builds it
         </div>
       </div>
     ),
@@ -85,7 +83,6 @@ export default async function OpengraphImage() {
       fonts: [
         { name: "Nunito", data: nunito900, weight: 900, style: "normal" },
         { name: "Instrument Sans", data: instrumentSans, weight: 500, style: "normal" },
-        { name: "Instrument Sans", data: instrumentSansItalic, weight: 500, style: "italic" },
       ],
     }
   );

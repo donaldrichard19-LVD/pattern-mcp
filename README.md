@@ -5,8 +5,9 @@
 [![npm downloads](https://img.shields.io/npm/dm/pattern-mcp.svg)](https://www.npmjs.com/package/pattern-mcp)
 [![MIT license](https://img.shields.io/badge/license-MIT-111111.svg)](./LICENSE)
 
-Pattern is an MCP server that helps coding agents make better UI
-component decisions.
+Pattern is an MCP server that checks a UI component need against real,
+current evidence before your agent commits to it, so a wrong decision
+gets caught before it's built, not after.
 
 [Website](https://usepattern.sh) · [npm](https://www.npmjs.com/package/pattern-mcp) · [Report an issue](https://github.com/donaldrichard19-LVD/pattern-mcp/issues/new/choose)
 

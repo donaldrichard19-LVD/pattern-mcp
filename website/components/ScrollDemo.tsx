@@ -8,11 +8,11 @@ import { Chip } from "./ui";
 
 const BEATS = [
   {
-    title: "The agent reaches a design decision",
+    title: "The agent reaches a UI decision it hasn't verified",
     body: [
       "This happens in the middle of a real build.",
-      "Your agent needs to choose a component, but it may not know what a good option looks like. It can pick something loosely related—or build a generic version from scratch.",
-      "Pattern gives the agent a better way to decide.",
+      "Your agent needs to choose a component, but nothing has checked whether it's actually the right fit. It can pick something loosely related, or build something generic because it never found a better option.",
+      "Pattern checks the decision against real evidence before the agent commits to it.",
     ],
     label: "recommend_component",
   },
@@ -20,21 +20,21 @@ const BEATS = [
     title: "Judgment against requirements, not keywords",
     body: [
       "Pattern turns each component need into a requirements checklist. It searches shadcn/ui, 21st.dev, and ReUI, then checks each requirement against the evidence it finds.",
-      "Coverage is calculated from the checklist, not a percentage the model reports.",
+      "The server calculates coverage from the checklist itself instead of trusting a percentage the model reports. This isn't a keyword search or a similarity score. It's a check against what the component actually supports.",
     ],
     label: "coverage scoring",
   },
   {
     title: "If a real component fits, use it",
     body: [
-      "A use_existing verdict includes the source, install command, and a clear description of what the component does.",
+      "A use_existing verdict includes the source, install command, and a description of what the component actually does.",
       "Pattern evaluates the component before recommending it. Your agent shows you the install command before running it.",
     ],
     label: "verdict: use_existing",
   },
   {
-    title: "If nothing fits, it builds from a real reference",
-    body: "A custom_build verdict returns the checklist plus a grounded Mobbin or Figma Community reference. Deep links are verified server-side against a page that was actually fetched. When only a browse page exists, Pattern says so",
+    title: "If nothing fits, build from a real reference",
+    body: "A custom_build verdict returns the requirements checklist along with a grounded reference from Mobbin or Figma Community, so your agent gets a concrete starting point instead of inventing the interaction from scratch. Direct links are verified before they're returned. When only a browse page exists, Pattern says so.",
     label: "verdict: custom_build",
   },
   {
