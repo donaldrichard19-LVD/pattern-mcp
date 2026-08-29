@@ -1,5 +1,17 @@
 # Pattern
 
+[![Publish](https://github.com/donaldrichard19-LVD/pattern-mcp/actions/workflows/publish.yml/badge.svg)](https://github.com/donaldrichard19-LVD/pattern-mcp/actions/workflows/publish.yml)
+[![npm version](https://img.shields.io/npm/v/pattern-mcp.svg)](https://www.npmjs.com/package/pattern-mcp)
+[![npm downloads](https://img.shields.io/npm/dm/pattern-mcp.svg)](https://www.npmjs.com/package/pattern-mcp)
+[![MIT license](https://img.shields.io/badge/license-MIT-111111.svg)](./LICENSE)
+
+An MCP server that judges UI component decisions for coding agents:
+`use_existing` or `custom_build`, scored against real shadcn/ui and
+21st.dev evidence, with Mobbin and Figma Community references when
+nothing fits.
+
+[Website](https://usepattern.sh) · [npm](https://www.npmjs.com/package/pattern-mcp) · [Report an issue](https://github.com/donaldrichard19-LVD/pattern-mcp/issues/new/choose)
+
 ![Pattern](docs/images/readme-hero.png)
 
 ## Install
