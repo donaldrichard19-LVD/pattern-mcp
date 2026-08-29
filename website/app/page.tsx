@@ -7,7 +7,6 @@ import { Reference } from "@/components/Reference";
 import { SavesTime } from "@/components/SavesTime";
 import { ScrollDemo } from "@/components/ScrollDemo";
 import { TopBar } from "@/components/TopBar";
-import { Transition } from "@/components/Transition";
 
 export default function Home() {
   return (
@@ -18,7 +17,6 @@ export default function Home() {
       <ScrollDemo />
       <SavesTime />
       <AvoidsMistakes />
-      <Transition />
       <Reference />
       <Guidance />
       <Close />
