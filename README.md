@@ -32,7 +32,7 @@ whether to:
 
 Pattern is designed for agents to use **while they are building**.
 
-It exposes three tools:
+It exposes four tools:
 
 - `recommend_component` — evaluates a UI component need and returns a
   structured recommendation.
@@ -42,6 +42,9 @@ It exposes three tools:
 - `record_component_decision` — records what the agent actually did so
   future recommendations in the same project can take that decision into
   account.
+- `read_ledger` — lists past `recommend_component` judgments for a
+  `project_id`, including any that were served from the ledger cache (see
+  [Per-project judgment ledger](#per-project-judgment-ledger)).
 
 ## How it works
 
@@ -71,6 +74,9 @@ A result can also be:
 - `custom_build`
 - `no_candidates_found`
 - `skip_list`
+- `ledger_cache_hit` — served from a recent, matching prior judgment
+  instead of a fresh search+score (see
+  [Per-project judgment ledger](#per-project-judgment-ledger)).
 
 `no_candidates_found` is kept separate from a low-coverage result. Not
 finding a candidate is different from finding candidates that don't cover
@@ -79,7 +85,14 @@ the requirements.
 If `project_id` is supplied, Pattern also checks for past confirmed
 decisions on that project and factors them in as a consistency signal —
 never a rule that overrides a genuinely better match found in the current
-search.
+search. Separately, `project_id` also enables the judgment ledger: a
+high-confidence prior judgment matching this exact
+component_need/domain/framework/existing_stack, recorded recently enough,
+can be served directly (`ledger_cache_hit`) instead of running a fresh
+search+score. This is the one deliberate exception to "every recommendation
+searches and scores again" — see
+[Per-project judgment ledger](#per-project-judgment-ledger) for the exact
+rules and why it's safe.
 
 Every result includes `computed_at`, because coverage is a snapshot of the
 search at that point in time, not a permanent fact. Every result also
@@ -631,6 +644,122 @@ Anthropic API call.
 }
 ```
 
+## Tool: `read_ledger`
+
+Lists past `recommend_component` judgments for a `project_id` -- every
+call that reached the API and produced a verdict, not just ones explicitly
+confirmed via `record_component_decision`. Useful for auditing what
+Pattern has already judged for a project, or for understanding why a call
+came back with `served_from_ledger: true`.
+
+### Input
+
+```json
+{
+  "project_id": "my-booking-app",
+  "component_need": "cancellation",
+  "limit": 10
+}
+```
+
+- `project_id` is required.
+- `component_need` is optional -- a simple keyword filter (substring
+  match, no embeddings) against stored entries' `component_need`. Omit to
+  list everything for the project.
+- `limit` is optional, defaults to 20. Most recent entries first.
+
+### Output
+
+```json
+{
+  "project_id": "my-booking-app",
+  "entries": [
+    {
+      "id": "a1b2c3d4-...",
+      "timestamp": "2026-08-29T19:50:47.073Z",
+      "project_id": "my-booking-app",
+      "component_need": "cancellation policy display with refund tiers by date",
+      "domain": "Airbnb-style rental marketplace",
+      "framework": "React + Tailwind",
+      "checklist": ["...", "..."],
+      "checklist_source": "extracted",
+      "candidates_evaluated": [
+        { "source": "ReUI (reui.io)", "name": "Timeline", "url": "https://reui.io/components/timeline", "coverage_pct": 62.5 }
+      ],
+      "verdict": "use_existing",
+      "chosen_candidate": "Timeline",
+      "confidence": "low",
+      "reason": "scored",
+      "coverage": "5/8 (62.5%)",
+      "project_conventions_snapshot": "9f3a1c7e2b0d4f5a"
+    }
+  ]
+}
+```
+
+Each entry holds only distilled fields -- `candidates_evaluated` never
+contains raw HTML, full prop tables, or the per-requirement evidence text
+`recommend_component` itself returns. See
+[Data minimization](#data-minimization) below.
+
+## Per-project judgment ledger
+
+Distinct from [per-project decision memory](#per-project-decision-memory)
+below -- that file only gains an entry when `record_component_decision` is
+explicitly called. The ledger instead gains one entry automatically for
+**every** `recommend_component` call that reaches the API with a
+`project_id` and lands on reason `"scored"` or `"no_candidates_found"`.
+
+Pattern stores it locally in:
+
+```
+~/.pattern/ledger.jsonl
+```
+
+Change the location with `PATTERN_LEDGER_PATH`. One JSON object per line
+(append-only, JSONL).
+
+### The cache-hit exception
+
+Every other part of Pattern scores fresh every time (see
+[No caching, by design](#no-caching-by-design)). The ledger is the one
+deliberate exception: a later `recommend_component` call with a matching
+`project_id` **can** be served directly from a prior entry, skipping
+search+score entirely, when **all** of the following hold:
+
+- `component_need` matches exactly (case-insensitive).
+- `domain` and `framework` match exactly.
+- `existing_stack` hashes to the same value as the stored entry's
+  (both omitted counts as a match).
+- The stored entry's `confidence` is `"high"`.
+- The stored entry's `reason` is `"scored"` or `"no_candidates_found"`.
+- The stored entry is no older than `PATTERN_LEDGER_TTL_DAYS` (default
+  **30** days, configurable).
+
+When served this way, the response has `reason: "ledger_cache_hit"`,
+`served_from_ledger: true`, `ledger_entry_id`, and
+`original_verdict_timestamp` -- so nothing is ever silently passed off as
+freshly verified. `_meta.estimated_cost_usd` and `tokens_used` are
+genuinely `0`: no API call happened. `requirements_checked` is `null` on
+this path -- the ledger never stores per-requirement evidence text (see
+[Data minimization](#data-minimization)), so a cache hit can only replay
+the verdict/confidence/coverage/chosen-candidate, not the original
+per-requirement reasoning.
+
+Any mismatch on the criteria above -- a different `domain`, a changed
+`existing_stack`, an entry that's gone stale, or one that wasn't
+high-confidence -- falls through to a normal, fresh search+score call.
+
+### Data minimization
+
+Nothing written to the ledger ever contains raw search/fetch content.
+Every candidate is reduced to exactly four fields before it's written --
+`source`, `name`, `url`, `coverage_pct` -- enforced at the type level
+(`assertDistilledCandidateShape` in `src/index.ts`), not just by
+convention: a raw or extended object throws rather than silently
+persisting. Run `node scripts/verify-ledger-boundary.mjs` (after
+`npm run build`) to check this boundary directly.
+
 ## Per-project decision memory
 
 Pattern stores confirmed decisions locally in:
@@ -683,12 +812,13 @@ sensitive information in them. See [SECURITY.md](./SECURITY.md).
 A failure to write the decision file is returned as an error from
 `record_component_decision`.
 
-**No caching, by design.** Project memory does not cache recommendations.
-A previous decision is only additional context for a new judgment. Every
-`recommend_component` call performs a fresh search and recalculates
-coverage. This means Pattern can use past decisions to improve
-consistency without letting stale decisions replace current evidence —
-see [Known limitations](#known-limitations) for more.
+**No caching, by design.** Project memory (this file, `memory.json`) does
+not cache recommendations. A previous decision is only additional context
+for a new judgment. This is unrelated to the
+[judgment ledger](#per-project-judgment-ledger)'s bounded cache-hit
+exception, which lives in a separate file (`ledger.jsonl`) and is always
+flagged (`served_from_ledger: true`) when it happens — see
+[Known limitations](#known-limitations) for more.
 
 ## Security and privacy
 
@@ -707,7 +837,8 @@ Pattern uses the Anthropic API, so `recommend_component` has a cost.
 
 A typical single pass costs about $0.06–$0.10 with Sonnet 5 at current
 pricing. Skip-listed primitives cost $0 because they're handled locally
-and never reach the API.
+and never reach the API. A [ledger cache hit](#the-cache-hit-exception)
+also costs $0, for the same reason -- no API call happens.
 
 ### The `_meta` field
 
@@ -1090,21 +1221,31 @@ pipeline is still fully bundled; nothing about this evaluation changed.
 
 ### No caching, by design
 
-Every recommendation searches and scores again.
+Every recommendation searches and scores again -- with one bounded
+exception (see below).
 
 This means a recommendation can change as component libraries change.
 For example, a later shadcn/ui release can introduce a component that
 changes a previous `custom_build` result.
 
-Do not persist a recommendation across sessions or builds at the
-calling-agent layer.
-
-If you add caching, keep it session-scoped.
+Do not build a second, unbounded cache of recommendations at the
+calling-agent layer on top of Pattern's own. If you add caching there,
+keep it session-scoped.
 
 [Project decision memory](#per-project-decision-memory) does not change
 this. It provides context from previous decisions, but every
 `recommend_component` call still performs a fresh search and scoring
 pass.
+
+The one deliberate exception is the
+[judgment ledger's cache-hit path](#the-cache-hit-exception): a later
+call matching an exact, recent, high-confidence prior judgment can be
+served without a fresh search+score. It's bounded (exact
+component_need/domain/framework/conventions match, a staleness TTL) and
+always self-identifies via `served_from_ledger: true` and
+`reason: "ledger_cache_hit"` -- so a calling agent that wants a guaranteed
+fresh check on every call should look for that flag and treat it the same
+as any other verdict it wants to double-check.
 
 ### The skip-list is still evolving
 

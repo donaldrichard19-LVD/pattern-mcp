@@ -58,7 +58,23 @@ call. Appends to local per-project memory only; makes no API call and
 re-runs no judgment. Requires `project_id`, `component_need`, `action`
 (`"installed"` | `"custom_built"`), and `source`.
 
+### `read_ledger`
+
+Lists past `recommend_component` judgments for a `project_id` -- every
+call that reached the API, not just ones confirmed via
+`record_component_decision`. Requires `project_id`; `component_need`
+(keyword filter) and `limit` are optional. Useful for auditing what
+Pattern has already judged, or for understanding a
+`served_from_ledger: true` response (see below).
+
 ## Cost awareness
+
+A high-confidence, recent, exactly-matching prior judgment for the same
+`project_id` can be served directly instead of a fresh search+score --
+check for `reason: "ledger_cache_hit"` / `served_from_ledger: true` in the
+response. It's the one exception to "every call scores fresh"; see
+[README.md's ledger section](./README.md#per-project-judgment-ledger) for
+the exact match rules.
 
 Every `recommend_component` and `extract_requirements` response carries an
 `_meta` block (`total_ms`, `breakdown_ms`, `tokens_used`,

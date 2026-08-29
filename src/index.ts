@@ -2,18 +2,29 @@
 /**
  * Pattern
  *
- * MCP server exposing two tools. `recommend_component` judges whether a UI
+ * MCP server exposing tools built around one judgment: whether a UI
  * component need should be met with an existing shadcn/ui, 21st.dev, or
  * ReUI (reui.io) component, or requires a custom build guided by a
- * real-app reference from Mobbin. `record_component_decision` appends a
- * confirmed decision to local per-project memory (see MEMORY_PATH below),
- * which recommend_component can optionally read back (via project_id) as
- * consistency context for a future call -- never as a cached verdict;
- * coverage is still scored fresh every time.
+ * real-app reference from Mobbin.
  *
- * The judgment logic (extract requirements -> search -> score real code ->
- * threshold into a verdict) is delegated to a single Anthropic API call
- * with the server-side web_search tool enabled, so the same reasoning
+ * Two separate local stores back this, with two different rules:
+ *  - `record_component_decision` appends a confirmed decision to local
+ *    per-project memory (see MEMORY_PATH below), which recommend_component
+ *    can optionally read back (via project_id) as consistency context for
+ *    a future call -- never as a cached verdict; coverage is still scored
+ *    fresh every time. Unchanged, still true.
+ *  - Every recommend_component call that reaches the API instead appends
+ *    to a per-project ledger (see LEDGER_PATH below). Unlike memory.json,
+ *    a high-confidence ledger entry CAN be served directly on a later,
+ *    matching call instead of a fresh search+score -- the one deliberate
+ *    exception to "always fresh," bounded by exact component_need/domain/
+ *    framework/conventions match and a staleness TTL, and always flagged
+ *    via `served_from_ledger: true` in the response so nothing is silently
+ *    passed off as freshly verified. See findLedgerCacheHit.
+ *
+ * The judgment logic itself (extract requirements -> search -> score real
+ * code -> threshold into a verdict) is delegated to a single Anthropic API
+ * call with the server-side web_search tool enabled, so the same reasoning
  * this project validated by hand in conversation is what runs here.
  */
 
@@ -23,6 +34,7 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+import { createHash, randomUUID } from "node:crypto";
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -118,6 +130,23 @@ const LOG_PATH = process.env.PATTERN_LOG_PATH ?? join(homedir(), ".pattern", "ca
 // of what's in this file (see README's "no verdict caching" rule).
 const MEMORY_PATH = process.env.PATTERN_MEMORY_PATH ?? join(homedir(), ".pattern", "memory.json");
 const MAX_DECISIONS_PER_PROJECT = 50;
+
+// Per-project judgment ledger -- distinct from both LOG_PATH and
+// MEMORY_PATH above. Every recommend_component call that reaches the API
+// with a project_id and lands on reason "scored" or "no_candidates_found"
+// appends one line here (see appendLedgerEntry), unlike MEMORY_PATH which
+// only gains an entry when record_component_decision is explicitly called.
+// Unlike MEMORY_PATH, this file's entries CAN produce a cached verdict on a
+// later call (see findLedgerCacheHit) -- the one deliberate exception to
+// this project's "coverage is scored fresh every time" rule, bounded by
+// exact component_need/domain/framework/conventions match, confidence
+// "high", and LEDGER_TTL_DAYS staleness, and always flagged in the
+// response via served_from_ledger so nothing is silently passed off as
+// fresh. Same homedir/project_id-keyed convention as LOG_PATH/MEMORY_PATH,
+// not a repo-root file -- this server has no concept of "which repo" a
+// call is about, only the caller-supplied project_id string.
+const LEDGER_PATH = process.env.PATTERN_LEDGER_PATH ?? join(homedir(), ".pattern", "ledger.jsonl");
+const LEDGER_TTL_DAYS = Number(process.env.PATTERN_LEDGER_TTL_DAYS ?? 30);
 
 // $/1M tokens, checked against the Anthropic pricing page rather than
 // recalled from training data (rates drift). Both current and legacy
@@ -396,6 +425,7 @@ async function streamAnthropicMessage(body: Record<string, unknown>): Promise<St
 const TOOL_NAME = "recommend_component";
 const RECORD_DECISION_TOOL_NAME = "record_component_decision";
 const EXTRACT_REQUIREMENTS_TOOL_NAME = "extract_requirements";
+const READ_LEDGER_TOOL_NAME = "read_ledger";
 
 const INPUT_SCHEMA = {
   type: "object",
@@ -430,8 +460,14 @@ const INPUT_SCHEMA = {
         "belongs to. When provided, past decisions confirmed via " +
         "record_component_decision for this same project_id are surfaced to " +
         "the model as a consistency signal (never a rule -- a genuinely " +
-        "better match found in this search still wins). Omit to skip memory " +
-        "lookup entirely; this never falls back to a shared/global bucket.",
+        "better match found in this search still wins). Separately, this call " +
+        "may also be served directly from a recent, high-confidence prior " +
+        "recommend_component judgment for this same project_id/component_need/" +
+        "domain/framework/existing_stack, skipping search+score entirely -- " +
+        "check the response for served_from_ledger: true, which is always set " +
+        "when this happens; see read_ledger to inspect what's stored. Omit " +
+        "project_id to skip both lookups entirely; neither ever falls back to " +
+        "a shared/global bucket.",
     },
     checklist: {
       type: "array",
@@ -506,6 +542,25 @@ const RECORD_DECISION_INPUT_SCHEMA = {
     },
   },
   required: ["project_id", "component_need", "action", "source"],
+} as const;
+
+const READ_LEDGER_INPUT_SCHEMA = {
+  type: "object",
+  properties: {
+    project_id: {
+      type: "string",
+      description: "The project_id used in prior recommend_component calls whose ledger entries you want to inspect.",
+    },
+    component_need: {
+      type: "string",
+      description: "Optional. Filters entries by simple keyword match against their component_need. Omit to list all entries for the project.",
+    },
+    limit: {
+      type: "number",
+      description: "Optional. Maximum number of entries to return, most recent first. Defaults to 20.",
+    },
+  },
+  required: ["project_id"],
 } as const;
 
 // Shared between buildSystemPrompt's own step 2 and
@@ -690,10 +745,13 @@ async function runSinglePass(input: {
   }
 
   // Coverage still computes fresh below regardless of what this finds --
-  // memory only ever adds context to the user message, it never short-
-  // circuits search/scoring or gets treated as a cached verdict. No
-  // project_id -> no lookup at all, not a shared/global fallback (see
-  // getPastDecisions).
+  // memory (MEMORY_PATH/record_component_decision) only ever adds context
+  // to the user message, it never short-circuits search/scoring or gets
+  // treated as a cached verdict. No project_id -> no lookup at all, not a
+  // shared/global fallback (see getPastDecisions). This is distinct from
+  // the ledger cache-hit check in judgeComponent, which CAN skip this
+  // entire function on a matching high-confidence entry -- that check
+  // happens one level up, before runSinglePass is ever called.
   const pastDecisions = input.project_id ? getPastDecisions(input.project_id) : [];
   const pastDecisionsBlock =
     pastDecisions.length === 0
@@ -1226,6 +1284,115 @@ export function getPastDecisions(projectId: string): DecisionEntry[] {
   return memory[projectId] ?? [];
 }
 
+// One line per judgment call that reached the API with a project_id and
+// landed on reason "scored" or "no_candidates_found" (see appendLedgerEntry
+// call sites in judgeComponent). candidates_evaluated/chosen_candidate hold
+// only DistilledCandidate-shaped data -- never raw evidence text, per the
+// data-minimization boundary above. project_conventions_snapshot is a hash
+// of existing_stack (see hashConventions), null when existing_stack wasn't
+// provided either time -- two null snapshots still count as a match.
+export interface LedgerEntry {
+  id: string;
+  timestamp: string;
+  project_id: string;
+  component_need: string;
+  domain: string;
+  framework: string;
+  checklist: string[];
+  checklist_source: "extracted" | "provided";
+  candidates_evaluated: DistilledCandidate[];
+  verdict: string;
+  chosen_candidate: string | null;
+  confidence: string;
+  reason: string;
+  coverage: string | null;
+  project_conventions_snapshot: string | null;
+}
+
+function hashConventions(existingStack?: string): string | null {
+  if (!existingStack) return null;
+  return createHash("sha256").update(existingStack).digest("hex").slice(0, 16);
+}
+
+// Same "missing/malformed collapses to empty" philosophy as readMemory,
+// but line-oriented (JSONL) rather than whole-file JSON -- a single
+// corrupted line (e.g. a hand-edited file, or a write that got cut off)
+// is skipped rather than failing the whole read.
+function readLedgerEntries(projectId: string): LedgerEntry[] {
+  let raw: string;
+  try {
+    raw = readFileSync(LEDGER_PATH, "utf8");
+  } catch {
+    return [];
+  }
+  const entries: LedgerEntry[] = [];
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const parsed = JSON.parse(line);
+      if (parsed && typeof parsed === "object" && parsed.project_id === projectId) {
+        entries.push(parsed as LedgerEntry);
+      }
+    } catch {
+      // skip malformed line
+    }
+  }
+  return entries;
+}
+
+// The only entry point that writes ledger.jsonl. Validates every
+// candidate against the DistilledCandidate boundary before it ever touches
+// disk -- a raw object reaching here throws rather than silently
+// persisting (see assertDistilledCandidateShape).
+function appendLedgerEntry(entry: LedgerEntry): void {
+  for (const candidate of entry.candidates_evaluated) {
+    assertDistilledCandidateShape(candidate);
+  }
+  mkdirSync(dirname(LEDGER_PATH), { recursive: true });
+  appendFileSync(LEDGER_PATH, JSON.stringify(entry) + "\n", "utf8");
+}
+
+// Verdict-serving match: deliberately stricter than findLedgerMatches
+// below (exact component_need/domain/framework, not keyword overlap)
+// since this decides whether a fresh API call gets skipped entirely, not
+// just what gets listed back to a caller browsing history.
+function findLedgerCacheHit(
+  input: { component_need: string; domain: string; framework: string; existing_stack?: string },
+  entries: LedgerEntry[]
+): LedgerEntry | null {
+  const snapshot = hashConventions(input.existing_stack);
+  const needLower = input.component_need.trim().toLowerCase();
+  const ttlMs = LEDGER_TTL_DAYS * 24 * 60 * 60 * 1000;
+  const now = Date.now();
+
+  const eligible = entries.filter((e) => {
+    if (e.component_need.trim().toLowerCase() !== needLower) return false;
+    if (e.domain !== input.domain) return false;
+    if (e.framework !== input.framework) return false;
+    if (e.project_conventions_snapshot !== snapshot) return false;
+    if (e.confidence !== "high") return false;
+    if (e.reason !== "scored" && e.reason !== "no_candidates_found") return false;
+    const age = now - new Date(e.timestamp).getTime();
+    if (!Number.isFinite(age) || age > ttlMs) return false;
+    return true;
+  });
+  if (eligible.length === 0) return null;
+  return eligible.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0];
+}
+
+// Broader listing for the read_ledger tool itself -- simple keyword match
+// on component_need (no embeddings, per the build plan's explicit v1
+// scope), not the strict exact match findLedgerCacheHit needs.
+function findLedgerMatches(projectId: string, componentNeed?: string, limit = 20): LedgerEntry[] {
+  let entries = readLedgerEntries(projectId);
+  if (componentNeed && componentNeed.trim()) {
+    const needle = componentNeed.trim().toLowerCase();
+    entries = entries.filter((e) => e.component_need.toLowerCase().includes(needle));
+  }
+  entries.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  return entries.slice(0, limit);
+}
+
 // Orchestrates the ensemble: run once, and only pay for 2 more full
 // pipeline passes when the single-run result landed close enough to a
 // verdict threshold that a single item's judgment swinging could flip
@@ -1257,6 +1424,38 @@ function aggregateMeta(passes: Array<{ ok: true; result: JudgmentResult }>): Jud
   };
 }
 
+// Builds the LedgerEntry appended after a fresh (non-cache-hit) judgment.
+// checklist/checklist_source come from the result itself, not input.checklist
+// -- that field captures what was actually scored regardless of whether the
+// caller pre-supplied it or this call extracted it internally.
+function buildLedgerEntry(
+  input: { component_need: string; domain: string; framework: string; existing_stack?: string },
+  projectId: string,
+  result: JudgmentResult
+): LedgerEntry {
+  const candidate = distillCandidate(result);
+  const checklist = Array.isArray(result.requirements_checked)
+    ? result.requirements_checked.map((r) => r.requirement).filter((r): r is string => !!r)
+    : [];
+  return {
+    id: randomUUID(),
+    timestamp: new Date().toISOString(),
+    project_id: projectId,
+    component_need: input.component_need,
+    domain: input.domain,
+    framework: input.framework,
+    checklist,
+    checklist_source: result.checklist_source ?? "extracted",
+    candidates_evaluated: candidate ? [candidate] : [],
+    verdict: result.verdict,
+    chosen_candidate: candidate?.name ?? null,
+    confidence: result.confidence,
+    reason: result.reason,
+    coverage: result.coverage ?? null,
+    project_conventions_snapshot: hashConventions(input.existing_stack),
+  };
+}
+
 async function judgeComponent(input: {
   component_need: string;
   domain: string;
@@ -1265,6 +1464,50 @@ async function judgeComponent(input: {
   project_id?: string;
   checklist?: string[];
 }): Promise<string> {
+  // The one deliberate exception to "coverage is scored fresh every time"
+  // (see file header and runSinglePass's memory-lookup comment) -- bounded
+  // by exact component_need/domain/framework/conventions match, confidence
+  // "high", and LEDGER_TTL_DAYS staleness. Checked before the skip-list
+  // fast-path so a skip-list primitive never bothers with a ledger read.
+  const ledgerCacheHit =
+    !isSkipListMatch(input.component_need) && input.project_id
+      ? findLedgerCacheHit(input, readLedgerEntries(input.project_id))
+      : null;
+
+  if (ledgerCacheHit) {
+    console.error(
+      JSON.stringify({
+        diagnostic: "ledger_cache_hit",
+        project_id: input.project_id,
+        ledger_entry_id: ledgerCacheHit.id,
+        original_timestamp: ledgerCacheHit.timestamp,
+      })
+    );
+    const candidate = ledgerCacheHit.candidates_evaluated[0] ?? null;
+    const result: JudgmentResult = {
+      verdict: ledgerCacheHit.verdict,
+      confidence: ledgerCacheHit.confidence,
+      reason: "ledger_cache_hit",
+      coverage: ledgerCacheHit.coverage,
+      requirements_checked: null,
+      recommendation: candidate
+        ? { source: candidate.source, install_command: null, component_description: candidate.name, reference: null }
+        : null,
+      ensemble: { triggered: false },
+      checklist_source: ledgerCacheHit.checklist_source,
+      served_from_ledger: true,
+      ledger_entry_id: ledgerCacheHit.id,
+      original_verdict_timestamp: ledgerCacheHit.timestamp,
+      _meta: {
+        total_ms: 1,
+        breakdown_ms: { extract: 1, search: 0, score: 0 },
+        tokens_used: { input: 0, output: 0 },
+        estimated_cost_usd: 0,
+      },
+    };
+    return JSON.stringify(result);
+  }
+
   // Session cap and local logging both apply only to calls that actually
   // reach the API -- skip-list hits never do, so both are excluded here
   // on the same condition rather than counted/logged and refunded.
@@ -1291,6 +1534,9 @@ async function judgeComponent(input: {
   if (!isBoundaryRisk(first.result)) {
     first.result.ensemble = { triggered: false };
     if (reachesApi) logCall(input, first.result);
+    if (reachesApi && input.project_id && (first.result.reason === "scored" || first.result.reason === "no_candidates_found")) {
+      appendLedgerEntry(buildLedgerEntry(input, input.project_id, first.result));
+    }
     return JSON.stringify(first.result);
   }
 
@@ -1355,6 +1601,9 @@ async function judgeComponent(input: {
   // reachable for calls that passed the skip-list check above -- always
   // reachesApi === true here, no guard needed.
   logCall(input, base);
+  if (input.project_id && (base.reason === "scored" || base.reason === "no_candidates_found")) {
+    appendLedgerEntry(buildLedgerEntry(input, input.project_id, base));
+  }
   return JSON.stringify(base);
 }
 
@@ -1386,6 +1635,13 @@ export interface JudgmentResult {
   ensemble?: { triggered: boolean; runs?: string[]; agreement?: string };
   past_decision_signal?: { considered: boolean; note: string } | null;
   checklist_source?: "extracted" | "provided";
+  // Present and true only when this response was served from the ledger
+  // cache hit path (see findLedgerCacheHit) instead of a fresh API call --
+  // requirements_checked is null on this path since the ledger never
+  // stores per-requirement evidence text, only distilled candidate fields.
+  served_from_ledger?: boolean;
+  ledger_entry_id?: string;
+  original_verdict_timestamp?: string;
   _meta?: {
     total_ms: number;
     breakdown_ms: { extract: number; search: number; score: number };
@@ -1455,6 +1711,52 @@ export function parseCoveragePercent(coverage: string | null | undefined): numbe
     if (total > 0) return (met / total) * 100;
   }
   return null;
+}
+
+// The only shape ever allowed to reach the ledger (see appendLedgerEntry) --
+// deliberately excludes anything raw: no HTML, no full prop tables, no
+// search snippet text, no evidence strings. Everything here already went
+// through the judgment call's own scoring; this is a projection of that
+// result, not a second copy of what was scraped to produce it.
+export interface DistilledCandidate {
+  source: string | null;
+  name: string | null;
+  url: string | null;
+  coverage_pct: number | null;
+}
+
+const ALLOWED_DISTILLED_CANDIDATE_KEYS = new Set(["source", "name", "url", "coverage_pct"]);
+
+// Throws rather than silently stripping unknown keys -- a raw object
+// reaching this function is a bug (some caller skipped distillCandidate),
+// and failing loudly is what makes "Pattern never persists scraped source"
+// a checkable claim rather than a hopeful one.
+export function assertDistilledCandidateShape(value: unknown): asserts value is DistilledCandidate {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("DistilledCandidate must be a plain object");
+  }
+  const keys = Object.keys(value as Record<string, unknown>);
+  const extra = keys.filter((k) => !ALLOWED_DISTILLED_CANDIDATE_KEYS.has(k));
+  if (extra.length > 0) {
+    throw new Error(`DistilledCandidate has disallowed key(s): ${extra.join(", ")}`);
+  }
+}
+
+// Only ever called for verdict "use_existing" with a populated
+// recommendation -- custom_build has no existing candidate to distill, so
+// candidates_evaluated/chosen_candidate stay empty/null in the ledger for
+// those. `url` reuses the already fetch-verified scoring_fetch URL
+// (see JudgmentResult._meta.scoring_fetch) rather than inventing a second
+// notion of "the candidate's real page" -- if that fetch didn't happen or
+// failed, url is null rather than falling back to an unverified guess.
+export function distillCandidate(result: JudgmentResult): DistilledCandidate | null {
+  if (result.verdict !== "use_existing" || !result.recommendation) return null;
+  return {
+    source: result.recommendation.source ?? null,
+    name: result.recommendation.component_description ?? null,
+    url: result._meta?.scoring_fetch?.succeeded ? result._meta.scoring_fetch.url ?? null : null,
+    coverage_pct: parseCoveragePercent(result.coverage),
+  };
 }
 
 export function enforceVerdictThreshold(parsed: JudgmentResult): void {
@@ -1818,6 +2120,22 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         "number, never computed or verified by Pattern.",
       inputSchema: RECORD_DECISION_INPUT_SCHEMA,
     },
+    {
+      name: READ_LEDGER_TOOL_NAME,
+      description:
+        "Lists past recommend_component judgment entries for a project_id -- " +
+        "every call that reached the API and produced a verdict, not just " +
+        "ones you explicitly confirmed via record_component_decision. Each " +
+        "entry holds only distilled fields (verdict, confidence, coverage, " +
+        "chosen candidate's source/name/url) -- never the original " +
+        "per-requirement evidence text. Useful for auditing what Pattern has " +
+        "already judged for a project, or for understanding why a later " +
+        "call came back with served_from_ledger: true (see recommend_component " +
+        "-- a high-confidence entry here, matching on component_need/domain/" +
+        "framework/existing_stack and recent enough, can be served directly " +
+        "instead of a fresh search+score).",
+      inputSchema: READ_LEDGER_INPUT_SCHEMA,
+    },
   ],
 }));
 
@@ -1910,6 +2228,27 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
   }
 
+  if (request.params.name === READ_LEDGER_TOOL_NAME) {
+    const args = request.params.arguments as {
+      project_id: string;
+      component_need?: string;
+      limit?: number;
+    };
+
+    try {
+      const entries = findLedgerMatches(args.project_id, args.component_need, args.limit);
+      return {
+        content: [{ type: "text", text: JSON.stringify({ project_id: args.project_id, entries }) }],
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return {
+        content: [{ type: "text", text: `Error: ${message}` }],
+        isError: true,
+      };
+    }
+  }
+
   throw new Error(`Unknown tool: ${request.params.name}`);
 });
 
@@ -1918,7 +2257,15 @@ async function main() {
   await server.connect(transport);
 }
 
-main().catch((err) => {
-  console.error("Fatal error starting pattern-mcp:", err);
-  process.exit(1);
-});
+// Guard exists so verification scripts (e.g. verify-ledger-boundary.mjs)
+// can import this module's exported pure functions (distillCandidate,
+// assertDistilledCandidateShape, parseCoveragePercent, etc.) without also
+// spinning up a stdio server that blocks on stdin. Real usage (the bin
+// entry point, `npx pattern-mcp`) never sets this, so autostart is
+// unaffected.
+if (!process.env.PATTERN_NO_AUTOSTART) {
+  main().catch((err) => {
+    console.error("Fatal error starting pattern-mcp:", err);
+    process.exit(1);
+  });
+}
