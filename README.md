@@ -14,8 +14,6 @@ on references from Mobbin or Figma Community.
 
 [Website](https://usepattern.sh) · [npm](https://www.npmjs.com/package/pattern-mcp) · [Report an issue](https://github.com/donaldrichard19-LVD/pattern-mcp/issues/new/choose)
 
-![Pattern](docs/images/readme-hero.png)
-
 ## Install
 
 ```bash
