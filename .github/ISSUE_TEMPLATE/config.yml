@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security notes
+    url: https://github.com/donaldrichard19-LVD/pattern-mcp/blob/main/SECURITY.md
+    about: Read the known gaps here before reporting a security issue.

@@ -1,0 +1,26 @@
+name: Feature request
+description: Suggest something Pattern doesn't do yet.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: gap
+    attributes:
+      label: What's the gap
+      description: What are you trying to do that Pattern doesn't support today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: What should Pattern do instead? Include example input/output if it helps.
+    validations:
+      required: false
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: Current workaround, if any
+    validations:
+      required: false

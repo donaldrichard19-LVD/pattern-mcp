@@ -1,0 +1,57 @@
+name: Bug report
+description: Something in Pattern isn't working as documented.
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you call, and what came back?
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Tool input
+      description: >
+        The component_need, domain, framework (and checklist, if you passed
+        one) for recommend_component or extract_requirements.
+      render: json
+    validations:
+      required: false
+
+  - type: input
+    id: version
+    attributes:
+      label: pattern-mcp version
+      placeholder: "0.1.1"
+    validations:
+      required: true
+
+  - type: input
+    id: client
+    attributes:
+      label: MCP client
+      placeholder: "Claude Code, Claude Desktop, Cursor, ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant stderr diagnostics
+      description: >
+        Pattern logs a JSON diagnostic line to stderr whenever it corrects
+        the model's own output (coverage_recounted, verdict_corrected,
+        etc.) -- paste any that look relevant.
+      render: json
+    validations:
+      required: false
