@@ -269,12 +269,16 @@ export function computeBreakdownMs(t: PhaseTimings): { extract: number; search: 
 }
 
 function buildMeta(timings: PhaseTimings, usage: AnthropicUsage): NonNullable<JudgmentResult["_meta"]> {
+  const fresh = usage.input_tokens ?? 0;
+  const cacheWrite = usage.cache_creation_input_tokens ?? 0;
+  const cacheRead = usage.cache_read_input_tokens ?? 0;
   return {
     total_ms: timings.scoreEndMs - timings.requestStartMs,
     breakdown_ms: computeBreakdownMs(timings),
     tokens_used: {
-      input: (usage.input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0),
+      input: fresh + cacheWrite + cacheRead,
       output: usage.output_tokens ?? 0,
+      input_breakdown: { fresh, cache_write: cacheWrite, cache_read: cacheRead },
     },
     estimated_cost_usd: estimateCostUsd(usage, MODEL),
   };
@@ -1427,6 +1431,18 @@ function aggregateMeta(passes: Array<{ ok: true; result: JudgmentResult }>): Jud
     tokens_used: {
       input: metas.reduce((sum, m) => sum + m.tokens_used.input, 0),
       output: metas.reduce((sum, m) => sum + m.tokens_used.output, 0),
+      // Only present if every pass has it -- all passes go through the same
+      // buildMeta call site in practice, so a mix would mean something else
+      // changed; safer to omit than to silently sum a partial set.
+      ...(metas.every((m) => m.tokens_used.input_breakdown)
+        ? {
+            input_breakdown: {
+              fresh: metas.reduce((sum, m) => sum + (m.tokens_used.input_breakdown?.fresh ?? 0), 0),
+              cache_write: metas.reduce((sum, m) => sum + (m.tokens_used.input_breakdown?.cache_write ?? 0), 0),
+              cache_read: metas.reduce((sum, m) => sum + (m.tokens_used.input_breakdown?.cache_read ?? 0), 0),
+            },
+          }
+        : {}),
     },
     estimated_cost_usd: Math.round(metas.reduce((sum, m) => sum + m.estimated_cost_usd, 0) * 10000) / 10000,
   };
@@ -1558,13 +1574,40 @@ async function judgeComponent(input: {
     })
   );
 
-  const [second, third] = await Promise.all([runSinglePass(input), runSinglePass(input)]);
-  const passes = [first, second, third].filter((p): p is { ok: true; result: JudgmentResult } => p.ok);
-
-  const verdicts = passes.map((p) => p.result.verdict);
-  const counts = new Map<string, number>();
+  // Adaptive escalation: run only a 2nd pass first. A binary verdict
+  // (use_existing | custom_build) can only tie at 2 passes, never at 3 --
+  // so we escalate to a 3rd pass ONLY on that 1/1 tie, which is exactly
+  // the case that actually needs a tie-break. When the 2nd pass agrees
+  // with the 1st, that agreement is itself the answer and a 3rd pass
+  // would just spend real API cost confirming what's already settled.
+  // This does not touch the correctness guarantee for genuine
+  // disagreement -- it still always resolves via an odd-numbered
+  // majority vote, same as the flat 3-run version this replaces.
+  const second = await runSinglePass(input);
+  let passes = [first, second].filter((p): p is { ok: true; result: JudgmentResult } => p.ok);
+  let verdicts = passes.map((p) => p.result.verdict);
+  let counts = new Map<string, number>();
   for (const v of verdicts) counts.set(v, (counts.get(v) ?? 0) + 1);
-  const [majorityVerdict, majorityCount] = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
+  let sortedCounts = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+
+  const isTwoWayTie = passes.length === 2 && sortedCounts.length === 2 && sortedCounts[0][1] === sortedCounts[1][1];
+
+  if (isTwoWayTie) {
+    console.error(
+      JSON.stringify({
+        diagnostic: "ensemble_tie_escalated",
+        runs: verdicts,
+      })
+    );
+    const third = await runSinglePass(input);
+    passes = [first, second, third].filter((p): p is { ok: true; result: JudgmentResult } => p.ok);
+    verdicts = passes.map((p) => p.result.verdict);
+    counts = new Map<string, number>();
+    for (const v of verdicts) counts.set(v, (counts.get(v) ?? 0) + 1);
+    sortedCounts = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  }
+
+  const [majorityVerdict, majorityCount] = sortedCounts[0];
   const agreement = `${majorityCount}/${passes.length}`;
 
   // Use a pass whose own verdict already matches the majority as the base
@@ -1655,7 +1698,12 @@ export interface JudgmentResult {
   _meta?: {
     total_ms: number;
     breakdown_ms: { extract: number; search: number; score: number };
-    tokens_used: { input: number; output: number };
+    // input is the total (fresh + cache_write + cache_read), unchanged --
+    // input_breakdown splits it out so a call can be checked for whether
+    // prompt caching actually discounted anything, instead of that being
+    // invisible inside one summed number. Undefined on paths with no real
+    // API call (skip_list, ledger_cache_hit) since there's no split to report.
+    tokens_used: { input: number; output: number; input_breakdown?: { fresh: number; cache_write: number; cache_read: number } };
     estimated_cost_usd: number;
     // Diagnostic only, mirrors search_calls/fetch_calls stderr diagnostics
     // -- whether step 4's single candidate-verification fetch (see

@@ -374,6 +374,10 @@ The validation work has shown that this approach can work in practice, while als
 
 ## Next steps
 
+See [BACKLOG.md](./BACKLOG.md) for the current cost/latency reduction plan —
+sequenced instrumentation, fetch-cap, and search-budget changes following this
+week's first live multi-call usage data.
+
 ### 1. Test the skip-list with real usage
 
 Track which calls hit the skip-list.
