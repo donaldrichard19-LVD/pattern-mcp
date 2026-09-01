@@ -3,6 +3,7 @@ dist/
 .env
 .env.local
 *.log
+BACKLOG.md
 scripts/*results*.json
 eval/*.json
 !eval/eval-set.json
