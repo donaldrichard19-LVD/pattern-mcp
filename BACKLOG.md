@@ -177,3 +177,43 @@ demand.
 
 **Effort:** not sized — tiered above by provider category; needs its own
 design pass (like the schema/adapter item) before any tier is estimable.
+
+---
+
+## Switch telemetry from opt-in to opt-out
+
+Telemetry (`src/telemetry.ts`, added to answer whether installs come back for
+a second/third project and whether BYO-key rate limits/credit exhaustion
+recur) currently defaults **off** — `PATTERN_TELEMETRY` must be explicitly
+set to a truthy value to send anything. Opt-out (on by default, disabled via
+an explicit falsy value) would grow the data faster.
+
+**Why this is parked, not rejected:** the product brief's own Risks section
+(§06, #1) names developer trust — "an AI made a decision with no paper
+trail" — as this audience's specific anxiety, and README's Telemetry section
+leans on "off by default" as part of earning it. For a local-first MIT tool
+whose users are the kind of developer who reads source before installing,
+shipping opt-out risks becoming its own trust incident (a "Pattern phones
+home by default" issue) — which would work against the exact positioning
+problem §06 is trying to fix, not just be a neutral data-volume tradeoff.
+
+**If revisited, the change itself is small:**
+
+- Flip `TELEMETRY_ENABLED` in `src/telemetry.ts` to true unless
+  `PATTERN_TELEMETRY` is explicitly falsy (`0`/`false`/`no`) — same env var,
+  inverted default.
+- Hold sending on the very first invocation until *after*
+  `printTelemetryNoticeOnce()` has printed, so no install's first data point
+  goes out before that install has seen the disclosure (Homebrew/Next.js
+  precedent) — currently not needed since opt-in already guarantees this.
+- Rewrite README's Telemetry section and the SECURITY.md bullet from
+  "off by default, here's how to turn on" to "on by default, here's how to
+  turn off."
+
+**Trigger to revisit:** real signal that the current opt-in rate is too low
+to answer the two questions telemetry exists for (see dashboard:
+[Pattern CLI — Usage & Reliability](https://us.posthog.com/project/551608/dashboard/2052510)),
+not a default decision to flip without that evidence.
+
+**Effort:** small — a few hours of code + doc changes, no design pass needed.
+The cost is the trust tradeoff above, not implementation difficulty.
