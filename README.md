@@ -837,8 +837,74 @@ recommendations.
 Local project memory and the local call log are stored on the machine
 running Pattern. They are not sent anywhere by Pattern itself.
 
+The one exception is opt-in telemetry, off by default -- see
+[Telemetry](#telemetry) below for exactly what it sends and how to turn
+it on or off.
+
 Review [SECURITY.md](./SECURITY.md) before putting sensitive information
 into fields such as `component_need`, `domain`, or project IDs.
+
+## Telemetry
+
+Off by default. Nothing is sent anywhere for telemetry purposes unless
+you explicitly set:
+
+```
+PATTERN_TELEMETRY=1
+```
+
+**The one-time notice.** The first time you run this version of Pattern
+-- whether it's a brand-new install or an upgrade from a version before
+telemetry existed -- it prints a short notice to stderr explaining all of
+this and how to opt in. It prints exactly once, ever (tracked by a marker
+file at `~/.pattern/telemetry_notice_shown`), then never again, regardless
+of whether you act on it. There's no interactive y/n prompt: Pattern's
+stdin is the MCP JSON-RPC channel the client uses to talk to it, so
+blocking on stdin for a keypress would fight the protocol handshake
+instead of showing a dialog -- a stderr notice is the safe equivalent for
+a stdio MCP server.
+
+**Why it exists.** Two things about real usage can't be answered from
+this repo alone: whether people actually come back and use Pattern on a
+second or third project on their own, and how often a BYO Anthropic key
+actually hits a rate limit or runs out of credit in real sessions, not
+just the one time that happened during manual testing (see
+[Known limitations](#known-limitations)). Telemetry answers both without
+requiring anyone to fill out a survey.
+
+**What gets sent, when enabled:**
+
+- An anonymous, randomly generated install ID -- a UUID created once and
+  stored at `~/.pattern/install_id` (overridable via
+  `PATTERN_INSTALL_ID_PATH`), never derived from your machine, username,
+  or any other identifying information. This is the only thing that ties
+  two events together as "the same install."
+- A one-way SHA-256 hash of `project_id`, truncated to 16 hex characters
+  -- never the raw `project_id` string. The hash lets Pattern count how
+  many *distinct* projects one install has used, without ever seeing what
+  those projects are named.
+- On every `recommend_component` call that reaches the API or the ledger
+  cache-hit shortcut: `verdict`, `confidence`, `reason`,
+  `ensemble_triggered`, `estimated_cost_usd`, and `served_from_ledger` --
+  the same distilled shape already written to the
+  [local call log](#local-call-log), not new information.
+- On a failed Anthropic API call specifically: the HTTP status code and a
+  coarse classification (`rate_limit`, `insufficient_credit`, or `other`)
+  -- never the request or response body.
+
+**What never gets sent, telemetry on or off:** `component_need`,
+`domain`, `framework`, `existing_stack`, `requirements_checked` evidence,
+the raw `project_id`, or your Anthropic API key.
+
+**Where it goes.** Events go to Pattern's PostHog project via its public,
+write-only project key (safe to ship in source -- it can send events, it
+cannot read data back). Set `PATTERN_POSTHOG_KEY` /
+`PATTERN_POSTHOG_HOST` to point at a different project, e.g. for
+self-hosting.
+
+**Turning it off** is the default -- just don't set `PATTERN_TELEMETRY`.
+If you'd previously enabled it, unset the variable (or set it to `0`) to
+go back to fully local.
 
 ## Cost
 

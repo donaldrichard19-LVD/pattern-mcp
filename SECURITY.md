@@ -72,6 +72,18 @@ doesn't invalidate a key that already appeared in history.
   this file persists across restarts *and* is read back into future API
   calls, so treat its contents with the same care as the live inputs
   above, not just as a passive record.
+- **If you've explicitly set `PATTERN_TELEMETRY=1`** (off by default --
+  telemetry is opt-in, not opt-out), an anonymous per-install UUID
+  (`~/.pattern/install_id`), a SHA-256 hash of `project_id` (never the raw
+  string), and the distilled verdict shape already in `calls.log`
+  (verdict, confidence, reason, ensemble_triggered, estimated_cost_usd) go
+  to Pattern's PostHog project over HTTPS. A failed Anthropic API call
+  additionally sends the HTTP status and a coarse error classification
+  (`rate_limit` / `insufficient_credit` / `other`) -- never the response
+  body. `component_need`, `domain`, `framework`, `existing_stack`, and the
+  raw `project_id` are never included in telemetry, on or off. See
+  [Telemetry](./README.md#telemetry) for the full field list and how to
+  confirm it's off.
 - The server emits diagnostic JSON lines to **stderr** on every call
   (search queries, coverage recounts, verdict corrections, ensemble
   decisions). These are not written to disk by this server, but depending

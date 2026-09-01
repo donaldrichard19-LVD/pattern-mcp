@@ -38,6 +38,12 @@ import { createHash, randomUUID } from "node:crypto";
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import {
+  captureApiError,
+  captureRecommendation,
+  printTelemetryNoticeOnce,
+  shutdownTelemetry,
+} from "./telemetry.js";
 
 export const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 // Configurable so Sonnet vs. Haiku can be A/B tested without a code change.
@@ -1531,6 +1537,15 @@ async function judgeComponent(input: {
         estimated_cost_usd: 0,
       },
     };
+    captureRecommendation({
+      projectId: input.project_id,
+      verdict: result.verdict,
+      confidence: result.confidence,
+      reason: result.reason,
+      ensembleTriggered: false,
+      estimatedCostUsd: 0,
+      servedFromLedger: true,
+    });
     return JSON.stringify(result);
   }
 
@@ -1562,6 +1577,17 @@ async function judgeComponent(input: {
     if (reachesApi) logCall(input, first.result);
     if (reachesApi && input.project_id && (first.result.reason === "scored" || first.result.reason === "no_candidates_found")) {
       appendLedgerEntry(buildLedgerEntry(input, input.project_id, first.result));
+    }
+    if (reachesApi) {
+      captureRecommendation({
+        projectId: input.project_id,
+        verdict: first.result.verdict,
+        confidence: first.result.confidence,
+        reason: first.result.reason,
+        ensembleTriggered: false,
+        estimatedCostUsd: first.result._meta?.estimated_cost_usd ?? null,
+        servedFromLedger: false,
+      });
     }
     return JSON.stringify(first.result);
   }
@@ -1657,6 +1683,15 @@ async function judgeComponent(input: {
   if (input.project_id && (base.reason === "scored" || base.reason === "no_candidates_found")) {
     appendLedgerEntry(buildLedgerEntry(input, input.project_id, base));
   }
+  captureRecommendation({
+    projectId: input.project_id,
+    verdict: base.verdict,
+    confidence: base.confidence,
+    reason: base.reason,
+    ensembleTriggered: true,
+    estimatedCostUsd: base._meta?.estimated_cost_usd ?? null,
+    servedFromLedger: false,
+  });
   return JSON.stringify(base);
 }
 
@@ -2221,6 +2256,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      if (/Anthropic API error \d+/.test(message)) {
+        captureApiError({ tool: TOOL_NAME, message, projectId: args.project_id });
+      }
       return {
         content: [{ type: "text", text: `Error: ${message}` }],
         isError: true,
@@ -2255,6 +2293,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      if (/Anthropic API error \d+/.test(message)) {
+        captureApiError({ tool: EXTRACT_REQUIREMENTS_TOOL_NAME, message });
+      }
       return {
         content: [{ type: "text", text: `Error: ${message}` }],
         isError: true,
@@ -2317,8 +2358,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 });
 
 async function main() {
+  printTelemetryNoticeOnce();
   const transport = new StdioServerTransport();
   await server.connect(transport);
+  // Best-effort telemetry drain on clean shutdown -- no-op when telemetry
+  // was never enabled (see src/telemetry.ts).
+  for (const signal of ["SIGINT", "SIGTERM"] as const) {
+    process.on(signal, async () => {
+      await shutdownTelemetry();
+      process.exit(0);
+    });
+  }
 }
 
 // Guard exists so verification scripts (e.g. verify-ledger-boundary.mjs)

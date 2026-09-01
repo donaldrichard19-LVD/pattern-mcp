@@ -36,7 +36,8 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0"
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "posthog-node": "^5.51.4"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
