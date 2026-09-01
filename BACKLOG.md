@@ -1,5 +1,23 @@
 # Pattern — Backlog
 
+## Priority order (2026-08-31)
+
+1. **Cost/latency reduction plan for `recommend_component`** — smallest effort,
+   already in motion (2 of 3 shipped), concrete unblocked next step (step 1:
+   expand the instrumentation sample), no design pass or accuracy risk until
+   step 3. Do this first.
+2. **Canonical intent schema + per-source adapters** — scope as a *design
+   pass* next, not a build. Framed as the real moat, and would subsume steps
+   2-3 of the cost plan if it ships — worth sizing soon — but it's large and
+   unsized, and shouldn't block #1. Sequence: finish the cost plan, then spend
+   a design session sizing the shadcn/ui proof-of-concept adapter.
+3. **Multi-provider model support** — parked. No user has asked for it, and
+   even the cheapest useful tier (OpenAI) is medium effort with no committed
+   demand behind it. Revisit only if a real user request or competitive
+   pressure shows up.
+
+---
+
 ## Canonical intent schema + per-source adapters
 
 Today, source discovery (shadcn/ui, 21st.dev, ReUI, Mobbin, Figma Community) all
