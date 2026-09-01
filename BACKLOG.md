@@ -126,3 +126,54 @@ this round.
 **Effort:** small, sequential — each step is a single isolated change plus a
 remeasurement pass; the discipline is in not skipping the remeasurement or
 batching steps together, not in the size of any individual diff.
+
+---
+
+## Multi-provider model support (Anthropic vs. OpenAI vs. open-weight)
+
+Today `judgeComponent` is hardwired to Anthropic's Messages API, and critically
+to its **server-executed** `web_search_20250305`/`web_fetch_20250910` tools
+(`src/index.ts:825-846`) — search-budget enforcement, one-fetch-per-source
+dedup, and permalink verification all run through Anthropic's
+`server_tool_use`/`*_tool_result` blocks, not a generic tool-calling loop.
+Letting users pick a different provider isn't a config swap; it's a second
+adapter layer, same shape as the source adapters above but for the model
+instead of the source.
+
+**Why this might matter:** optionality (cost-sensitive users on cheaper
+models, users who need to keep judgments off Anthropic's infra) and provider
+redundancy. Raised as a curiosity question, not a committed direction — no
+user has asked for this yet.
+
+**Scope by tier (rough):**
+
+- **Anthropic model swap (Sonnet ↔ Haiku ↔ Opus)** — trivial, a config knob.
+  Not really "multi-provider," already effectively free.
+- **Add OpenAI** — medium. The Responses API has an equivalent server-side web
+  search tool, so the overall shape carries over, but tool-result parsing,
+  prompt-caching semantics (automatic, no explicit `cache_control`
+  breakpoints), and pricing all differ — the entire cost/latency plan above
+  would need to be recomputed per provider, not reused. Rough estimate: 1-2
+  weeks for a working adapter plus a re-run of the eval set.
+- **Open-weight models** — large. Most have no built-in server-side
+  search/fetch at all, so search (Tavily/Brave/Serper) and fetch (a proxy)
+  would need to be brought client-side, reimplementing today's
+  budget/dedup/permalink-verification logic outside Anthropic's server tools.
+  Bigger risk than plumbing: the ensemble judging and scoring prompts are
+  tuned against Claude's instruction-following — a weaker model could quietly
+  degrade coverage-scoring accuracy, so this needs real re-validation against
+  the gold eval set, not just a wiring change.
+
+**Relationship to the canonical schema/adapter item above:** same
+evaluate-before-generalize shape — one provider as proof of concept, design
+pass before sizing, don't build all adapters up front. If both this and the
+per-source adapter work eventually ship, the two adapter layers (provider,
+source) are orthogonal and should stay decoupled rather than merged into one
+interface.
+
+**Out of scope for now:** picking a second provider, writing the adapter
+interface, or committing to any tier above — this is parked pending real user
+demand.
+
+**Effort:** not sized — tiered above by provider category; needs its own
+design pass (like the schema/adapter item) before any tier is estimable.
