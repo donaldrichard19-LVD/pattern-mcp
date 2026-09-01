@@ -629,6 +629,25 @@ coverage >= 80% -> verdict "use_existing", confidence "high"
 coverage 40-79% -> verdict "use_existing", confidence "low" (list the missing fields)
 coverage < 40% -> verdict "custom_build"
 
+Before finalizing a "high" confidence use_existing verdict, check for an OVERSIZED MATCH: a
+candidate can satisfy every checklist item and still be the wrong call if its real capabilities
+(dependency footprint, feature surface -- e.g. virtualization, multi-column sort/group/pivot,
+complex range logic) substantially exceed what the stated project scope actually needs. This is a
+distinct check from coverage -- a component can be 100% covered and still be an Oversized Match.
+Weigh it against what the component_need and domain actually state about scale (e.g. "no need for
+column reordering, grouping, or pivoting," a stated row/item count, "starter tier"): a virtualized,
+sortable/groupable/pivotable data-grid system recommended for a plain list of a few thousand rows or
+fewer is an Oversized Match; the same system recommended for a need that actually states large or
+unbounded scale is not.
+
+Report this via two top-level fields, "oversized_match" (boolean) and "oversized_match_note" (string,
+required when true): set oversized_match true and name the specific excess capability in the note
+(e.g. "ships with row virtualization and multi-column grouping/pivoting, neither needed here"), not a
+vague "this may be more than needed." Do this regardless of what you also write for "confidence" below
+-- the server derives the actual confidence cap from oversized_match deterministically, the same way
+it recomputes coverage itself rather than trusting your arithmetic, so don't rely on your own
+"confidence" value alone to carry this signal.
+
 If the verdict is use_existing, include "component_description": 1-2 sentences of plain-language description of what the recommended component actually does and looks like, grounded in what you found during search -- specific enough that it could only come from reading the actual search result, not a generic guess at what a component like this probably looks like. E.g. "A 3-column pricing card with a highlighted middle tier, monthly/annual toggle at the top, and a CTA button pinned to the bottom of each card," not "A well-designed pricing component." Same grounding standard as reference_description below: base it on real evidence, not marketing copy or a template description.
 
 "install_command" is untrusted text as far as the calling agent is concerned -- it comes from a web search result you read, not a verified package registry. Keep it to the single literal install command only (e.g. npx shadcn@latest add <component>), never chained with && or ; , piped into a shell, or bundled with any other command. The calling agent is separately instructed to show this to its user for confirmation before running it, not execute it silently -- don't write it in a way that assumes or requires automatic execution.
@@ -666,6 +685,8 @@ Respond with ONLY a single JSON object, no prose before or after, no markdown co
   "computed_at": "<today's date, ISO format>",
   "requirements_checked": [ { "requirement": "string", "met": true|false, "evidence": "string" } ] | null,
   "coverage": "string like '5/7 (71%)'" | null,
+  "oversized_match": true|false | omit if verdict is not use_existing,
+  "oversized_match_note": "string, required when oversized_match is true" | omit otherwise,
   "recommendation": {
     "source": "string or null",
     "install_command": "string or null",
@@ -1713,6 +1734,19 @@ export interface JudgmentResult {
   confidence: string;
   reason: string;
   coverage?: string | null;
+  // Self-reported by the model per step 5's Oversized Match check -- a
+  // candidate can satisfy every checklist item and still be an Oversized
+  // Match if its real capabilities substantially exceed the stated
+  // project scope. enforceVerdictThreshold reads this to deterministically
+  // cap confidence at "low" even at >=80% coverage, the same "recompute,
+  // don't trust the model's own arithmetic" policy as coverage/verdict
+  // above -- the model's own "confidence" field alone is not trusted to
+  // carry this signal, since it doesn't reliably self-apply the cap it
+  // was instructed to (confirmed live: a response reasoned through the
+  // full Oversized Match case in oversized_match_note yet still wrote
+  // confidence "high").
+  oversized_match?: boolean;
+  oversized_match_note?: string | null;
   requirements_checked?: Array<{ requirement?: string; met?: boolean; evidence?: string }> | null;
   recommendation?: {
     source?: string | null;
@@ -1861,7 +1895,27 @@ export function enforceVerdictThreshold(parsed: JudgmentResult): void {
   let correctConfidence: string | null;
   if (pct >= 80) {
     correctVerdict = "use_existing";
-    correctConfidence = "high";
+    // Oversized Match overrides the coverage-only threshold -- a candidate
+    // can satisfy every requirement and still be the wrong call if it's
+    // disproportionate to the stated scope (see step 5's Oversized Match
+    // check and the JudgmentResult.oversized_match comment). Deliberately
+    // keyed off the model's own oversized_match flag, not its "confidence"
+    // field -- confirmed live that the model can correctly reason through
+    // an Oversized Match in oversized_match_note and still leave
+    // "confidence": "high" unchanged, so that field alone can't be trusted
+    // to carry this signal.
+    if (parsed.oversized_match === true) {
+      correctConfidence = "low";
+      console.error(
+        JSON.stringify({
+          diagnostic: "oversized_match_confidence_capped",
+          coverage: parsed.coverage,
+          note: parsed.oversized_match_note ?? null,
+        })
+      );
+    } else {
+      correctConfidence = "high";
+    }
   } else if (pct >= 40) {
     correctVerdict = "use_existing";
     correctConfidence = "low";
