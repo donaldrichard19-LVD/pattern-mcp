@@ -1664,6 +1664,38 @@ Pattern caches its system instructions using `cache_control: ephemeral`.
 The instructions are the same across calls, so repeated requests don't
 pay the full input cost for that block.
 
+### Measured cache and fetch behavior
+
+`_meta.tokens_used.input_breakdown` splits input tokens into `fresh`,
+`cache_write`, and `cache_read` (see [The `_meta`
+field](#the-_meta-field)) -- added specifically to check assumptions
+about caching against real numbers rather than guessing. Two real
+findings so far:
+
+- **A single, non-repeat call is not "all fresh."** The working
+  assumption had been that only exact-repeat calls (the [ledger cache
+  hit](#the-cache-hit-exception)) benefit from caching at all. A live
+  test disproved that: a fresh, non-repeat toast-component call came back
+  with roughly half its input tokens served from `cache_read`. A
+  follow-up 4-case sample (2026-09-02, spanning a clean `use_existing`
+  call, a `custom_build` call, and two historically boundary/inconsistent
+  cases) confirmed this wasn't a fluke -- `cache_read` share stayed in a
+  46-63% band across all four, regardless of call shape.
+- **`fresh` (fully-priced, never-cached) tokens are driven by whether the
+  call reaches step 6's Mobbin/Figma reference search, not by general
+  complexity or the boundary-risk ensemble firing.** In that same
+  4-case sample, the two `use_existing` calls had negligible `fresh`
+  tokens (0.2%); both `custom_build` calls (which searched Mobbin/Figma)
+  had 24-27.5% `fresh` -- even though, in both of those cases, the actual
+  Mobbin *fetch* failed (`url_not_accessible`, 0 bytes returned). That
+  rules out fetched-page content size as the driver for this cost --
+  it's the extra Mobbin/Figma-restricted *search* calls themselves. This
+  is why [`PATTERN_FETCH_MAX_CONTENT_TOKENS`](#fetch-grounded-scoring-and-reference-verification)
+  was trimmed (a fetch-content cap can't fix a search-call cost) rather
+  than split per-step as originally considered, and why reducing
+  Mobbin/Figma search overhead is tracked as its own, differently-scoped
+  future item rather than folded into that change.
+
 ### Search limits
 
 Pattern limits candidate discovery to 3 web searches -- one per source.
@@ -1701,9 +1733,12 @@ the category page), there's no safe fallback for an unverified met/not-met
 call, so nothing is silently corrected -- `scoring_fetch` just tells you
 whether the grounding actually ran.
 
-A fetch can read up to 15,000 content tokens. `web_fetch` has no separate
-per-call fee; the cost comes from the content added to the model's
-context.
+A fetch can read up to `PATTERN_FETCH_MAX_CONTENT_TOKENS` content tokens
+(default 12,000 -- trimmed from 15,000 after a real instrumentation
+sample showed the largest actual fetched page was ~10.7k tokens, see
+[Measured cache and fetch behavior](#measured-cache-and-fetch-behavior)
+above). `web_fetch` has no separate per-call fee; the cost comes from the
+content added to the model's context.
 
 ### Choosing a cheaper model
 

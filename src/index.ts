@@ -74,6 +74,32 @@ const SEARCH_BUDGET: number | null =
         return parsed;
       })();
 
+// Cost/latency reduction plan, step 2 (BACKLOG.md): trimmed from 15,000
+// after a real 4-case instrumentation sample (2026-09-02) showed the
+// largest actual fetched page was ~10.7k tokens (a shadcn doc page),
+// comfortably under this new cap with headroom. Deliberately NOT split
+// into separate step-4 (candidate-doc) vs. step-6 (Mobbin/Figma) caps as
+// originally scoped: both steps share one web_fetch tool instance, so a
+// real split would mean defining two separately-named web_fetch tools and
+// trusting the model to pick the right one per step -- a real behavior
+// risk for a saving the same sample disproved anyway. Both custom_build
+// cases in that sample had elevated "fresh" (fully-priced, uncached)
+// token counts even though their Mobbin fetch *failed*
+// (url_not_accessible, 0 bytes returned) -- the cost driver there is the
+// extra Mobbin/Figma-restricted search calls, not fetched content size,
+// so this cap can't address it. That's tracked as a separate, differently
+// -scoped backlog item, not folded into this one.
+const FETCH_MAX_CONTENT_TOKENS_RAW = process.env.PATTERN_FETCH_MAX_CONTENT_TOKENS ?? "12000";
+const FETCH_MAX_CONTENT_TOKENS = (() => {
+  const parsed = Number.parseInt(FETCH_MAX_CONTENT_TOKENS_RAW, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error(
+      `PATTERN_FETCH_MAX_CONTENT_TOKENS must be a positive integer, got: ${FETCH_MAX_CONTENT_TOKENS_RAW}`
+    );
+  }
+  return parsed;
+})();
+
 // Static skip-list: single-purpose primitives with no meaningful internal
 // structure to score coverage against. Decided in the product brief as a
 // starting point -- revisit once real usage data exists (see README).
@@ -1167,8 +1193,10 @@ existing_stack: ${input.existing_stack ?? "(not specified)"}${checklistBlock}${p
         max_uses: 3,
         // Category/browse pages can be large, and all we need from them
         // is a permalink, not the full page -- caps token cost of a
-        // fetch that turns out not to have a deep link after all.
-        max_content_tokens: 15000,
+        // fetch that turns out not to have a deep link after all. See
+        // FETCH_MAX_CONTENT_TOKENS above for why this is 12,000, not the
+        // original 15,000, and why it isn't split per-step.
+        max_content_tokens: FETCH_MAX_CONTENT_TOKENS,
       },
     ],
   });
