@@ -1,5 +1,6 @@
 "use client";
 
+import packageJson from "../../package.json";
 import { DOCS, REPO } from "./constants";
 import { BODY, H2, SECTION } from "./tokens";
 import { Button, Divider, Mark, Wordmark, trackClick } from "./ui";
@@ -58,7 +59,7 @@ export function Close() {
             Reference
           </a>
         </div>
-        <span style={{ fontSize: "var(--text-caption)", color: "var(--text-tertiary)" }}>v0.1.1 · MIT · Don Richard</span>
+        <span style={{ fontSize: "var(--text-caption)", color: "var(--text-tertiary)" }}>v{packageJson.version} · MIT · Don Richard</span>
       </div>
     </footer>
   );
