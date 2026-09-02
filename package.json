@@ -1,6 +1,6 @@
 {
   "name": "pattern-mcp",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "MCP tool that judges whether a UI component need should be met with an existing shadcn/ui, 21st.dev, or ReUI component or requires a custom build, using field/requirement coverage scored against real component code.",
   "type": "module",
   "main": "dist/index.js",
