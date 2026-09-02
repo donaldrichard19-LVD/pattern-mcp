@@ -32,7 +32,7 @@ whether to:
 
 Pattern is designed for agents to use **while they are building**.
 
-It exposes eight tools:
+It exposes eleven tools:
 
 - `recommend_component` — evaluates a UI component need and returns a
   structured recommendation.
@@ -61,6 +61,19 @@ It exposes eight tools:
   markdown block (checklist, candidates, verdict, `snapshot_ref`) you can
   paste into a PR or issue by hand -- see [Tool:
   `export_ledger_provenance`](#tool-export_ledger_provenance).
+- `post_ledger_provenance_to_github` — posts that same artifact as a real
+  comment on a GitHub PR/issue, idempotently -- see [Tool:
+  `post_ledger_provenance_to_github`](#tool-post_ledger_provenance_to_github).
+  The one tool here with a real, visible side effect outside your own
+  machine; confirm with the user before calling it.
+- `sweep_ledger_liveness` — batch version of `check_ledger_liveness`
+  across a whole project (or every project in the ledger), plus
+  dangling-cluster detection -- see [Tool:
+  `sweep_ledger_liveness`](#tool-sweep_ledger_liveness). Meant to be
+  invoked by your own cron/CI, not something Pattern schedules itself.
+- `backfill_ledger_snapshot_ref` — best-effort `snapshot_ref`
+  reconstruction for entries written before that field existed -- see
+  [Tool: `backfill_ledger_snapshot_ref`](#tool-backfill_ledger_snapshot_ref).
 
 ## How it works
 
@@ -739,14 +752,16 @@ came back with `served_from_ledger: true`.
       "file_path": null,
       "snapshot_ref": "a1b2c3d4e5f6...",
       "last_verified_live": null,
-      "live_status": "unknown"
+      "live_status": "unknown",
+      "reconstructed_snapshot_ref": null
     }
   ]
 }
 ```
 
-`file_path`/`snapshot_ref`/`last_verified_live`/`live_status` are the
-ledger integrity + decision provenance fields -- see [Ledger integrity and
+`file_path`/`snapshot_ref`/`last_verified_live`/`live_status`/
+`reconstructed_snapshot_ref` are the ledger integrity + decision
+provenance fields -- see [Ledger integrity and
 decision provenance](#ledger-integrity-and-decision-provenance) and [Tool:
 `check_ledger_liveness`](#tool-check_ledger_liveness). Entries written
 before this feature shipped read back with `file_path`/`snapshot_ref`/
@@ -954,8 +969,11 @@ an arbitrary shell command.
 ```
 
 `live_status` is one of `"live"`, `"orphaned"`, `"unknown"`, or
-(reserved, not yet produced -- see [Ledger integrity and decision
-provenance](#ledger-integrity-and-decision-provenance)) `"dangling"`.
+`"dangling"` (only ever produced by
+[`sweep_ledger_liveness`](#tool-sweep_ledger_liveness)'s cluster
+detection, never by a single-entry `check_ledger_liveness` call -- see
+[Ledger integrity and decision
+provenance](#ledger-integrity-and-decision-provenance)).
 Entries with no `file_path` are listed but never checked or written to
 `ledger_liveness.jsonl` -- their status is permanently `"unknown"` since
 there's nothing to check. Results here are also layered onto
@@ -1011,6 +1029,200 @@ custom-build reference (Mobbin/Figma) to the ledger (see
 [`distillCandidate`](#data-minimization)), so it can't reproduce it here.
 A `null` `snapshot_ref` (project root wasn't a git repository at judgment
 time) renders as prose too, not the literal word `null`.
+
+## Tool: `post_ledger_provenance_to_github`
+
+Posts one ledger entry's provenance artifact (the same content
+`export_ledger_provenance` produces) as a real comment on a GitHub PR or
+issue. **This is the one tool in this server with a real, visible side
+effect on a third-party service** -- every other tool here only ever
+touches local files. Confirm with the user before calling it, the same
+way you're expected to confirm before running a suggested
+`install_command` (see [Installation commands are not
+trusted](#installation-commands-are-not-trusted) and SECURITY.md).
+
+GitHub treats a PR and an issue identically for comments (both use the
+same `/issues/{number}/comments` endpoint), so there's one input shape
+for both -- no separate "is this a PR" flag.
+
+### Auth: `GITHUB_TOKEN`, not a GitHub App
+
+This resolves the open question left in [Ledger integrity and decision
+provenance](#ledger-integrity-and-decision-provenance)'s earlier writeup
+in favor of a **personal access token**, read from the `GITHUB_TOKEN`
+environment variable -- the same convention every GitHub Action and the
+`gh` CLI itself already use. Needs `repo` scope. A GitHub App was the
+alternative on the table, but it needs a hosted installation flow and a
+webhook receiver, which contradicts this project's entire distribution
+model (a local npm package, no hosted infrastructure -- see [Ledger
+integrity and decision provenance](#ledger-integrity-and-decision-provenance)
+and the Pattern Primer's build-order principle). Pattern manages no
+GitHub credential of its own, the same way it manages no git credential
+for `snapshot_ref` -- it just reads what's already in your environment.
+
+### Input
+
+```json
+{
+  "project_id": "my-booking-app",
+  "ledger_entry_id": "a1b2c3d4-...",
+  "repo": "my-org/my-booking-app",
+  "issue_number": 42
+}
+```
+
+All four fields are required.
+
+### Output
+
+```json
+{
+  "posted": true,
+  "comment_url": "https://github.com/my-org/my-booking-app/pull/42#issuecomment-...",
+  "comment_id": 123456789
+}
+```
+
+### Idempotent by construction
+
+Every posted comment is prefixed with a hidden HTML marker keyed to the
+ledger entry's id (`<!-- pattern-ledger-provenance:<id> -->`). A call
+first checks the thread's existing comments (most recent 100 -- full
+pagination isn't handled yet) for that marker; if found, it returns
+`{ "posted": false, "reason": "already_posted", "comment_url": "..." }`
+pointing at the existing comment instead of creating a duplicate. A
+repeat call is always safe to make.
+
+Errors (`isError: true`) clearly on: no `GITHUB_TOKEN` set, a malformed
+`repo` (not `owner/repo`), an unknown `ledger_entry_id`, or a GitHub API
+error (bad credentials, repo/issue not found, rate limit) -- the error
+message includes the real HTTP status and GitHub's own error text.
+
+## Tool: `sweep_ledger_liveness`
+
+Batch version of [`check_ledger_liveness`](#tool-check_ledger_liveness):
+updates `live_status` for every `file_path`-bearing entry across an
+entire project, or -- when `project_id` is omitted -- every `project_id`
+present in the ledger. This is the "on a schedule (project open or cron)"
+half of the referential-integrity design that `check_ledger_liveness`'s
+on-demand, single-project call doesn't cover.
+
+**Pattern has no daemon or scheduler of its own.** Each server invocation
+is transient, tied to its MCP host's lifecycle -- there is nowhere inside
+this server for a cron job to live. This tool is meant to be invoked by
+whatever external scheduler you already have (a cron job, a CI step
+running nightly), not something Pattern triggers automatically or ever
+will on its own.
+
+### Input
+
+```json
+{
+  "project_id": "my-booking-app"
+}
+```
+
+`project_id` is optional -- omit it to sweep every `project_id` present
+in the ledger in one call.
+
+### Output
+
+```json
+{
+  "projects_swept": 2,
+  "total_entries_checked": 14,
+  "dangling_clusters": [
+    { "project_id": "my-booking-app", "feature_id": "3f9a21c0", "entry_ids": ["...", "..."] }
+  ],
+  "per_project": [
+    { "project_id": "my-booking-app", "checked": 9, "total_entries": 12, "dangling_clusters": 1 },
+    { "project_id": "other-project", "checked": 5, "total_entries": 5, "dangling_clusters": 0 }
+  ]
+}
+```
+
+### Dangling clusters, and how "cluster" maps onto what the ledger actually stores
+
+The ledger has no explicit entry-to-entry reference field -- each line is
+an independent judgment record. `feature_id` (see [Feature cost
+attribution](#feature-cost-attribution)) is the one real grouping
+construct that already exists, so a "cluster" here means every entry
+sharing one `feature_id`, and "no live anchor" means none of them
+resolved to `live_status: "live"`. A single-entry group is just an
+ordinary orphaned/unknown entry, not a cluster phenomenon, so groups of
+one are never flagged.
+
+Every entry in a qualifying cluster gets `live_status: "dangling"` --
+overriding whatever `"orphaned"`/`"unknown"` value it had -- visible on
+its next `read_ledger`/`check_ledger_liveness` read via the same
+`ledger_liveness.jsonl` overlay `check_ledger_liveness` already writes to
+(see [Referential integrity](#referential-integrity-file_path--live_status)).
+Tested against the exact repro shape reported by a user: 13 entries, 12
+sharing a `feature_id` with no live anchor among them, 1 separate and
+live -- all 12 flag `dangling`, the 13th doesn't. Also tested at 200 and
+1,000 synthetic entries without reintroducing search+score-class latency
+(both complete in well under a second -- this is `fs.existsSync` calls
+and in-memory grouping, not API calls).
+
+## Tool: `backfill_ledger_snapshot_ref`
+
+Best-effort reconstruction of `snapshot_ref` for ledger entries written
+before that field existed (or written outside a git repository): finds
+the commit that was `HEAD` at or just before each entry's own timestamp
+(`git log --before=<timestamp> -1 --format=%H`). Entries that already
+have a real `snapshot_ref` are reported but never touched -- backfill
+only ever fills a gap, never second-guesses a captured value.
+
+### Input
+
+```json
+{
+  "project_id": "my-booking-app",
+  "ledger_entry_id": "a1b2c3d4-..."
+}
+```
+
+`ledger_entry_id` is optional -- omit it to backfill every entry in the
+project missing `snapshot_ref`.
+
+### Output
+
+```json
+{
+  "project_id": "my-booking-app",
+  "attempted": 3,
+  "reconstructed": 2,
+  "results": [
+    { "ledger_entry_id": "a1b2c3d4-...", "already_had_snapshot_ref": false, "reconstructed_snapshot_ref": "9f3a1c7e2b0d4f5a6b7c8d9e0f1a2b3c4d5e6f70" },
+    { "ledger_entry_id": "e5f6a7b8-...", "already_had_snapshot_ref": false, "reconstructed_snapshot_ref": null }
+  ]
+}
+```
+
+### A reconstructed value is always labeled, never presented as real
+
+Necessarily an approximation, not a guarantee: a rebase, force-push, or
+history rewrite since that timestamp can make "the commit `HEAD` pointed
+to then" no longer resolve to what the codebase actually looked like at
+judgment time. Every attempt is persisted (including failures -- a
+project whose git history doesn't reach back that far, or that isn't a
+git repository at all) to `~/.pattern/snapshot_backfill.jsonl` (override
+with `PATTERN_SNAPSHOT_BACKFILL_PATH`), and surfaces on later reads as
+`reconstructed_snapshot_ref` -- a field kept fully separate from
+`snapshot_ref` itself, never overwriting or being confused with it.
+[`export_ledger_provenance`](#tool-export_ledger_provenance) and
+[`post_ledger_provenance_to_github`](#tool-post_ledger_provenance_to_github)
+both render a reconstructed value with an explicit "(reconstructed via
+backfill -- best-effort approximation, not the original captured
+snapshot)" label, never silently as if it were equivalent to a value
+captured live.
+
+Tested against a real throwaway git repo with known commit history (an
+entry timestamped between two real commits reconstructs to exactly the
+first one), a 200-entry synthetic ledger outside any git repo (every
+attempt fails fast and reports `null` rather than throwing), and a
+read-only run against this project's own real `coop-commerce` ledger
+entries, per the spec's own test plan.
 
 ## Feature cost attribution
 
@@ -1182,11 +1394,12 @@ original judgment's snapshot, look up the entry named in its
 [`export_ledger_provenance`](#tool-export_ledger_provenance) packages one
 entry's full record -- checklist, candidates, verdict, `snapshot_ref` --
 into a markdown block you can paste into a PR or issue by hand.
-
-Not yet built (P2-P3 of Feature 2): the MCP action to post that artifact
-to a GitHub PR/issue automatically (blocked on an open question -- personal
-token vs. GitHub App -- see BACKLOG.md), and provenance backfill for
-entries that predate `snapshot_ref`.
+[`post_ledger_provenance_to_github`](#tool-post_ledger_provenance_to_github)
+posts that same artifact automatically, idempotently, using a personal
+`GITHUB_TOKEN` rather than a GitHub App (see that tool's docs for why).
+[`backfill_ledger_snapshot_ref`](#tool-backfill_ledger_snapshot_ref)
+reconstructs a best-effort `snapshot_ref` for entries that predate the
+field, always clearly labeled as reconstructed wherever it's rendered.
 
 ### Referential integrity: `file_path` / `live_status`
 
@@ -1203,25 +1416,25 @@ check whether that file still exists and still mentions
   `PROJECT_ROOT`, or the file exists but `chosen_candidate` can't be
   confirmed in it. Deliberately the default outcome for anything
   ambiguous: a false `"orphaned"` is worse than a lingering `"unknown"`.
-- **`dangling`** -- reserved, not yet produced. Feature 1's second
-  staleness type (a cluster of entries that only reference each other,
-  with no live anchor anywhere) is graph-level analysis across the whole
-  ledger, not a single-entry check -- P3, not built here.
+- **`dangling`** -- only ever produced by
+  [`sweep_ledger_liveness`](#tool-sweep_ledger_liveness), never by
+  `check_ledger_liveness` on its own: a cluster of 2+ entries sharing a
+  `feature_id` where none of them resolved to `"live"`. Graph-level
+  analysis across a project's whole entry set, not a single-entry check
+  -- see that tool's docs for why `feature_id` is the grouping used.
 
-Checks are on-demand only right now (call `check_ledger_liveness`
-yourself, or on whatever schedule you want) -- there's no automatic
-sweep. `live_status`/`last_verified_live` start `"unknown"`/`null` on
-every entry at write time and only ever advance via a
-`check_ledger_liveness` call; results are stored append-only in
-`~/.pattern/ledger_liveness.jsonl` (override with
-`PATTERN_LEDGER_LIVENESS_PATH`, same "append, never mutate the source
-line, most recent record wins at read time" convention as
+`check_ledger_liveness` remains on-demand and single-project;
+[`sweep_ledger_liveness`](#tool-sweep_ledger_liveness) is the
+scheduled/batch counterpart -- meant to be invoked by your own cron/CI,
+since Pattern has no scheduler of its own. `live_status`/`last_verified_live`
+start `"unknown"`/`null` on every entry at write time and only ever
+advance via a `check_ledger_liveness`/`sweep_ledger_liveness` call;
+results are stored append-only in `~/.pattern/ledger_liveness.jsonl`
+(override with `PATTERN_LEDGER_LIVENESS_PATH`, same "append, never mutate
+the source line, most recent record wins at read time" convention as
 `outcome_proxies.jsonl`, see [Outcome proxies](#outcome-proxies)) and
 layered onto `ledger.jsonl`'s own entries at read time -- the ledger line
 itself is never rewritten.
-
-Not yet built (P2-P3 of Feature 1): a scheduled/batch sweep across an
-entire ledger, and dangling-cluster detection.
 
 ## Per-project decision memory
 

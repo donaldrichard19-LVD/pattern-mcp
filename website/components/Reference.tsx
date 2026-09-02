@@ -79,6 +79,41 @@ const EXPORT_PROVENANCE_OUTPUT_ROWS = [
   ["markdown", "string", "Checklist, candidates compared, verdict, confidence, and snapshot_ref as one markdown block"],
 ];
 
+const POST_PROVENANCE_INPUT_ROWS = [
+  ["project_id", "string, required", "The project_id used in the recommend_component call that produced this entry"],
+  ["ledger_entry_id", "string, required", "The specific entry to post"],
+  ["repo", "string, required", 'GitHub repo in "owner/repo" form'],
+  ["issue_number", "number, required", "The PR or issue number to comment on — GitHub treats both identically"],
+];
+
+const POST_PROVENANCE_OUTPUT_ROWS = [
+  ["posted", "boolean", "false when a matching comment already exists — idempotent, never double-posts"],
+  ["comment_url", "string", "The new or existing comment's URL"],
+  ["reason", '"already_posted" | undefined', "Present only when posted is false"],
+];
+
+const SWEEP_LIVENESS_INPUT_ROWS = [
+  ["project_id", "string, optional", "Omit to sweep every project_id present in the ledger in one call"],
+];
+
+const SWEEP_LIVENESS_OUTPUT_ROWS = [
+  ["projects_swept", "number", "How many project_ids were covered"],
+  ["total_entries_checked", "number", "Sum of checked across all swept projects"],
+  ["dangling_clusters", "{ project_id, feature_id, entry_ids }[]", "2+ entries sharing a feature_id where none resolved to live_status live"],
+  ["per_project", "{ project_id, checked, total_entries, dangling_clusters }[]", "Per-project breakdown"],
+];
+
+const BACKFILL_INPUT_ROWS = [
+  ["project_id", "string, required", "The project_id whose ledger entries to backfill"],
+  ["ledger_entry_id", "string, optional", "Omit to backfill every entry in the project missing snapshot_ref"],
+];
+
+const BACKFILL_OUTPUT_ROWS = [
+  ["attempted", "number", "Entries missing snapshot_ref that backfill actually tried (entries with a real one are skipped)"],
+  ["reconstructed", "number", "How many of those attempts found a commit"],
+  ["results[].reconstructed_snapshot_ref", "string | null", "Always labeled as reconstructed wherever rendered — never presented as a real captured snapshot_ref"],
+];
+
 const EXTRACT_INPUT_ROWS = [
   ["component_need", "string, required", "Same field as recommend_component's input"],
   ["domain", "string, required", "Extraction is grounded in this, not the component name alone"],
@@ -99,6 +134,8 @@ const CONFIG_ROWS = [
   ["PATTERN_LEDGER_PATH", "~/.pattern/ledger.jsonl", "Every judgment that reaches the API, plus $0 ledger cache hits"],
   ["PATTERN_LEDGER_TTL_DAYS", "30", "How recent a ledger entry must be to serve as a cache hit"],
   ["PATTERN_PROJECT_ROOT", "process.cwd()", "Root check_ledger_liveness reads files from, and snapshot_ref's git commands run in"],
+  ["GITHUB_TOKEN", "required for post_ledger_provenance_to_github", "Personal access token, repo scope. Not needed for any other tool"],
+  ["PATTERN_SNAPSHOT_BACKFILL_PATH", "~/.pattern/snapshot_backfill.jsonl", "Every backfill_ledger_snapshot_ref attempt, including failures"],
 ];
 
 function Table({ head, rows, mono = 0 }: { head: string[]; rows: string[][]; mono?: number }) {
@@ -229,6 +266,42 @@ export function Reference() {
           <div style={{ display: "grid", gap: 12 }}>
             <div style={LABEL}>export_ledger_provenance output</div>
             <Table head={["Field", "Values", "Notes"]} rows={EXPORT_PROVENANCE_OUTPUT_ROWS} mono={1} />
+          </div>
+        </Reveal>
+        <Reveal>
+          <div style={{ display: "grid", gap: 12 }}>
+            <div style={LABEL}>post_ledger_provenance_to_github input — the one tool here with a real, visible side effect off your machine</div>
+            <Table head={["Field", "Type", "Notes"]} rows={POST_PROVENANCE_INPUT_ROWS} mono={1} />
+          </div>
+        </Reveal>
+        <Reveal>
+          <div style={{ display: "grid", gap: 12 }}>
+            <div style={LABEL}>post_ledger_provenance_to_github output</div>
+            <Table head={["Field", "Values", "Notes"]} rows={POST_PROVENANCE_OUTPUT_ROWS} mono={1} />
+          </div>
+        </Reveal>
+        <Reveal>
+          <div style={{ display: "grid", gap: 12 }}>
+            <div style={LABEL}>sweep_ledger_liveness input — batch/scheduled, meant for your own cron or CI</div>
+            <Table head={["Field", "Type", "Notes"]} rows={SWEEP_LIVENESS_INPUT_ROWS} mono={1} />
+          </div>
+        </Reveal>
+        <Reveal>
+          <div style={{ display: "grid", gap: 12 }}>
+            <div style={LABEL}>sweep_ledger_liveness output</div>
+            <Table head={["Field", "Values", "Notes"]} rows={SWEEP_LIVENESS_OUTPUT_ROWS} mono={1} />
+          </div>
+        </Reveal>
+        <Reveal>
+          <div style={{ display: "grid", gap: 12 }}>
+            <div style={LABEL}>backfill_ledger_snapshot_ref input</div>
+            <Table head={["Field", "Type", "Notes"]} rows={BACKFILL_INPUT_ROWS} mono={1} />
+          </div>
+        </Reveal>
+        <Reveal>
+          <div style={{ display: "grid", gap: 12 }}>
+            <div style={LABEL}>backfill_ledger_snapshot_ref output</div>
+            <Table head={["Field", "Values", "Notes"]} rows={BACKFILL_OUTPUT_ROWS} mono={1} />
           </div>
         </Reveal>
         <Reveal>

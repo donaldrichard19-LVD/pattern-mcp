@@ -93,34 +93,77 @@ doesn't invalidate a key that already appeared in history.
   `component_need`/`domain`, so the same caution applies if your client
   logs stderr.
 
-## `check_ledger_liveness` reads your filesystem and runs `git`
+## The ledger integrity tools read your filesystem and run `git`
 
 Every other tool in this server has no filesystem/git access to your repo
 at all (see [Per-project judgment ledger](./README.md#per-project-judgment-ledger)).
-`check_ledger_liveness`, and `recommend_component`'s `snapshot_ref`
-capture at write time, are the one deliberate exception — see [Ledger
+`check_ledger_liveness`, `sweep_ledger_liveness`,
+`backfill_ledger_snapshot_ref`, and `recommend_component`'s `snapshot_ref`
+capture at write time, are the deliberate exception — see [Ledger
 integrity and decision provenance](./README.md#ledger-integrity-and-decision-provenance)
-for the full design. Concretely:
+for the full design. Concretely, this server runs exactly two fixed git
+subcommands, both read-only, never touching repo state, and never an
+arbitrary or caller-influenced shell command:
 
-- `git rev-parse HEAD` runs against `PROJECT_ROOT` on every ledger write —
-  read-only, never touches repo state, never any other git subcommand.
-- `check_ledger_liveness` calls `fs.existsSync` and reads one file's
-  content, only for a `file_path` a caller explicitly passed to
-  `recommend_component`, only if it resolves inside `PROJECT_ROOT` — a
-  path that's absolute or escapes `PROJECT_ROOT` via `../` is rejected
-  (resolves to `live_status: "unknown"`) rather than read.
+- `git rev-parse HEAD` against `PROJECT_ROOT` on every ledger write, for
+  `snapshot_ref`.
+- `git log --before=<entry's own timestamp> -1 --format=%H` against
+  `PROJECT_ROOT`, only inside `backfill_ledger_snapshot_ref`, to
+  reconstruct a best-effort `snapshot_ref` for an entry that predates the
+  feature. The timestamp is one already stored on the ledger entry, never
+  taken from caller input.
+- `check_ledger_liveness`/`sweep_ledger_liveness` call `fs.existsSync` and
+  read one file's content, only for a `file_path` a caller explicitly
+  passed to `recommend_component`, only if it resolves inside
+  `PROJECT_ROOT` — a path that's absolute or escapes `PROJECT_ROOT` via
+  `../` is rejected (resolves to `live_status: "unknown"`) rather than
+  read. `sweep_ledger_liveness` is the same check, batched across a whole
+  project (or every project in the ledger) — it reads more files in one
+  call, but the same one-file-per-entry, same-guard rules apply to each.
+- None of these ever write to your repo.
 - `PROJECT_ROOT` defaults to this server process's own working directory
   (`process.cwd()`), not something derived from `project_id` or any other
   caller-supplied string — override with `PATTERN_PROJECT_ROOT` if your
   MCP host doesn't launch this server with the consuming repo as its
   working directory.
-- Neither of these ever writes to your repo, and neither ever runs an
-  arbitrary shell/git command beyond the fixed `git rev-parse HEAD`
-  above.
 
 If you're running this server in a context where its working directory
 might not be the repo you expect (e.g. a shared or multi-tenant host),
 set `PATTERN_PROJECT_ROOT` explicitly rather than relying on the default.
+
+`sweep_ledger_liveness` is meant to be invoked by whatever external
+scheduler you already have (a cron job, a CI step) — Pattern has no
+background process or scheduler of its own to trigger it automatically,
+and never does.
+
+## `post_ledger_provenance_to_github` posts real, visible content to GitHub
+
+Every other tool in this server, `check_ledger_liveness`/`snapshot_ref`
+included, only ever touches things on your own machine.
+`post_ledger_provenance_to_github` is the one exception: it makes a real
+`POST` to the GitHub API that creates a real, visible comment on a real
+PR or issue, using a `GITHUB_TOKEN` you provide (`repo` scope). Concretely:
+
+- Nothing is posted unless this tool is explicitly called with a
+  `repo`/`issue_number` you provide — Pattern never infers or guesses a
+  destination, and never calls this tool on its own as a side effect of
+  `recommend_component` or anything else.
+- The tool description instructs the calling agent to confirm with the
+  user before invoking it, the same convention as `install_command` (see
+  above) — but that's a prompting convention the model is instructed to
+  follow, not something this server enforces. Nothing stops a calling
+  agent that ignores its own instructions from posting without asking.
+- Idempotent by construction (a hidden marker keyed to the ledger entry's
+  id), so a retried or repeated call won't spam the same thread with
+  duplicate comments — but it only checks the most recent 100 comments on
+  that thread, so a very long-running thread with more history than that
+  could still get a second copy in an edge case.
+- `GITHUB_TOKEN` is read directly from the environment and sent as a
+  bearer token to `api.github.com` (or `PATTERN_GITHUB_API_BASE`, if
+  overridden) — Pattern never writes it to disk, logs it, or sends it
+  anywhere else. Scope the token to only what this needs (`repo`
+  read/write on the specific repos you intend to post to), the same care
+  you'd give any personal access token.
 
 ## Cost ceiling is a session cap, not a spend cap
 

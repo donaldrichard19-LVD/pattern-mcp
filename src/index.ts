@@ -212,6 +212,32 @@ function computeSnapshotRef(root: string): string | null {
     return null;
   }
 }
+
+// Feature 2 / Decision Provenance, P3: best-effort reconstruction of
+// snapshot_ref for an entry written before that field existed (or written
+// outside a git repo -- though a project that's never used git has
+// nothing to reconstruct from either way). Finds the commit that was HEAD
+// at or just before the entry's own timestamp. Necessarily an
+// approximation, not a guarantee: a rebase, force-push, or history
+// rewrite since that time can make "the commit HEAD pointed to then" no
+// longer resolve to what the codebase actually looked like at judgment
+// time -- exactly the risk the spec's own mitigation table already names.
+// Read-only, same timeout/error-swallowing discipline as
+// computeSnapshotRef above.
+function reconstructSnapshotRef(root: string, atISOTimestamp: string): string | null {
+  try {
+    const sha = execFileSync("git", ["log", `--before=${atISOTimestamp}`, "-1", "--format=%H"], {
+      cwd: root,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 2000,
+    }).trim();
+    return /^[0-9a-f]{7,40}$/i.test(sha) ? sha : null;
+  } catch {
+    return null;
+  }
+}
+
 // Kill switch for the cache-hit short-circuit specifically -- does NOT
 // disable the ledger itself. Entries still get written and read_ledger
 // still works either way; this only controls whether judgeComponent is
@@ -507,6 +533,9 @@ const REPORT_BUILD_COST_TOOL_NAME = "report_build_cost";
 const REPORT_OUTCOME_PROXY_TOOL_NAME = "report_outcome_proxy";
 const CHECK_LEDGER_LIVENESS_TOOL_NAME = "check_ledger_liveness";
 const EXPORT_LEDGER_PROVENANCE_TOOL_NAME = "export_ledger_provenance";
+const POST_LEDGER_PROVENANCE_TOOL_NAME = "post_ledger_provenance_to_github";
+const SWEEP_LEDGER_LIVENESS_TOOL_NAME = "sweep_ledger_liveness";
+const BACKFILL_LEDGER_SNAPSHOT_REF_TOOL_NAME = "backfill_ledger_snapshot_ref";
 
 const INPUT_SCHEMA = {
   type: "object",
@@ -777,6 +806,59 @@ const EXPORT_LEDGER_PROVENANCE_INPUT_SCHEMA = {
     },
   },
   required: ["project_id", "ledger_entry_id"],
+} as const;
+
+const POST_LEDGER_PROVENANCE_INPUT_SCHEMA = {
+  type: "object",
+  properties: {
+    project_id: {
+      type: "string",
+      description: "The project_id used in the recommend_component call that produced this ledger entry.",
+    },
+    ledger_entry_id: {
+      type: "string",
+      description: "The specific entry to post, from read_ledger or check_ledger_liveness.",
+    },
+    repo: {
+      type: "string",
+      description: 'GitHub repo in "owner/repo" form, e.g. "my-org/my-booking-app".',
+    },
+    issue_number: {
+      type: "number",
+      description:
+        "The PR or issue number to comment on -- GitHub treats both identically for comments, so no separate type flag is needed.",
+    },
+  },
+  required: ["project_id", "ledger_entry_id", "repo", "issue_number"],
+} as const;
+
+const SWEEP_LEDGER_LIVENESS_INPUT_SCHEMA = {
+  type: "object",
+  properties: {
+    project_id: {
+      type: "string",
+      description:
+        "Optional. Scope the sweep to one project_id. Omit to sweep every " +
+        "project_id present in the ledger -- the whole-ledger, scheduler-driven " +
+        "mode this tool exists for.",
+    },
+  },
+  required: [],
+} as const;
+
+const BACKFILL_LEDGER_SNAPSHOT_REF_INPUT_SCHEMA = {
+  type: "object",
+  properties: {
+    project_id: {
+      type: "string",
+      description: "The project_id whose ledger entries to backfill.",
+    },
+    ledger_entry_id: {
+      type: "string",
+      description: "Optional. Backfill just this one entry instead of every entry for project_id missing snapshot_ref.",
+    },
+  },
+  required: ["project_id"],
 } as const;
 
 // Shared between buildSystemPrompt's own step 2 and
@@ -1566,6 +1648,18 @@ export interface LedgerEntry {
   snapshot_ref: string | null;
   last_verified_live: string | null;
   live_status: "live" | "orphaned" | "dangling" | "unknown";
+  // Feature 2 P3: best-effort reconstruction for an entry whose real
+  // snapshot_ref is null (written before that field existed, or written
+  // outside a git repo). Never set at write time -- always null on a
+  // freshly built entry -- and only ever populated at read time from
+  // snapshot_backfill.jsonl (see backfillLedgerSnapshotRefs), the same
+  // "separate overlay, never mutate the source line" convention as
+  // live_status. Deliberately never conflated with snapshot_ref itself:
+  // a reconstructed value carries a materially weaker guarantee (an
+  // approximation of what HEAD probably was at that timestamp, not the
+  // commit actually captured live) and must stay visibly distinguishable
+  // from a real one wherever it's rendered (see formatProvenanceArtifact).
+  reconstructed_snapshot_ref: string | null;
 }
 
 function hashConventions(existingStack?: string): string | null {
@@ -1632,17 +1726,87 @@ function readLedgerLivenessRecords(ledgerEntryId: string): LedgerLivenessRecord[
   return records;
 }
 
+// Deliberately not a sort-then-take-first: readLedgerLivenessRecords
+// returns records in file/append order (oldest first), and a descending
+// sort by timestamp is NOT tie-safe -- JS's stable sort preserves the
+// original relative order among equal timestamps, so on a tie (two
+// records appended within the same millisecond, which sweepLedgerLiveness
+// does routinely -- a per-entry check followed immediately by a
+// dangling-cluster append for the same entry) it would silently return
+// the OLDER of the two. reduce with >= walks forward through true append
+// order and lets each later-appended tied record win, which is what
+// "latest" actually means here.
 function latestLiveness(ledgerEntryId: string): LedgerLivenessRecord | null {
-  const records = readLedgerLivenessRecords(ledgerEntryId).sort(
-    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-  );
-  return records[0] ?? null;
+  const records = readLedgerLivenessRecords(ledgerEntryId);
+  if (records.length === 0) return null;
+  return records.reduce((latest, r) => (new Date(r.timestamp).getTime() >= new Date(latest.timestamp).getTime() ? r : latest));
 }
 
 function withLatestLiveness(entry: LedgerEntry): LedgerEntry {
   const latest = latestLiveness(entry.id);
   if (!latest) return entry;
   return { ...entry, live_status: latest.live_status, last_verified_live: latest.timestamp };
+}
+
+// Feature 2 P3's overlay -- same append-only/latest-wins convention as
+// ledger_liveness.jsonl above, kept as a fully separate file/function pair
+// rather than folded into the liveness overlay: these two overlays answer
+// unrelated questions (is the file still there vs. what commit was this
+// judged against) and happen to share only their storage shape, not their
+// meaning.
+const SNAPSHOT_BACKFILL_PATH =
+  process.env.PATTERN_SNAPSHOT_BACKFILL_PATH ?? join(homedir(), ".pattern", "snapshot_backfill.jsonl");
+
+export interface SnapshotBackfillRecord {
+  id: string;
+  timestamp: string;
+  ledger_entry_id: string;
+  project_id: string;
+  reconstructed_snapshot_ref: string | null;
+}
+
+function appendSnapshotBackfillRecord(record: SnapshotBackfillRecord): void {
+  mkdirSync(dirname(SNAPSHOT_BACKFILL_PATH), { recursive: true });
+  appendFileSync(SNAPSHOT_BACKFILL_PATH, JSON.stringify(record) + "\n", "utf8");
+}
+
+function readSnapshotBackfillRecords(ledgerEntryId: string): SnapshotBackfillRecord[] {
+  let raw: string;
+  try {
+    raw = readFileSync(SNAPSHOT_BACKFILL_PATH, "utf8");
+  } catch {
+    return [];
+  }
+  const records: SnapshotBackfillRecord[] = [];
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const parsed = JSON.parse(line);
+      if (parsed && typeof parsed === "object" && parsed.ledger_entry_id === ledgerEntryId) {
+        records.push(parsed as SnapshotBackfillRecord);
+      }
+    } catch {
+      // skip malformed line
+    }
+  }
+  return records;
+}
+
+// Same tie-safety reasoning as latestLiveness above.
+function latestSnapshotBackfill(ledgerEntryId: string): SnapshotBackfillRecord | null {
+  const records = readSnapshotBackfillRecords(ledgerEntryId);
+  if (records.length === 0) return null;
+  return records.reduce((latest, r) => (new Date(r.timestamp).getTime() >= new Date(latest.timestamp).getTime() ? r : latest));
+}
+
+// Only overlays onto entries that actually need it -- an entry with a
+// real snapshot_ref never consults the backfill overlay at all, so a
+// stray/stale backfill record can never shadow a genuine captured value.
+function withReconstructedSnapshotRef(entry: LedgerEntry): LedgerEntry {
+  if (entry.snapshot_ref) return entry;
+  const latest = latestSnapshotBackfill(entry.id);
+  if (!latest) return entry;
+  return { ...entry, reconstructed_snapshot_ref: latest.reconstructed_snapshot_ref };
 }
 
 // Feature 1 / Referential Integrity, P1: the single-entry live-check.
@@ -1652,9 +1816,10 @@ function withLatestLiveness(entry: LedgerEntry): LedgerEntry {
 // resolveWithinRoot), or exists but the candidate name can't be confirmed
 // in its content -- conservative on purpose, per the spec's own risk
 // mitigation (a false "orphaned" is worse than a lingering "unknown").
-// "dangling" (an entry only cross-referenced by other ledger entries, no
-// live anchor anywhere) is graph-level analysis across the whole ledger,
-// not a single-entry check -- Feature 1 P3, not built here.
+// "dangling" (a cluster of entries with no live anchor anywhere among
+// them) is graph-level analysis across a whole project's entries, not a
+// single-entry check -- see detectDanglingClusters, part of
+// sweep_ledger_liveness (Feature 1 P2/P3), not this function.
 function checkFileLiveStatus(entry: LedgerEntry): "live" | "orphaned" | "unknown" {
   if (!entry.file_path) return "unknown";
   const abs = resolveWithinRoot(PROJECT_ROOT, entry.file_path);
@@ -1683,11 +1848,12 @@ function checkLedgerEntryLiveness(entry: LedgerEntry): LedgerLivenessRecord {
 }
 
 // check_ledger_liveness tool: on-demand invocation of the live-check above
-// (the design's "on demand via an MCP call" case -- a scheduled/batch
-// sweep is Feature 1 P2, not built here). Entries with no file_path are
-// reported but never checked/recorded -- their status is permanently
-// "unknown" by construction, so re-checking them on every call would only
-// grow ledger_liveness.jsonl without ever learning anything new.
+// (the design's "on demand via an MCP call" case -- see
+// sweepLedgerLiveness below for the scheduled/batch case, Feature 1 P2).
+// Entries with no file_path are reported but never checked/recorded --
+// their status is permanently "unknown" by construction, so re-checking
+// them on every call would only grow ledger_liveness.jsonl without ever
+// learning anything new.
 function checkLedgerLiveness(input: { project_id: string; ledger_entry_id?: string }): {
   checked: number;
   total_entries: number;
@@ -1731,6 +1897,48 @@ function checkLedgerLiveness(input: { project_id: string; ledger_entry_id?: stri
   };
 }
 
+// backfill_ledger_snapshot_ref tool (Feature 2 P3): attempts
+// reconstructSnapshotRef for every entry in a project that's missing a
+// real snapshot_ref, and persists each attempt to snapshot_backfill.jsonl
+// regardless of outcome -- a documented "we tried, here's what we found"
+// audit trail, not just a cache, since a failed reconstruction is itself
+// meaningful information (this project's git history doesn't reach back
+// that far, or PROJECT_ROOT isn't a git repo at all). Entries that
+// already have a real snapshot_ref are reported but never touched --
+// backfill only ever fills a gap, never second-guesses a captured value.
+function backfillLedgerSnapshotRefs(input: { project_id: string; ledger_entry_id?: string }): {
+  attempted: number;
+  reconstructed: number;
+  results: Array<{
+    ledger_entry_id: string;
+    already_had_snapshot_ref: boolean;
+    reconstructed_snapshot_ref: string | null;
+  }>;
+} {
+  const entries = readLedgerEntries(input.project_id).filter(
+    (e) => !input.ledger_entry_id || e.id === input.ledger_entry_id
+  );
+  const results = entries.map((e) => {
+    if (e.snapshot_ref) {
+      return { ledger_entry_id: e.id, already_had_snapshot_ref: true, reconstructed_snapshot_ref: null };
+    }
+    const reconstructed = reconstructSnapshotRef(PROJECT_ROOT, e.timestamp);
+    appendSnapshotBackfillRecord({
+      id: randomUUID(),
+      timestamp: new Date().toISOString(),
+      ledger_entry_id: e.id,
+      project_id: e.project_id,
+      reconstructed_snapshot_ref: reconstructed,
+    });
+    return { ledger_entry_id: e.id, already_had_snapshot_ref: false, reconstructed_snapshot_ref: reconstructed };
+  });
+  return {
+    attempted: results.filter((r) => !r.already_had_snapshot_ref).length,
+    reconstructed: results.filter((r) => r.reconstructed_snapshot_ref !== null).length,
+    results,
+  };
+}
+
 // Same "missing/malformed collapses to empty" philosophy as readMemory,
 // but line-oriented (JSONL) rather than whole-file JSON -- a single
 // corrupted line (e.g. a hand-edited file, or a write that got cut off)
@@ -1759,14 +1967,124 @@ function readLedgerEntries(projectId: string): LedgerEntry[] {
           snapshot_ref: rawEntry.snapshot_ref ?? null,
           last_verified_live: rawEntry.last_verified_live ?? null,
           live_status: rawEntry.live_status ?? "unknown",
+          reconstructed_snapshot_ref: rawEntry.reconstructed_snapshot_ref ?? null,
         };
-        entries.push(withLatestLiveness(normalized));
+        entries.push(withReconstructedSnapshotRef(withLatestLiveness(normalized)));
       }
     } catch {
       // skip malformed line
     }
   }
   return entries;
+}
+
+// sweep_ledger_liveness (Feature 1 P2) needs every project_id present in
+// the ledger when none is specified -- readLedgerEntries always filters
+// to one project_id, so this is the one place that reads every line
+// unfiltered. Same "missing/malformed collapses to empty" tolerance as
+// readLedgerEntries itself.
+function listAllProjectIds(): string[] {
+  let raw: string;
+  try {
+    raw = readFileSync(LEDGER_PATH, "utf8");
+  } catch {
+    return [];
+  }
+  const ids = new Set<string>();
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const parsed = JSON.parse(line);
+      if (parsed && typeof parsed === "object" && typeof parsed.project_id === "string") {
+        ids.add(parsed.project_id);
+      }
+    } catch {
+      // skip malformed line
+    }
+  }
+  return [...ids];
+}
+
+// Feature 1 P3: the graph-level half of referential integrity that
+// checkFileLiveStatus's single-entry check can't do. Pattern's ledger has
+// no explicit entry-to-entry reference field (each line is an independent
+// judgment record) -- feature_id is the one real grouping construct that
+// already exists (deriveFeatureId), so a "cluster" here means every entry
+// sharing one feature_id, and "cross-linked with no live anchor" means
+// none of them resolved to live_status "live". A cluster of exactly one
+// entry is just an ordinary orphaned/unknown entry, not a cluster
+// phenomenon, so single-entry groups are never flagged.
+//
+// Must run after checkLedgerLiveness has updated live_status for the
+// same project -- otherwise this would be judging stale per-entry
+// statuses. sweepLedgerLiveness below enforces that ordering; this
+// function does not re-check individual entries itself.
+function detectDanglingClusters(projectId: string): Array<{ feature_id: string; entry_ids: string[] }> {
+  const entries = readLedgerEntries(projectId);
+  const byFeature = new Map<string, LedgerEntry[]>();
+  for (const e of entries) {
+    const group = byFeature.get(e.feature_id) ?? [];
+    group.push(e);
+    byFeature.set(e.feature_id, group);
+  }
+
+  const clusters: Array<{ feature_id: string; entry_ids: string[] }> = [];
+  for (const [featureId, group] of byFeature) {
+    if (group.length < 2) continue;
+    if (group.some((e) => e.live_status === "live")) continue;
+    clusters.push({ feature_id: featureId, entry_ids: group.map((e) => e.id) });
+    for (const e of group) {
+      appendLedgerLivenessRecord({
+        id: randomUUID(),
+        timestamp: new Date().toISOString(),
+        ledger_entry_id: e.id,
+        project_id: projectId,
+        live_status: "dangling",
+        checked_file_path: e.file_path,
+      });
+    }
+  }
+  return clusters;
+}
+
+// The MCP tool: batch-updates live_status across an entire ledger,
+// optionally scoped to one project_id, but sweeping every project_id
+// present when omitted -- the "on a schedule (project open or cron)" half
+// of the design that check_ledger_liveness's on-demand, single-project
+// call (P1) doesn't cover. Pattern has no daemon or background process of
+// its own to schedule this from (each server invocation is transient,
+// tied to its MCP host's lifecycle) -- this tool is meant to be invoked
+// by whatever external scheduler you already have (a cron job, a CI
+// step), not something Pattern triggers on its own.
+function sweepLedgerLiveness(input: { project_id?: string }): {
+  projects_swept: number;
+  total_entries_checked: number;
+  dangling_clusters: Array<{ project_id: string; feature_id: string; entry_ids: string[] }>;
+  per_project: Array<{ project_id: string; checked: number; total_entries: number; dangling_clusters: number }>;
+} {
+  const projectIds = input.project_id ? [input.project_id] : listAllProjectIds();
+  const perProject: Array<{ project_id: string; checked: number; total_entries: number; dangling_clusters: number }> =
+    [];
+  const allDangling: Array<{ project_id: string; feature_id: string; entry_ids: string[] }> = [];
+
+  for (const projectId of projectIds) {
+    const liveness = checkLedgerLiveness({ project_id: projectId });
+    const clusters = detectDanglingClusters(projectId);
+    for (const c of clusters) allDangling.push({ project_id: projectId, ...c });
+    perProject.push({
+      project_id: projectId,
+      checked: liveness.checked,
+      total_entries: liveness.total_entries,
+      dangling_clusters: clusters.length,
+    });
+  }
+
+  return {
+    projects_swept: projectIds.length,
+    total_entries_checked: perProject.reduce((sum, p) => sum + p.checked, 0),
+    dangling_clusters: allDangling,
+    per_project: perProject,
+  };
 }
 
 // The only entry point that writes ledger.jsonl. Validates every
@@ -1822,6 +2140,26 @@ function findLedgerMatches(projectId: string, componentNeed?: string, limit = 20
   return entries.slice(0, limit);
 }
 
+// entry.reconstructed_snapshot_ref only ever gets consulted when
+// snapshot_ref itself is null (see withReconstructedSnapshotRef) -- this
+// still checks both explicitly, rather than assuming that invariant holds,
+// so the two can never be silently conflated even if that changes later.
+// A reconstructed value is always labeled as such: it's an approximation
+// (the commit HEAD probably pointed to at that timestamp), not the
+// original captured snapshot, and presenting it unlabeled would overstate
+// its reliability.
+function formatSnapshotLine(entry: LedgerEntry): string {
+  if (entry.snapshot_ref) return "`" + entry.snapshot_ref + "`";
+  if (entry.reconstructed_snapshot_ref) {
+    return (
+      "`" +
+      entry.reconstructed_snapshot_ref +
+      "` (reconstructed via backfill -- best-effort approximation, not the original captured snapshot)"
+    );
+  }
+  return "not available (project root wasn't a git repository at judgment time)";
+}
+
 // Feature 2 / Decision Provenance, P1: renders one ledger entry as a
 // stable markdown block -- "stable" meaning a pure function of the entry
 // alone (never Date.now(), never anything read live off disk), so the
@@ -1829,8 +2167,8 @@ function findLedgerMatches(projectId: string, componentNeed?: string, limit = 20
 // what makes verify-provenance-artifact.mjs's snapshot test meaningful:
 // a diff in the generated markdown for a fixed fixture means the format
 // changed, not that time passed. Markdown, not JSON, per the spec --
-// PRs/issues render it natively (P2, not built here, attaches this to
-// one).
+// PRs/issues render it natively (see export_ledger_provenance and
+// post_ledger_provenance_to_github, which attach this to one).
 export function formatProvenanceArtifact(entry: LedgerEntry): string {
   const lines: string[] = [];
   lines.push(`## Pattern decision: ${entry.component_need}`);
@@ -1840,9 +2178,7 @@ export function formatProvenanceArtifact(entry: LedgerEntry): string {
   lines.push(`- **Coverage:** ${entry.coverage ?? "n/a"}`);
   lines.push(`- **Domain:** ${entry.domain}`);
   lines.push(`- **Framework:** ${entry.framework}`);
-  lines.push(
-    `- **Snapshot:** ${entry.snapshot_ref ? "`" + entry.snapshot_ref + "`" : "not available (project root wasn't a git repository at judgment time)"}`
-  );
+  lines.push(`- **Snapshot:** ${formatSnapshotLine(entry)}`);
   lines.push(`- **Judged at:** ${entry.timestamp}${entry.cache_hit ? " (served from ledger cache hit)" : ""}`);
   lines.push("");
 
@@ -1873,6 +2209,105 @@ export function formatProvenanceArtifact(entry: LedgerEntry): string {
   lines.push(`_Generated by Pattern (\`export_ledger_provenance\`) from ledger entry \`${entry.id}\`._`);
 
   return lines.join("\n");
+}
+
+// Feature 2 / Decision Provenance, P2: posts an export_ledger_provenance
+// artifact as a real comment on a GitHub PR or issue. GitHub's REST API
+// treats a PR and an issue identically for comments (both are backed by
+// the same /issues/{number}/comments endpoint), so one input shape covers
+// both -- no separate "is this a PR" flag needed.
+//
+// This is the one tool in this server with a real, visible side effect on
+// a third-party service outside the caller's own machine -- every other
+// tool here only ever touches local files. The calling agent should
+// confirm with the user before invoking it, the same way it's expected to
+// confirm before running a suggested install_command (see SECURITY.md).
+//
+// Auth resolves the spec's own open question (personal token vs. GitHub
+// App) in favor of a personal token: reads GITHUB_TOKEN from the
+// environment, the same convention every GitHub Action and the `gh` CLI
+// itself use. A GitHub App needs a hosted installation flow and a webhook
+// receiver, which contradicts this project's "local npm package, no
+// hosted infrastructure" distribution model (see the README's Ledger
+// integrity section and the Pattern Primer's build-order principle) --
+// Pattern manages no GitHub credential of its own, the same way it
+// manages no git credential for computeSnapshotRef above.
+//
+// Idempotent by construction, not just by convention: every posted
+// comment is prefixed with a hidden HTML marker keyed to the ledger
+// entry's id, and a post first checks existing comments for that marker
+// -- a repeat call for the same entry returns posted: false instead of
+// creating a duplicate. Only checks the most recent 100 comments (one
+// page) -- a thread with more prior comments than that is an edge case
+// this pass doesn't handle; full pagination is a later concern, not built
+// here.
+const GITHUB_API_BASE = process.env.PATTERN_GITHUB_API_BASE ?? "https://api.github.com";
+
+function provenanceMarker(ledgerEntryId: string): string {
+  return `<!-- pattern-ledger-provenance:${ledgerEntryId} -->`;
+}
+
+async function postProvenanceToGitHub(input: {
+  project_id: string;
+  ledger_entry_id: string;
+  repo: string;
+  issue_number: number;
+}): Promise<{ posted: boolean; reason?: string; comment_url: string; comment_id?: number }> {
+  const token = process.env.GITHUB_TOKEN;
+  if (!token) {
+    throw new Error(
+      "GITHUB_TOKEN is not set. This tool posts a real comment to GitHub and needs a personal access token " +
+        "with repo scope (the same one `gh auth login` or a GitHub Action would use) -- set the GITHUB_TOKEN " +
+        "environment variable and retry."
+    );
+  }
+  if (!/^[^/\s]+\/[^/\s]+$/.test(input.repo)) {
+    throw new Error(`repo must be in "owner/repo" form, got: "${input.repo}"`);
+  }
+
+  const entry = readLedgerEntries(input.project_id).find((e) => e.id === input.ledger_entry_id);
+  if (!entry) {
+    throw new Error(
+      `No ledger entry with id "${input.ledger_entry_id}" found for project_id "${input.project_id}". Use read_ledger to list entries and their ids.`
+    );
+  }
+
+  const marker = provenanceMarker(entry.id);
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    Accept: "application/vnd.github+json",
+    "Content-Type": "application/json",
+    "User-Agent": "pattern-mcp",
+  };
+  const commentsUrl = `${GITHUB_API_BASE}/repos/${input.repo}/issues/${input.issue_number}/comments`;
+
+  const listResponse = await fetch(`${commentsUrl}?per_page=100`, { headers });
+  if (!listResponse.ok) {
+    const errText = await listResponse.text();
+    throw new Error(
+      `GitHub API error ${listResponse.status} listing comments on ${input.repo}#${input.issue_number}: ${errText}`
+    );
+  }
+  const existingComments = (await listResponse.json()) as Array<{ id: number; body: string; html_url: string }>;
+  const existing = existingComments.find((c) => c.body.includes(marker));
+  if (existing) {
+    return { posted: false, reason: "already_posted", comment_url: existing.html_url, comment_id: existing.id };
+  }
+
+  const body = `${marker}\n\n${formatProvenanceArtifact(entry)}`;
+  const postResponse = await fetch(commentsUrl, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ body }),
+  });
+  if (!postResponse.ok) {
+    const errText = await postResponse.text();
+    throw new Error(
+      `GitHub API error ${postResponse.status} posting comment to ${input.repo}#${input.issue_number}: ${errText}`
+    );
+  }
+  const created = (await postResponse.json()) as { id: number; html_url: string };
+  return { posted: true, comment_url: created.html_url, comment_id: created.id };
 }
 
 // report_build_cost (cost-attribution build plan, 1.3) -- self-reported
@@ -2190,6 +2625,7 @@ function buildLedgerEntry(
     file_path: input.file_path ?? null,
     last_verified_live: null,
     live_status: "unknown",
+    reconstructed_snapshot_ref: null,
   };
 }
 
@@ -3065,8 +3501,58 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         "the same entry always produces the same markdown, nothing here " +
         "reads live system time or disk state. This only formats and " +
         "returns text; it does not post anything to GitHub or anywhere " +
-        "else -- that's a separate, not-yet-built action.",
+        "else -- see post_ledger_provenance_to_github for that.",
       inputSchema: EXPORT_LEDGER_PROVENANCE_INPUT_SCHEMA,
+    },
+    {
+      name: POST_LEDGER_PROVENANCE_TOOL_NAME,
+      description:
+        "Posts one ledger entry's provenance artifact (same content " +
+        "export_ledger_provenance produces) as a real comment on a GitHub " +
+        "PR or issue. This is the one tool in this server with a real, " +
+        "visible side effect on a third-party service, not just your own " +
+        "machine -- confirm with the user before calling this, the same " +
+        "way you'd confirm before running a suggested install_command " +
+        "(see SECURITY.md). Requires GITHUB_TOKEN (a personal access " +
+        "token with repo scope) in the environment -- Pattern manages no " +
+        "GitHub credential of its own. Idempotent: a repeat call for the " +
+        "same ledger_entry_id/repo/issue_number detects the previously " +
+        "posted comment (via a hidden marker) and returns posted: false " +
+        "instead of creating a duplicate.",
+      inputSchema: POST_LEDGER_PROVENANCE_INPUT_SCHEMA,
+    },
+    {
+      name: SWEEP_LEDGER_LIVENESS_TOOL_NAME,
+      description:
+        "Batch version of check_ledger_liveness: updates live_status for " +
+        "every file_path-bearing entry across an entire project (or, when " +
+        "project_id is omitted, every project_id present in the ledger), " +
+        "then flags dangling clusters -- groups of 2+ entries sharing a " +
+        "feature_id where none of them resolved to live_status 'live'. " +
+        "Pattern has no daemon or scheduler of its own (each server " +
+        "invocation is transient, tied to its MCP host's lifecycle) -- " +
+        "this tool is meant to be invoked by whatever external scheduler " +
+        "you already have (a cron job, a CI step), not something Pattern " +
+        "triggers automatically. Tested at 200 and 1,000 synthetic " +
+        "entries without reintroducing search+score latency -- this is " +
+        "fs stat calls, not API calls.",
+      inputSchema: SWEEP_LEDGER_LIVENESS_INPUT_SCHEMA,
+    },
+    {
+      name: BACKFILL_LEDGER_SNAPSHOT_REF_TOOL_NAME,
+      description:
+        "Best-effort reconstruction of snapshot_ref for ledger entries " +
+        "written before that field existed (or written outside a git " +
+        "repo): finds the commit that was HEAD at or just before each " +
+        "entry's own timestamp. Always clearly distinguished from a real " +
+        "captured snapshot_ref wherever it's rendered (export_ledger_provenance, " +
+        "post_ledger_provenance_to_github) -- a rebase/force-push/history " +
+        "rewrite since that time can make this approximation wrong, so " +
+        "it's never presented as equivalent to a value actually captured " +
+        "live. Entries that already have a real snapshot_ref are reported " +
+        "but never touched. Persists every attempt (including failures) " +
+        "for later lookup; never modifies ledger.jsonl itself.",
+      inputSchema: BACKFILL_LEDGER_SNAPSHOT_REF_INPUT_SCHEMA,
     },
   ],
 }));
@@ -3274,6 +3760,62 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         content: [
           { type: "text", text: JSON.stringify({ ledger_entry_id: entry.id, markdown: formatProvenanceArtifact(entry) }) },
         ],
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return {
+        content: [{ type: "text", text: `Error: ${message}` }],
+        isError: true,
+      };
+    }
+  }
+
+  if (request.params.name === POST_LEDGER_PROVENANCE_TOOL_NAME) {
+    const args = request.params.arguments as {
+      project_id: string;
+      ledger_entry_id: string;
+      repo: string;
+      issue_number: number;
+    };
+
+    try {
+      const result = await postProvenanceToGitHub(args);
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return {
+        content: [{ type: "text", text: `Error: ${message}` }],
+        isError: true,
+      };
+    }
+  }
+
+  if (request.params.name === SWEEP_LEDGER_LIVENESS_TOOL_NAME) {
+    const args = request.params.arguments as { project_id?: string };
+
+    try {
+      const result = sweepLedgerLiveness(args);
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return {
+        content: [{ type: "text", text: `Error: ${message}` }],
+        isError: true,
+      };
+    }
+  }
+
+  if (request.params.name === BACKFILL_LEDGER_SNAPSHOT_REF_TOOL_NAME) {
+    const args = request.params.arguments as { project_id: string; ledger_entry_id?: string };
+
+    try {
+      const result = backfillLedgerSnapshotRefs(args);
+      return {
+        content: [{ type: "text", text: JSON.stringify({ project_id: args.project_id, ...result }) }],
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
