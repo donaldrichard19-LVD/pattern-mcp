@@ -13,7 +13,7 @@ export function Close() {
           <div style={{ display: "grid", gap: 10 }}>
             <h2 style={H2}>Agents will keep making UI decisions on their own.</h2>
             <p style={{ ...BODY, fontSize: "var(--text-body-lg)", margin: 0 }}>
-              The question is whether you can afford to find out they were wrong after the fact.
+              Give them tools to ship the right scope the first time.
             </p>
           </div>
         </Reveal>
