@@ -6,6 +6,7 @@ import { Reference } from "@/components/Reference";
 import { SavesTime } from "@/components/SavesTime";
 import { ScrollDemo } from "@/components/ScrollDemo";
 import { TopBar } from "@/components/TopBar";
+import { TracksDecisions } from "@/components/TracksDecisions";
 
 export default function Home() {
   return (
@@ -15,6 +16,7 @@ export default function Home() {
       <ScrollDemo />
       <SavesTime />
       <AvoidsMistakes />
+      <TracksDecisions />
       <Reference />
       <Guidance />
       <Close />

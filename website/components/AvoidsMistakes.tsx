@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, CircleSlash, History, Link as LinkIcon, Receipt, Scale } from "lucide-react";
+import { Activity, CircleSlash, Link as LinkIcon, Receipt, Scale } from "lucide-react";
 import type { ReactNode } from "react";
 import { BODY, H2, SECTION } from "./tokens";
 import { Reveal } from "./ui";
@@ -45,14 +45,6 @@ const CAPS: { icon: ReactNode; h: string; p: [string, string] | [string, string,
     p: [
       "Pattern makes the cost of each decision visible.",
       "You can see the time, tokens, and estimated API cost instead of working from an opaque usage budget.",
-    ],
-  },
-  {
-    icon: <History size={18} />,
-    h: "Old decisions can be checked, not just logged",
-    p: [
-      "Every decision is pinned to the commit it was judged against, and can later be checked against the file it was implemented in.",
-      "check_ledger_liveness tells you whether that file still exists and still uses what was recommended, instead of a ledger that just accumulates entries no one revisits.",
     ],
   },
 ];

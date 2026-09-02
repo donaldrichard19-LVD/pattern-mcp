@@ -1,8 +1,21 @@
 "use client";
 
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { H2, LABEL, MONO, PANEL, SECTION } from "./tokens";
 import { Reveal } from "./ui";
+
+const RECORD_DECISION_INPUT_ROWS = [
+  ["project_id", "string, required", "Stable per project — a directory path or project name works well"],
+  ["component_need", "string, required", "The same need passed to recommend_component"],
+  ["action", "installed | custom_built", "What the agent actually did with the verdict"],
+  ["source", "shadcn | 21st.dev | reui | custom", "Where the installed component came from, or custom for a build"],
+  ["time_saved_minutes", "number, optional", "Your own estimate — self-reported, never computed or verified by Pattern"],
+];
+
+const RECORD_DECISION_OUTPUT_ROWS = [
+  ["status", '"recorded"', "Confirms the decision was saved"],
+  ["entry", "object", "The stored decision, including project_id and the fields above"],
+];
 
 const INPUT_ROWS = [
   ["component_need", "string, required", 'Specific, not a category. "price breakdown with fees and taxes", not "pricing"'],
@@ -187,6 +200,27 @@ function Table({ head, rows, mono = 0 }: { head: string[]; rows: string[][]; mon
   );
 }
 
+const GROUP_HEAD: CSSProperties = {
+  fontFamily: "inherit",
+  fontSize: "var(--text-body-lg)",
+  fontWeight: 600,
+  color: "var(--text-primary)",
+  margin: 0,
+  paddingTop: 8,
+  borderTop: "1px solid var(--border-subtle)",
+};
+
+function Group({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <Reveal>
+      <div style={{ display: "grid", gap: 24 }}>
+        <h3 style={GROUP_HEAD}>{title}</h3>
+        <div style={{ display: "grid", gap: 24 }}>{children}</div>
+      </div>
+    </Reveal>
+  );
+}
+
 export function Reference() {
   return (
     <section id="reference" className="pt-pad-y" style={{ padding: "80px 0", borderTop: "1px solid var(--border-subtle)" }}>
@@ -194,116 +228,102 @@ export function Reference() {
         <Reveal>
           <div style={{ display: "grid", gap: 12 }}>
             <h2 style={{ ...H2, maxWidth: 620 }}>Reference</h2>
+            <p style={{ color: "var(--text-secondary)", margin: 0, maxWidth: 640 }}>
+              Eleven tools in three groups — the judgment call itself, tracking what it cost and what happened, and
+              verifying or exporting old decisions later.
+            </p>
           </div>
         </Reveal>
-        <Reveal>
+
+        <Group title="Make the judgment call">
           <div style={{ display: "grid", gap: 12 }}>
             <div style={LABEL}>recommend_component input</div>
             <Table head={["Field", "Type", "Notes"]} rows={INPUT_ROWS} mono={1} />
           </div>
-        </Reveal>
-        <Reveal>
           <div style={{ display: "grid", gap: 12 }}>
             <div style={LABEL}>recommend_component output</div>
             <Table head={["Field", "Values", "Notes"]} rows={OUTPUT_ROWS} mono={1} />
           </div>
-        </Reveal>
-        <Reveal>
           <div style={{ display: "grid", gap: 12 }}>
             <div style={LABEL}>extract_requirements input — optional, runs extraction on its own</div>
             <Table head={["Field", "Type", "Notes"]} rows={EXTRACT_INPUT_ROWS} mono={1} />
           </div>
-        </Reveal>
-        <Reveal>
           <div style={{ display: "grid", gap: 12 }}>
             <div style={LABEL}>extract_requirements output</div>
             <Table head={["Field", "Values", "Notes"]} rows={EXTRACT_OUTPUT_ROWS} mono={1} />
           </div>
-        </Reveal>
-        <Reveal>
+        </Group>
+
+        <Group title="Track cost and outcome">
+          <div style={{ display: "grid", gap: 12 }}>
+            <div style={LABEL}>record_component_decision input — call after acting on a verdict, not on every call</div>
+            <Table head={["Field", "Type", "Notes"]} rows={RECORD_DECISION_INPUT_ROWS} mono={1} />
+          </div>
+          <div style={{ display: "grid", gap: 12 }}>
+            <div style={LABEL}>record_component_decision output</div>
+            <Table head={["Field", "Values", "Notes"]} rows={RECORD_DECISION_OUTPUT_ROWS} mono={1} />
+          </div>
           <div style={{ display: "grid", gap: 12 }}>
             <div style={LABEL}>read_ledger input — every past judgment for a project_id</div>
             <Table head={["Field", "Type", "Notes"]} rows={READ_LEDGER_INPUT_ROWS} mono={1} />
           </div>
-        </Reveal>
-        <Reveal>
           <div style={{ display: "grid", gap: 12 }}>
             <div style={LABEL}>read_ledger output</div>
             <Table head={["Field", "Values", "Notes"]} rows={READ_LEDGER_OUTPUT_ROWS} mono={1} />
           </div>
-        </Reveal>
-        <Reveal>
-          <div style={{ display: "grid", gap: 12 }}>
-            <div style={LABEL}>check_ledger_liveness input — is a past decision's file still alive?</div>
-            <Table head={["Field", "Type", "Notes"]} rows={CHECK_LIVENESS_INPUT_ROWS} mono={1} />
-          </div>
-        </Reveal>
-        <Reveal>
-          <div style={{ display: "grid", gap: 12 }}>
-            <div style={LABEL}>check_ledger_liveness output</div>
-            <Table head={["Field", "Values", "Notes"]} rows={CHECK_LIVENESS_OUTPUT_ROWS} mono={1} />
-          </div>
-        </Reveal>
-        <Reveal>
           <div style={{ display: "grid", gap: 12 }}>
             <div style={LABEL}>report_build_cost input — self-reported, free</div>
             <Table head={["Field", "Type", "Notes"]} rows={REPORT_BUILD_COST_INPUT_ROWS} mono={1} />
           </div>
-        </Reveal>
-        <Reveal>
           <div style={{ display: "grid", gap: 12 }}>
             <div style={LABEL}>report_outcome_proxy input — self-reported, free</div>
             <Table head={["Field", "Type", "Notes"]} rows={REPORT_OUTCOME_INPUT_ROWS} mono={1} />
           </div>
-        </Reveal>
-        <Reveal>
+        </Group>
+
+        <Group title="Verify and export old decisions">
           <div style={{ display: "grid", gap: 12 }}>
-            <div style={LABEL}>export_ledger_provenance input — one decision as a paste-able markdown block</div>
-            <Table head={["Field", "Type", "Notes"]} rows={EXPORT_PROVENANCE_INPUT_ROWS} mono={1} />
+            <div style={LABEL}>check_ledger_liveness input — is a past decision's file still alive?</div>
+            <Table head={["Field", "Type", "Notes"]} rows={CHECK_LIVENESS_INPUT_ROWS} mono={1} />
           </div>
-        </Reveal>
-        <Reveal>
           <div style={{ display: "grid", gap: 12 }}>
-            <div style={LABEL}>export_ledger_provenance output</div>
-            <Table head={["Field", "Values", "Notes"]} rows={EXPORT_PROVENANCE_OUTPUT_ROWS} mono={1} />
+            <div style={LABEL}>check_ledger_liveness output</div>
+            <Table head={["Field", "Values", "Notes"]} rows={CHECK_LIVENESS_OUTPUT_ROWS} mono={1} />
           </div>
-        </Reveal>
-        <Reveal>
-          <div style={{ display: "grid", gap: 12 }}>
-            <div style={LABEL}>post_ledger_provenance_to_github input — the one tool here with a real, visible side effect off your machine</div>
-            <Table head={["Field", "Type", "Notes"]} rows={POST_PROVENANCE_INPUT_ROWS} mono={1} />
-          </div>
-        </Reveal>
-        <Reveal>
-          <div style={{ display: "grid", gap: 12 }}>
-            <div style={LABEL}>post_ledger_provenance_to_github output</div>
-            <Table head={["Field", "Values", "Notes"]} rows={POST_PROVENANCE_OUTPUT_ROWS} mono={1} />
-          </div>
-        </Reveal>
-        <Reveal>
           <div style={{ display: "grid", gap: 12 }}>
             <div style={LABEL}>sweep_ledger_liveness input — batch/scheduled, meant for your own cron or CI</div>
             <Table head={["Field", "Type", "Notes"]} rows={SWEEP_LIVENESS_INPUT_ROWS} mono={1} />
           </div>
-        </Reveal>
-        <Reveal>
           <div style={{ display: "grid", gap: 12 }}>
             <div style={LABEL}>sweep_ledger_liveness output</div>
             <Table head={["Field", "Values", "Notes"]} rows={SWEEP_LIVENESS_OUTPUT_ROWS} mono={1} />
           </div>
-        </Reveal>
-        <Reveal>
+          <div style={{ display: "grid", gap: 12 }}>
+            <div style={LABEL}>export_ledger_provenance input — one decision as a paste-able markdown block</div>
+            <Table head={["Field", "Type", "Notes"]} rows={EXPORT_PROVENANCE_INPUT_ROWS} mono={1} />
+          </div>
+          <div style={{ display: "grid", gap: 12 }}>
+            <div style={LABEL}>export_ledger_provenance output</div>
+            <Table head={["Field", "Values", "Notes"]} rows={EXPORT_PROVENANCE_OUTPUT_ROWS} mono={1} />
+          </div>
           <div style={{ display: "grid", gap: 12 }}>
             <div style={LABEL}>backfill_ledger_snapshot_ref input</div>
             <Table head={["Field", "Type", "Notes"]} rows={BACKFILL_INPUT_ROWS} mono={1} />
           </div>
-        </Reveal>
-        <Reveal>
           <div style={{ display: "grid", gap: 12 }}>
             <div style={LABEL}>backfill_ledger_snapshot_ref output</div>
             <Table head={["Field", "Values", "Notes"]} rows={BACKFILL_OUTPUT_ROWS} mono={1} />
           </div>
-        </Reveal>
+          <div style={{ display: "grid", gap: 12 }}>
+            <div style={LABEL}>post_ledger_provenance_to_github input — the one tool here with a real, visible side effect off your machine</div>
+            <Table head={["Field", "Type", "Notes"]} rows={POST_PROVENANCE_INPUT_ROWS} mono={1} />
+          </div>
+          <div style={{ display: "grid", gap: 12 }}>
+            <div style={LABEL}>post_ledger_provenance_to_github output</div>
+            <Table head={["Field", "Values", "Notes"]} rows={POST_PROVENANCE_OUTPUT_ROWS} mono={1} />
+          </div>
+        </Group>
+
         <Reveal>
           <div style={{ display: "grid", gap: 12 }}>
             <div style={LABEL}>Configuration</div>
