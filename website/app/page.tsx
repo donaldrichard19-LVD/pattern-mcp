@@ -2,7 +2,6 @@ import { AvoidsMistakes } from "@/components/AvoidsMistakes";
 import { Close } from "@/components/Close";
 import { Guidance } from "@/components/Guidance";
 import { Hero } from "@/components/Hero";
-import { Problem } from "@/components/Problem";
 import { Reference } from "@/components/Reference";
 import { SavesTime } from "@/components/SavesTime";
 import { ScrollDemo } from "@/components/ScrollDemo";
@@ -13,7 +12,6 @@ export default function Home() {
     <div style={{ background: "#fff" }}>
       <TopBar />
       <Hero />
-      <Problem />
       <ScrollDemo />
       <SavesTime />
       <AvoidsMistakes />
