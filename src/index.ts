@@ -444,6 +444,7 @@ const TOOL_NAME = "recommend_component";
 const RECORD_DECISION_TOOL_NAME = "record_component_decision";
 const EXTRACT_REQUIREMENTS_TOOL_NAME = "extract_requirements";
 const READ_LEDGER_TOOL_NAME = "read_ledger";
+const REPORT_BUILD_COST_TOOL_NAME = "report_build_cost";
 
 const INPUT_SCHEMA = {
   type: "object",
@@ -498,6 +499,17 @@ const INPUT_SCHEMA = {
         "first, review or edit its checklist, then pass it here. Omit to keep " +
         "today's default behavior: recommend_component extracts its own " +
         "checklist internally, unchanged.",
+    },
+    feature_id: {
+      type: "string",
+      description:
+        "Optional. A stable identifier for the feature this component need " +
+        "belongs to (e.g. a ticket id or branch name), used to roll up this " +
+        "call's cost with a later report_build_cost call for the same " +
+        "feature. Omit to have one derived deterministically from " +
+        "project_id+component_need -- repeat calls for the same feature " +
+        "then land under the same id automatically, with no coordination " +
+        "needed between calls. Only meaningful together with project_id.",
     },
   },
   required: ["component_need", "domain", "framework"],
@@ -577,8 +589,56 @@ const READ_LEDGER_INPUT_SCHEMA = {
       type: "number",
       description: "Optional. Maximum number of entries to return, most recent first. Defaults to 20.",
     },
+    feature_id: {
+      type: "string",
+      description:
+        "Optional. Instead of the usual keyword listing, returns the full " +
+        "cost rollup for this one feature_id -- every verdict-time ledger " +
+        "entry (fresh judgments and $0 ledger cache hits) plus every " +
+        "report_build_cost record for it, with a summed total_cost_usd. " +
+        "When provided, component_need and limit are ignored.",
+    },
   },
   required: ["project_id"],
+} as const;
+
+const REPORT_BUILD_COST_INPUT_SCHEMA = {
+  type: "object",
+  properties: {
+    feature_id: {
+      type: "string",
+      description:
+        "The feature_id this build belongs to -- either one you explicitly " +
+        "passed to an earlier recommend_component call for this feature, " +
+        "or (if you didn't) the same value recommend_component would " +
+        "derive on its own: sha256(project_id + '::' + component_need, " +
+        "lowercased/trimmed) truncated to 8 hex chars. When in doubt, call " +
+        "read_ledger with just project_id and copy the feature_id off the " +
+        "relevant entry rather than re-deriving it by hand.",
+    },
+    project_id: {
+      type: "string",
+      description: "Optional but recommended. The same project_id used in the recommend_component call(s) for this feature, so read_ledger's feature_id rollup can find this record.",
+    },
+    tokens_used: {
+      type: "number",
+      description: "Optional. Total tokens spent building this feature, if you have a real number (e.g. from your own session accounting).",
+    },
+    cost_usd: {
+      type: "number",
+      description: "Total real spend, in USD, for building this feature end to end -- your own best number, not Pattern's (Pattern has no visibility past the verdict it returned).",
+    },
+    outcome: {
+      type: "string",
+      enum: ["shipped", "abandoned", "replaced_with_existing"],
+      description:
+        "What actually happened to this build: 'shipped' it went out, " +
+        "'abandoned' the build was dropped before shipping, " +
+        "'replaced_with_existing' you started a custom build but swapped " +
+        "in an existing component instead (or vice versa).",
+    },
+  },
+  required: ["feature_id", "cost_usd", "outcome"],
 } as const;
 
 // Shared between buildSystemPrompt's own step 2 and
@@ -1325,15 +1385,25 @@ export function getPastDecisions(projectId: string): DecisionEntry[] {
 
 // One line per judgment call that reached the API with a project_id and
 // landed on reason "scored" or "no_candidates_found" (see appendLedgerEntry
-// call sites in judgeComponent). candidates_evaluated/chosen_candidate hold
-// only DistilledCandidate-shaped data -- never raw evidence text, per the
-// data-minimization boundary above. project_conventions_snapshot is a hash
-// of existing_stack (see hashConventions), null when existing_stack wasn't
-// provided either time -- two null snapshots still count as a match.
+// call sites in judgeComponent) -- plus, since the cost-attribution build
+// plan (pattern-cost-attribution-build-plan.md), one line per ledger cache
+// hit too, so cost/count rolls up correctly even for the $0 served-from-
+// ledger calls (cache_hit: true, reason "ledger_cache_hit"; these are
+// automatically excluded from findLedgerCacheHit's own eligibility check,
+// so they can never themselves become the source of a future cache hit).
+// candidates_evaluated/chosen_candidate hold only DistilledCandidate-shaped
+// data -- never raw evidence text, per the data-minimization boundary
+// above. project_conventions_snapshot is a hash of existing_stack (see
+// hashConventions), null when existing_stack wasn't provided either time
+// -- two null snapshots still count as a match. feature_id groups every
+// entry (and, separately, report_build_cost's BuildRecord entries) that
+// belong to the same feature, so end-to-end cost is queryable per feature,
+// not just per project_id/call -- see deriveFeatureId.
 export interface LedgerEntry {
   id: string;
   timestamp: string;
   project_id: string;
+  feature_id: string;
   component_need: string;
   domain: string;
   framework: string;
@@ -1345,12 +1415,29 @@ export interface LedgerEntry {
   confidence: string;
   reason: string;
   coverage: string | null;
+  cost_usd: number;
+  cache_hit: boolean;
   project_conventions_snapshot: string | null;
 }
 
 function hashConventions(existingStack?: string): string | null {
   if (!existingStack) return null;
   return createHash("sha256").update(existingStack).digest("hex").slice(0, 16);
+}
+
+// Stable id for rolling up cost across recommend_component (verdict) and
+// report_build_cost (build) records for the "same" feature. A
+// caller-supplied id always wins (their own tracking -- a ticket id,
+// branch name, whatever is stable on their side); otherwise derive
+// deterministically from project_id+component_need so repeat calls for the
+// same feature land under the same key across sessions with no
+// coordination required between recommend_component and report_build_cost.
+function deriveFeatureId(componentNeed: string, projectId: string, provided?: string): string {
+  if (provided && provided.trim()) return provided.trim();
+  return createHash("sha256")
+    .update(`${projectId}::${componentNeed.trim().toLowerCase()}`)
+    .digest("hex")
+    .slice(0, 8);
 }
 
 // Same "missing/malformed collapses to empty" philosophy as readMemory,
@@ -1432,6 +1519,106 @@ function findLedgerMatches(projectId: string, componentNeed?: string, limit = 20
   return entries.slice(0, limit);
 }
 
+// report_build_cost (cost-attribution build plan, 1.3) -- self-reported
+// build cost, cheapest option first, since Pattern has no visibility into
+// what happens after judgeComponent returns a verdict (1.4's
+// session-correlation fallback is a research spike only, not built here).
+// Stored as a second, separate JSONL file rather than mixed into
+// ledger.jsonl's LedgerEntry shape -- a BuildRecord has none of
+// LedgerEntry's verdict/coverage/candidate fields, and keeping the file
+// single-shape keeps read_ledger's existing output stable. Joined to
+// verdict records purely by feature_id, per the build plan's data model.
+const BUILD_LEDGER_PATH =
+  process.env.PATTERN_BUILD_LEDGER_PATH ?? join(homedir(), ".pattern", "build_ledger.jsonl");
+
+export interface BuildRecord {
+  id: string;
+  timestamp: string;
+  project_id?: string;
+  feature_id: string;
+  tokens_used: number | null;
+  cost_usd: number;
+  outcome: "shipped" | "abandoned" | "replaced_with_existing";
+}
+
+function appendBuildRecord(record: BuildRecord): void {
+  mkdirSync(dirname(BUILD_LEDGER_PATH), { recursive: true });
+  appendFileSync(BUILD_LEDGER_PATH, JSON.stringify(record) + "\n", "utf8");
+}
+
+// Same "missing/malformed collapses to empty, one bad line skipped not
+// fatal" philosophy as readLedgerEntries.
+function readBuildRecords(featureId: string): BuildRecord[] {
+  let raw: string;
+  try {
+    raw = readFileSync(BUILD_LEDGER_PATH, "utf8");
+  } catch {
+    return [];
+  }
+  const records: BuildRecord[] = [];
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const parsed = JSON.parse(line);
+      if (parsed && typeof parsed === "object" && parsed.feature_id === featureId) {
+        records.push(parsed as BuildRecord);
+      }
+    } catch {
+      // skip malformed line
+    }
+  }
+  return records;
+}
+
+function recordBuildCost(input: {
+  feature_id: string;
+  project_id?: string;
+  tokens_used?: number;
+  cost_usd: number;
+  outcome: "shipped" | "abandoned" | "replaced_with_existing";
+}): BuildRecord {
+  const record: BuildRecord = {
+    id: randomUUID(),
+    timestamp: new Date().toISOString(),
+    project_id: input.project_id,
+    feature_id: input.feature_id,
+    tokens_used:
+      typeof input.tokens_used === "number" && Number.isFinite(input.tokens_used) ? input.tokens_used : null,
+    cost_usd: input.cost_usd,
+    outcome: input.outcome,
+  };
+  appendBuildRecord(record);
+  return record;
+}
+
+// The "total cost per feature is queryable" rollup task 1.5 validates
+// against a hand total: every verdict-time ledger entry for this
+// project_id+feature_id (fresh judgments and $0 cache hits alike) plus
+// every self-reported build record for the same feature_id. project_id is
+// required, same as every other read here, so this never falls back to a
+// shared/global bucket across projects.
+function totalFeatureCost(
+  projectId: string,
+  featureId: string
+): {
+  feature_id: string;
+  verdict_entries: LedgerEntry[];
+  build_records: BuildRecord[];
+  total_cost_usd: number;
+} {
+  const verdictEntries = readLedgerEntries(projectId).filter((e) => e.feature_id === featureId);
+  const buildRecords = readBuildRecords(featureId).filter((r) => !r.project_id || r.project_id === projectId);
+  const total =
+    verdictEntries.reduce((sum, e) => sum + (e.cost_usd ?? 0), 0) +
+    buildRecords.reduce((sum, r) => sum + (r.cost_usd ?? 0), 0);
+  return {
+    feature_id: featureId,
+    verdict_entries: verdictEntries,
+    build_records: buildRecords,
+    total_cost_usd: Math.round(total * 10000) / 10000,
+  };
+}
+
 // Orchestrates the ensemble: run once, and only pay for 2 more full
 // pipeline passes when the single-run result landed close enough to a
 // verdict threshold that a single item's judgment swinging could flip
@@ -1475,14 +1662,20 @@ function aggregateMeta(passes: Array<{ ok: true; result: JudgmentResult }>): Jud
   };
 }
 
-// Builds the LedgerEntry appended after a fresh (non-cache-hit) judgment.
+// Builds the LedgerEntry appended after a judgment -- fresh (non-cache-hit)
+// or a ledger cache hit, distinguished by opts.cacheHit/opts.costUsd (a
+// cache hit is always real $0, a fresh call carries its own
+// _meta.estimated_cost_usd; callers pass that in rather than this function
+// reaching into result._meta itself, since the cache-hit path's synthetic
+// _meta shouldn't be treated as equivalent to a real one).
 // checklist/checklist_source come from the result itself, not input.checklist
 // -- that field captures what was actually scored regardless of whether the
 // caller pre-supplied it or this call extracted it internally.
 function buildLedgerEntry(
-  input: { component_need: string; domain: string; framework: string; existing_stack?: string },
+  input: { component_need: string; domain: string; framework: string; existing_stack?: string; feature_id?: string },
   projectId: string,
-  result: JudgmentResult
+  result: JudgmentResult,
+  opts: { costUsd: number; cacheHit: boolean; featureId?: string }
 ): LedgerEntry {
   const candidate = distillCandidate(result);
   const checklist = Array.isArray(result.requirements_checked)
@@ -1492,6 +1685,7 @@ function buildLedgerEntry(
     id: randomUUID(),
     timestamp: new Date().toISOString(),
     project_id: projectId,
+    feature_id: deriveFeatureId(input.component_need, projectId, opts.featureId ?? input.feature_id),
     component_need: input.component_need,
     domain: input.domain,
     framework: input.framework,
@@ -1503,6 +1697,8 @@ function buildLedgerEntry(
     confidence: result.confidence,
     reason: result.reason,
     coverage: result.coverage ?? null,
+    cost_usd: opts.costUsd,
+    cache_hit: opts.cacheHit,
     project_conventions_snapshot: hashConventions(input.existing_stack),
   };
 }
@@ -1514,6 +1710,7 @@ async function judgeComponent(input: {
   existing_stack?: string;
   project_id?: string;
   checklist?: string[];
+  feature_id?: string;
 }): Promise<string> {
   // The one deliberate exception to "coverage is scored fresh every time"
   // (see file header and runSinglePass's memory-lookup comment) -- bounded
@@ -1567,6 +1764,20 @@ async function judgeComponent(input: {
       estimatedCostUsd: 0,
       servedFromLedger: true,
     });
+    // Cost-attribution build plan, 1.1: log feature_id on every ledger
+    // write, cache hit included -- not just fresh judgments -- so a
+    // feature's total cost rolls up correctly even when most of its later
+    // calls cost $0 via this exact short-circuit. Inherits the matched
+    // entry's feature_id unless this call explicitly supplies its own.
+    if (input.project_id) {
+      appendLedgerEntry(
+        buildLedgerEntry(input, input.project_id, result, {
+          costUsd: 0,
+          cacheHit: true,
+          featureId: input.feature_id ?? ledgerCacheHit.feature_id,
+        })
+      );
+    }
     return JSON.stringify(result);
   }
 
@@ -1597,7 +1808,12 @@ async function judgeComponent(input: {
     first.result.ensemble = { triggered: false };
     if (reachesApi) logCall(input, first.result);
     if (reachesApi && input.project_id && (first.result.reason === "scored" || first.result.reason === "no_candidates_found")) {
-      appendLedgerEntry(buildLedgerEntry(input, input.project_id, first.result));
+      appendLedgerEntry(
+        buildLedgerEntry(input, input.project_id, first.result, {
+          costUsd: first.result._meta?.estimated_cost_usd ?? 0,
+          cacheHit: false,
+        })
+      );
     }
     if (reachesApi) {
       captureRecommendation({
@@ -1702,7 +1918,12 @@ async function judgeComponent(input: {
   // reachesApi === true here, no guard needed.
   logCall(input, base);
   if (input.project_id && (base.reason === "scored" || base.reason === "no_candidates_found")) {
-    appendLedgerEntry(buildLedgerEntry(input, input.project_id, base));
+    appendLedgerEntry(
+      buildLedgerEntry(input, input.project_id, base, {
+        costUsd: base._meta?.estimated_cost_usd ?? 0,
+        cacheHit: false,
+      })
+    );
   }
   captureRecommendation({
     projectId: input.project_id,
@@ -2289,6 +2510,22 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         "instead of a fresh search+score).",
       inputSchema: READ_LEDGER_INPUT_SCHEMA,
     },
+    {
+      name: REPORT_BUILD_COST_TOOL_NAME,
+      description:
+        "Self-reports the end-to-end build cost for one feature -- call this " +
+        "once when the build a recommend_component verdict fed into is " +
+        "actually complete (shipped, abandoned, or replaced), not on every " +
+        "verdict. Pattern only ever sees the cost of judging what to use; " +
+        "everything past that -- the actual scaffold, install, or custom " +
+        "build -- happens outside Pattern entirely, so this is the only way " +
+        "that cost gets attributed back to the feature. Pass the same " +
+        "feature_id you used (or that recommend_component derived) for this " +
+        "feature's judgment call(s), so read_ledger's feature_id rollup can " +
+        "join this record to them. This only appends a local record; it " +
+        "never re-runs any judgment and never calls the Anthropic API.",
+      inputSchema: REPORT_BUILD_COST_INPUT_SCHEMA,
+    },
   ],
 }));
 
@@ -2301,6 +2538,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       existing_stack?: string;
       project_id?: string;
       checklist?: string[];
+      feature_id?: string;
     };
 
     try {
@@ -2392,12 +2630,42 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       project_id: string;
       component_need?: string;
       limit?: number;
+      feature_id?: string;
     };
 
     try {
+      if (args.feature_id) {
+        const rollup = totalFeatureCost(args.project_id, args.feature_id);
+        return {
+          content: [{ type: "text", text: JSON.stringify({ project_id: args.project_id, ...rollup }) }],
+        };
+      }
       const entries = findLedgerMatches(args.project_id, args.component_need, args.limit);
       return {
         content: [{ type: "text", text: JSON.stringify({ project_id: args.project_id, entries }) }],
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return {
+        content: [{ type: "text", text: `Error: ${message}` }],
+        isError: true,
+      };
+    }
+  }
+
+  if (request.params.name === REPORT_BUILD_COST_TOOL_NAME) {
+    const args = request.params.arguments as {
+      feature_id: string;
+      project_id?: string;
+      tokens_used?: number;
+      cost_usd: number;
+      outcome: "shipped" | "abandoned" | "replaced_with_existing";
+    };
+
+    try {
+      const record = recordBuildCost(args);
+      return {
+        content: [{ type: "text", text: JSON.stringify({ status: "recorded", record }) }],
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

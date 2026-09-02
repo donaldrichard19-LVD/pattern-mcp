@@ -32,7 +32,7 @@ whether to:
 
 Pattern is designed for agents to use **while they are building**.
 
-It exposes four tools:
+It exposes five tools:
 
 - `recommend_component` — evaluates a UI component need and returns a
   structured recommendation.
@@ -44,7 +44,12 @@ It exposes four tools:
   account.
 - `read_ledger` — lists past `recommend_component` judgments for a
   `project_id`, including any that were served from the ledger cache (see
-  [Per-project judgment ledger](#per-project-judgment-ledger)).
+  [Per-project judgment ledger](#per-project-judgment-ledger)); pass
+  `feature_id` instead of browsing by keyword to get a full cost rollup for
+  one feature (see [Tool: `report_build_cost`](#tool-report_build_cost)).
+- `report_build_cost` — self-reports the end-to-end build cost for one
+  feature, so cost incurred after Pattern's own verdict (the actual
+  scaffold/install/build) is still attributable back to it.
 
 ## How it works
 
@@ -409,6 +414,16 @@ Leave `checklist` out to keep today's default behavior: `recommend_component`
 extracts its own checklist internally, exactly as before this option
 existed.
 
+#### `feature_id`
+
+`feature_id` is optional -- a stable identifier for the feature this
+component need belongs to (e.g. a ticket id or branch name). Its only use
+is joining this call's cost with a later
+[`report_build_cost`](#tool-report_build_cost) call for the same feature.
+Omit it to have one derived deterministically from `project_id` +
+`component_need`; only meaningful together with `project_id`. See
+[Feature cost attribution](#feature-cost-attribution).
+
 **Is the checklist actually skipped, not just re-derived?** Checked, not
 assumed. `breakdown_ms.extract` for a `checklist`-provided call is smaller
 than the default path's, but not near-zero -- which raised the question of
@@ -667,6 +682,10 @@ came back with `served_from_ledger: true`.
   match, no embeddings) against stored entries' `component_need`. Omit to
   list everything for the project.
 - `limit` is optional, defaults to 20. Most recent entries first.
+- `feature_id` is optional. When provided, `component_need` and `limit`
+  are ignored and the response is a full cost rollup for that one feature
+  instead of a keyword listing -- see [Feature cost
+  attribution](#feature-cost-attribution).
 
 ### Output
 
@@ -678,6 +697,7 @@ came back with `served_from_ledger: true`.
       "id": "a1b2c3d4-...",
       "timestamp": "2026-08-29T19:50:47.073Z",
       "project_id": "my-booking-app",
+      "feature_id": "3f9a21c0",
       "component_need": "cancellation policy display with refund tiers by date",
       "domain": "Airbnb-style rental marketplace",
       "framework": "React + Tailwind",
@@ -691,9 +711,25 @@ came back with `served_from_ledger: true`.
       "confidence": "low",
       "reason": "scored",
       "coverage": "5/8 (62.5%)",
+      "cost_usd": 0.087,
+      "cache_hit": false,
       "project_conventions_snapshot": "9f3a1c7e2b0d4f5a"
     }
   ]
+}
+```
+
+Passing `feature_id` instead returns:
+
+```json
+{
+  "project_id": "my-booking-app",
+  "feature_id": "3f9a21c0",
+  "verdict_entries": [ "...same shape as above, filtered to this feature_id..." ],
+  "build_records": [
+    { "id": "...", "timestamp": "...", "project_id": "my-booking-app", "feature_id": "3f9a21c0", "tokens_used": 9000, "cost_usd": 1.25, "outcome": "shipped" }
+  ],
+  "total_cost_usd": 1.34
 }
 ```
 
@@ -702,13 +738,94 @@ contains raw HTML, full prop tables, or the per-requirement evidence text
 `recommend_component` itself returns. See
 [Data minimization](#data-minimization) below.
 
+## Tool: `report_build_cost`
+
+Self-reports the end-to-end build cost for one feature. Pattern only ever
+sees the cost of judging *what* to use (`recommend_component`'s own
+`_meta.estimated_cost_usd`); everything past that -- the actual scaffold,
+install, or custom build -- happens outside Pattern entirely and Pattern
+has no way to observe it. Call this once, after the calling agent's build
+for a feature is actually complete (shipped, abandoned, or replaced), not
+on every verdict.
+
+### Input
+
+```json
+{
+  "feature_id": "3f9a21c0",
+  "project_id": "my-booking-app",
+  "tokens_used": 9000,
+  "cost_usd": 1.25,
+  "outcome": "shipped"
+}
+```
+
+- `feature_id` is required -- either a value you explicitly passed to an
+  earlier `recommend_component` call for this feature, or (if you didn't)
+  the same value `recommend_component` derives on its own:
+  `sha256(project_id + "::" + component_need, lowercased/trimmed)`
+  truncated to 8 hex characters. When in doubt, call `read_ledger` with
+  just `project_id` and copy the `feature_id` off the relevant entry
+  rather than re-deriving it by hand.
+- `project_id` is optional but recommended -- without it, this record
+  still joins to a `recommend_component` entry by `feature_id` alone, but
+  `read_ledger`'s rollup can't scope it to one project.
+- `tokens_used` is optional.
+- `cost_usd` is required -- your own real number, not Pattern's.
+- `outcome` is required: `"shipped"`, `"abandoned"`, or
+  `"replaced_with_existing"`.
+
+### Output
+
+```json
+{
+  "status": "recorded",
+  "record": {
+    "id": "c5706b47-...",
+    "timestamp": "2026-09-02T01:25:29.653Z",
+    "project_id": "my-booking-app",
+    "feature_id": "3f9a21c0",
+    "tokens_used": 9000,
+    "cost_usd": 1.25,
+    "outcome": "shipped"
+  }
+}
+```
+
+This only appends a local record to `~/.pattern/build_ledger.jsonl`
+(override with `PATTERN_BUILD_LEDGER_PATH`) -- it never re-runs any
+judgment and never calls the Anthropic API.
+
+## Feature cost attribution
+
+Every `recommend_component` call that writes to the ledger -- a fresh
+judgment *or* a $0 [ledger cache hit](#the-cache-hit-exception) -- now
+carries a `feature_id`, plus its own `cost_usd` and `cache_hit`. Pair that
+with `report_build_cost`'s build-time record and `read_ledger`'s
+`feature_id` rollup, and total spend on a feature (judgment + build,
+across however many calls) is queryable end to end, not just the cost of
+one verdict call.
+
+`feature_id` defaults to a deterministic derivation --
+`sha256(project_id + "::" + component_need)` truncated to 8 hex chars --
+so repeat calls for the same feature land under the same id automatically,
+with no coordination needed between `recommend_component` and
+`report_build_cost` calls. Pass your own `feature_id` explicitly (e.g. a
+ticket id or branch name) if you'd rather key on something stable on your
+own side.
+
 ## Per-project judgment ledger
 
 Distinct from [per-project decision memory](#per-project-decision-memory)
 below -- that file only gains an entry when `record_component_decision` is
 explicitly called. The ledger instead gains one entry automatically for
-**every** `recommend_component` call that reaches the API with a
-`project_id` and lands on reason `"scored"` or `"no_candidates_found"`.
+**every** `recommend_component` call with a `project_id` that lands on
+reason `"scored"` or `"no_candidates_found"` -- whether that's a fresh
+call that reached the API, or a $0 [ledger cache
+hit](#the-cache-hit-exception) served without one (`cache_hit: true`,
+`cost_usd: 0`), so a feature's total cost still rolls up correctly even
+once most of its later calls are free. See [Feature cost
+attribution](#feature-cost-attribution).
 
 Pattern stores it locally in:
 

@@ -26,8 +26,11 @@ This is the recommended path for most callers -- call it directly with
 
 Optional inputs: `existing_stack` (tiebreaker), `project_id` (surfaces
 past decisions from `record_component_decision` as a consistency signal),
-and `checklist` (skip this call's own extraction and score against a
-checklist you already have -- see `extract_requirements` below).
+`checklist` (skip this call's own extraction and score against a
+checklist you already have -- see `extract_requirements` below), and
+`feature_id` (joins this call's cost with a later `report_build_cost` call
+for the same feature -- see below; omit to have one derived
+automatically).
 
 On `custom_build`, open or read the returned Mobbin/Figma reference
 URL(s) before starting the build -- don't just print the URL. On
@@ -71,11 +74,26 @@ re-runs no judgment. Requires `project_id`, `component_need`, `action`
 ### `read_ledger`
 
 Lists past `recommend_component` judgments for a `project_id` -- every
-call that reached the API, not just ones confirmed via
-`record_component_decision`. Requires `project_id`; `component_need`
-(keyword filter) and `limit` are optional. Useful for auditing what
-Pattern has already judged, or for understanding a
-`served_from_ledger: true` response (see below).
+call that landed on a verdict, fresh or served from the ledger cache, not
+just ones confirmed via `record_component_decision`. Requires
+`project_id`; `component_need` (keyword filter) and `limit` are optional.
+Useful for auditing what Pattern has already judged, or for understanding
+a `served_from_ledger: true` response (see below). Pass `feature_id`
+instead of `component_need`/`limit` to get a full cost rollup for one
+feature (verdict entries + `report_build_cost` records, summed
+`total_cost_usd`) rather than a keyword listing.
+
+### `report_build_cost`
+
+Call this *after* the build a `recommend_component` verdict fed into is
+actually complete (shipped, abandoned, or replaced) -- not on every
+verdict. Pattern only sees the cost of judging what to use; this is the
+only way the cost of the actual build gets attributed back to the
+feature. Requires `feature_id` (the one you passed to, or that was
+derived by, the matching `recommend_component` call(s)), `cost_usd`, and
+`outcome` (`"shipped"` | `"abandoned"` | `"replaced_with_existing"`).
+`project_id` and `tokens_used` are optional. Appends to a local file only
+-- no API call, no judgment re-run.
 
 ## Cost awareness
 
