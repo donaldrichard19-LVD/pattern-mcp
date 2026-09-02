@@ -445,6 +445,7 @@ const RECORD_DECISION_TOOL_NAME = "record_component_decision";
 const EXTRACT_REQUIREMENTS_TOOL_NAME = "extract_requirements";
 const READ_LEDGER_TOOL_NAME = "read_ledger";
 const REPORT_BUILD_COST_TOOL_NAME = "report_build_cost";
+const REPORT_OUTCOME_PROXY_TOOL_NAME = "report_outcome_proxy";
 
 const INPUT_SCHEMA = {
   type: "object",
@@ -639,6 +640,39 @@ const REPORT_BUILD_COST_INPUT_SCHEMA = {
     },
   },
   required: ["feature_id", "cost_usd", "outcome"],
+} as const;
+
+const REPORT_OUTCOME_PROXY_INPUT_SCHEMA = {
+  type: "object",
+  properties: {
+    feature_id: {
+      type: "string",
+      description: "The feature_id this outcome data belongs to -- same value used in the feature's recommend_component/report_build_cost calls.",
+    },
+    project_id: {
+      type: "string",
+      description: "Optional but recommended. The same project_id used in this feature's other calls, so read_ledger's feature_id rollup can find this record.",
+    },
+    reworked: {
+      type: "boolean",
+      description:
+        "Whether any of the files this feature's build touched have been modified again since the original merge -- computed by you from your own repo's git history (e.g. `git log --follow` against the file list), never guessed. Re-report this on a later check if the answer changes.",
+    },
+    days_to_rework: {
+      type: "number",
+      description: "Optional. Days between the original merge and the first rework commit, if reworked is true and you have a real date to compute from.",
+    },
+    time_to_merge_hours: {
+      type: "number",
+      description: "Hours between the first commit touching this feature's files and the commit/PR that merged it, computed from your own repo's git metadata.",
+    },
+    status_at_30d: {
+      type: "string",
+      enum: ["kept", "replaced", "removed"],
+      description: "At a ~30-day horizon post-merge: whether the component Pattern recommended still exists in the codebase, unchanged in kind ('kept'), was swapped for a different approach ('replaced'), or was deleted entirely ('removed'). Only report this once the horizon has actually passed.",
+    },
+  },
+  required: ["feature_id"],
 } as const;
 
 // Shared between buildSystemPrompt's own step 2 and
@@ -1597,6 +1631,115 @@ function recordBuildCost(input: {
 // every self-reported build record for the same feature_id. project_id is
 // required, same as every other read here, so this never falls back to a
 // shared/global bucket across projects.
+// report_outcome_proxy (cost-attribution build plan Phase 2, 2.1-2.3) --
+// self-reported, same reasoning as report_build_cost: rework-rate and
+// time-to-merge both require real git history, and Pattern has no
+// process.cwd()/repo-path concept and no filesystem access to a caller's
+// repo at all (see project judgment ledger's own design notes) -- rather
+// than giving Pattern a new git-shelling-out capability, the calling
+// agent (which already has real repo access) computes these off its own
+// `git log`/`git blame` and reports the result here. This also makes
+// 2.4's exclusion check true by construction: nothing on this path ever
+// reads coverage_pct, confidence, or any other Pattern-produced field --
+// there simply isn't a code path from a verdict into an outcome proxy.
+// Append-only like every other record here: a feature can get multiple
+// proxy reports over time (time_to_merge_hours right after merge,
+// reworked/days_to_rework on a later re-check, status_at_30d once the
+// horizon passes) -- readers take the latest report per field via
+// latestOutcomeProxy below, not a running mutation of one row.
+const OUTCOME_PROXY_PATH =
+  process.env.PATTERN_OUTCOME_PROXY_PATH ?? join(homedir(), ".pattern", "outcome_proxies.jsonl");
+
+export interface OutcomeProxyRecord {
+  id: string;
+  timestamp: string;
+  project_id?: string;
+  feature_id: string;
+  reworked?: boolean;
+  days_to_rework?: number | null;
+  time_to_merge_hours?: number;
+  status_at_30d?: "kept" | "replaced" | "removed";
+}
+
+function appendOutcomeProxyRecord(record: OutcomeProxyRecord): void {
+  mkdirSync(dirname(OUTCOME_PROXY_PATH), { recursive: true });
+  appendFileSync(OUTCOME_PROXY_PATH, JSON.stringify(record) + "\n", "utf8");
+}
+
+function readOutcomeProxyRecords(featureId: string): OutcomeProxyRecord[] {
+  let raw: string;
+  try {
+    raw = readFileSync(OUTCOME_PROXY_PATH, "utf8");
+  } catch {
+    return [];
+  }
+  const records: OutcomeProxyRecord[] = [];
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const parsed = JSON.parse(line);
+      if (parsed && typeof parsed === "object" && parsed.feature_id === featureId) {
+        records.push(parsed as OutcomeProxyRecord);
+      }
+    } catch {
+      // skip malformed line
+    }
+  }
+  return records;
+}
+
+// Merges every report for a feature into one view, most recent value per
+// field wins (not most recent record wins) -- so a status_at_30d reported
+// today doesn't get lost behind an unrelated reworked update reported
+// yesterday, and vice versa. history is still returned in full for anyone
+// who wants the raw timeline rather than just the merged snapshot.
+function latestOutcomeProxy(featureId: string): { merged: Partial<OutcomeProxyRecord> | null; history: OutcomeProxyRecord[] } {
+  const records = readOutcomeProxyRecords(featureId).sort(
+    (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+  );
+  if (records.length === 0) return { merged: null, history: records };
+  const merged: Partial<OutcomeProxyRecord> = {};
+  for (const r of records) {
+    if (r.reworked !== undefined) merged.reworked = r.reworked;
+    if (r.days_to_rework !== undefined) merged.days_to_rework = r.days_to_rework;
+    if (r.time_to_merge_hours !== undefined) merged.time_to_merge_hours = r.time_to_merge_hours;
+    if (r.status_at_30d !== undefined) merged.status_at_30d = r.status_at_30d;
+  }
+  return { merged, history: records };
+}
+
+function recordOutcomeProxy(input: {
+  feature_id: string;
+  project_id?: string;
+  reworked?: boolean;
+  days_to_rework?: number;
+  time_to_merge_hours?: number;
+  status_at_30d?: "kept" | "replaced" | "removed";
+}): OutcomeProxyRecord {
+  if (
+    input.reworked === undefined &&
+    input.days_to_rework === undefined &&
+    input.time_to_merge_hours === undefined &&
+    input.status_at_30d === undefined
+  ) {
+    throw new Error(
+      "report_outcome_proxy requires at least one of reworked, days_to_rework, time_to_merge_hours, or status_at_30d."
+    );
+  }
+  const record: OutcomeProxyRecord = {
+    id: randomUUID(),
+    timestamp: new Date().toISOString(),
+    project_id: input.project_id,
+    feature_id: input.feature_id,
+    ...(input.reworked !== undefined ? { reworked: input.reworked } : {}),
+    ...(input.days_to_rework !== undefined ? { days_to_rework: input.days_to_rework } : {}),
+    ...(input.time_to_merge_hours !== undefined ? { time_to_merge_hours: input.time_to_merge_hours } : {}),
+    ...(input.status_at_30d !== undefined ? { status_at_30d: input.status_at_30d } : {}),
+  };
+  appendOutcomeProxyRecord(record);
+  return record;
+}
+
 function totalFeatureCost(
   projectId: string,
   featureId: string
@@ -1605,17 +1748,22 @@ function totalFeatureCost(
   verdict_entries: LedgerEntry[];
   build_records: BuildRecord[];
   total_cost_usd: number;
+  outcome_proxy: Partial<OutcomeProxyRecord> | null;
+  outcome_proxy_history: OutcomeProxyRecord[];
 } {
   const verdictEntries = readLedgerEntries(projectId).filter((e) => e.feature_id === featureId);
   const buildRecords = readBuildRecords(featureId).filter((r) => !r.project_id || r.project_id === projectId);
   const total =
     verdictEntries.reduce((sum, e) => sum + (e.cost_usd ?? 0), 0) +
     buildRecords.reduce((sum, r) => sum + (r.cost_usd ?? 0), 0);
+  const { merged, history } = latestOutcomeProxy(featureId);
   return {
     feature_id: featureId,
     verdict_entries: verdictEntries,
     build_records: buildRecords,
     total_cost_usd: Math.round(total * 10000) / 10000,
+    outcome_proxy: merged,
+    outcome_proxy_history: history,
   };
 }
 
@@ -2526,6 +2674,25 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         "never re-runs any judgment and never calls the Anthropic API.",
       inputSchema: REPORT_BUILD_COST_INPUT_SCHEMA,
     },
+    {
+      name: REPORT_OUTCOME_PROXY_TOOL_NAME,
+      description:
+        "Self-reports a value signal for one feature that is deliberately " +
+        "independent of Pattern's own verdict -- never derive any of these " +
+        "fields from coverage_pct, confidence, or anything else Pattern " +
+        "returned; they only mean something if they could contradict the " +
+        "verdict. Compute reworked/days_to_rework and time_to_merge_hours " +
+        "from your own repo's real git history (e.g. `git log --follow` " +
+        "against the files this feature's build touched) -- never guess " +
+        "them. Report status_at_30d only once a real ~30-day-post-merge " +
+        "horizon has actually passed. Safe to call more than once for the " +
+        "same feature_id as more signal becomes available over time (e.g. " +
+        "time_to_merge_hours right after merge, reworked on a later check, " +
+        "status_at_30d at the 30-day mark) -- read_ledger's feature_id " +
+        "rollup merges every report into one latest-value-per-field view. " +
+        "This only appends a local record; it never calls the Anthropic API.",
+      inputSchema: REPORT_OUTCOME_PROXY_INPUT_SCHEMA,
+    },
   ],
 }));
 
@@ -2664,6 +2831,30 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     try {
       const record = recordBuildCost(args);
+      return {
+        content: [{ type: "text", text: JSON.stringify({ status: "recorded", record }) }],
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return {
+        content: [{ type: "text", text: `Error: ${message}` }],
+        isError: true,
+      };
+    }
+  }
+
+  if (request.params.name === REPORT_OUTCOME_PROXY_TOOL_NAME) {
+    const args = request.params.arguments as {
+      feature_id: string;
+      project_id?: string;
+      reworked?: boolean;
+      days_to_rework?: number;
+      time_to_merge_hours?: number;
+      status_at_30d?: "kept" | "replaced" | "removed";
+    };
+
+    try {
+      const record = recordOutcomeProxy(args);
       return {
         content: [{ type: "text", text: JSON.stringify({ status: "recorded", record }) }],
       };

@@ -32,7 +32,7 @@ whether to:
 
 Pattern is designed for agents to use **while they are building**.
 
-It exposes five tools:
+It exposes six tools:
 
 - `recommend_component` — evaluates a UI component need and returns a
   structured recommendation.
@@ -50,6 +50,10 @@ It exposes five tools:
 - `report_build_cost` — self-reports the end-to-end build cost for one
   feature, so cost incurred after Pattern's own verdict (the actual
   scaffold/install/build) is still attributable back to it.
+- `report_outcome_proxy` — self-reports a value signal (rework, time to
+  merge, kept-vs-replaced) for one feature, deliberately independent of
+  Pattern's own verdict -- see [Outcome
+  proxies](#outcome-proxies).
 
 ## How it works
 
@@ -729,9 +733,15 @@ Passing `feature_id` instead returns:
   "build_records": [
     { "id": "...", "timestamp": "...", "project_id": "my-booking-app", "feature_id": "3f9a21c0", "tokens_used": 9000, "cost_usd": 1.25, "outcome": "shipped" }
   ],
-  "total_cost_usd": 1.34
+  "total_cost_usd": 1.34,
+  "outcome_proxy": { "time_to_merge_hours": 3.5, "reworked": true, "days_to_rework": 12, "status_at_30d": "kept" },
+  "outcome_proxy_history": [ "...every raw report_outcome_proxy record for this feature_id, oldest first..." ]
 }
 ```
+
+`outcome_proxy` is `null` (and `outcome_proxy_history` an empty array)
+when no `report_outcome_proxy` calls have been made for this feature yet
+-- see [Outcome proxies](#outcome-proxies).
 
 Each entry holds only distilled fields -- `candidates_evaluated` never
 contains raw HTML, full prop tables, or the per-requirement evidence text
@@ -796,6 +806,64 @@ This only appends a local record to `~/.pattern/build_ledger.jsonl`
 (override with `PATTERN_BUILD_LEDGER_PATH`) -- it never re-runs any
 judgment and never calls the Anthropic API.
 
+## Tool: `report_outcome_proxy`
+
+Self-reports a value signal for one feature, deliberately independent of
+Pattern's own verdict -- the whole point is a signal that could
+*contradict* the verdict, so nothing on this path ever reads
+`coverage_pct`, `confidence`, or any other Pattern-produced field. Compute
+`reworked`/`days_to_rework` and `time_to_merge_hours` from your own repo's
+real git history (e.g. `git log --follow` against the files this
+feature's build touched) -- Pattern has no `process.cwd()`/repo-path
+concept and no filesystem access to your repo at all, so it can't compute
+these itself. Report `status_at_30d` only once a real ~30-day-post-merge
+horizon has actually passed.
+
+Safe to call more than once for the same `feature_id` as more signal
+becomes available over time -- e.g. `time_to_merge_hours` right after
+merge, `reworked` on a later re-check, `status_at_30d` at the 30-day mark.
+`read_ledger`'s `feature_id` rollup merges every report into one
+latest-value-per-field view (a later report only overwrites the specific
+fields it includes, never the others).
+
+### Input
+
+```json
+{
+  "feature_id": "3f9a21c0",
+  "project_id": "my-booking-app",
+  "reworked": true,
+  "days_to_rework": 12
+}
+```
+
+- `feature_id` is required.
+- `project_id` is optional but recommended, same reasoning as
+  `report_build_cost`.
+- `reworked`, `days_to_rework`, `time_to_merge_hours`, `status_at_30d` are
+  all individually optional, but **at least one is required** -- an empty
+  report is rejected rather than silently recording nothing.
+
+### Output
+
+```json
+{
+  "status": "recorded",
+  "record": {
+    "id": "8a2f1e0c-...",
+    "timestamp": "2026-09-16T18:04:12.881Z",
+    "project_id": "my-booking-app",
+    "feature_id": "3f9a21c0",
+    "reworked": true,
+    "days_to_rework": 12
+  }
+}
+```
+
+This only appends a local record to `~/.pattern/outcome_proxies.jsonl`
+(override with `PATTERN_OUTCOME_PROXY_PATH`) -- it never calls the
+Anthropic API.
+
 ## Feature cost attribution
 
 Every `recommend_component` call that writes to the ledger -- a fresh
@@ -813,6 +881,31 @@ with no coordination needed between `recommend_component` and
 `report_build_cost` calls. Pass your own `feature_id` explicitly (e.g. a
 ticket id or branch name) if you'd rather key on something stable on your
 own side.
+
+## Outcome proxies
+
+Cost data alone (`feature cost attribution` above) can't answer whether a
+cheaper build was actually *worth it* -- comparing it against Pattern's
+own verdict/`coverage_pct` would be circular, since that's the very thing
+being evaluated. `report_outcome_proxy` attaches a cheap, non-circular
+value signal per `feature_id` instead:
+
+- **`reworked` / `days_to_rework`** (primary proxy) -- was any file this
+  feature's build touched modified again after the original merge, and if
+  so, how soon? Computed from real git history, not Pattern's own data.
+- **`time_to_merge_hours`** (secondary proxy) -- how long the feature
+  took from first commit to merge.
+- **`status_at_30d`** (tertiary, longer-horizon proxy) -- at a ~30-day
+  horizon, does the component Pattern recommended still exist in the
+  codebase, unchanged in kind (`"kept"`), was it swapped for a different
+  approach (`"replaced"`), or removed entirely (`"removed"`)?
+
+`read_ledger`'s `feature_id` rollup returns both `outcome_proxy` (the
+merged latest-value-per-field view) and `outcome_proxy_history` (every
+raw report, in case the timeline itself matters) alongside the cost
+figures from [Feature cost attribution](#feature-cost-attribution) above
+-- so "what did this feature cost end to end, and did it hold up?" is
+answerable from one `read_ledger` call.
 
 ## Per-project judgment ledger
 

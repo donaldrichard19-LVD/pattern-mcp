@@ -79,9 +79,10 @@ just ones confirmed via `record_component_decision`. Requires
 `project_id`; `component_need` (keyword filter) and `limit` are optional.
 Useful for auditing what Pattern has already judged, or for understanding
 a `served_from_ledger: true` response (see below). Pass `feature_id`
-instead of `component_need`/`limit` to get a full cost rollup for one
-feature (verdict entries + `report_build_cost` records, summed
-`total_cost_usd`) rather than a keyword listing.
+instead of `component_need`/`limit` to get a full cost + outcome rollup
+for one feature (verdict entries + `report_build_cost` records, summed
+`total_cost_usd`, plus `outcome_proxy`/`outcome_proxy_history` from
+`report_outcome_proxy` below) rather than a keyword listing.
 
 ### `report_build_cost`
 
@@ -94,6 +95,22 @@ derived by, the matching `recommend_component` call(s)), `cost_usd`, and
 `outcome` (`"shipped"` | `"abandoned"` | `"replaced_with_existing"`).
 `project_id` and `tokens_used` are optional. Appends to a local file only
 -- no API call, no judgment re-run.
+
+### `report_outcome_proxy`
+
+Self-reports a value signal for one feature, deliberately independent of
+Pattern's own verdict -- **never** derive `reworked`/`days_to_rework`/
+`time_to_merge_hours` from `coverage_pct`, `confidence`, or anything else
+Pattern returned; compute them from your own repo's real git history
+(`git log --follow` against the files this feature's build touched) --
+Pattern has no repo access of its own. Report `status_at_30d`
+(`"kept"` | `"replaced"` | `"removed"`) only once a real ~30-day horizon
+has passed. Requires `feature_id` and at least one of `reworked`,
+`days_to_rework`, `time_to_merge_hours`, `status_at_30d` -- an empty
+report errors rather than recording nothing. Safe to call repeatedly for
+the same feature as more signal becomes available; `read_ledger`'s
+`feature_id` rollup merges every report into one latest-value-per-field
+view. Appends to a local file only -- no API call.
 
 ## Cost awareness
 
