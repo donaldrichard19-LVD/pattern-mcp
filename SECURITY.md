@@ -93,6 +93,35 @@ doesn't invalidate a key that already appeared in history.
   `component_need`/`domain`, so the same caution applies if your client
   logs stderr.
 
+## `check_ledger_liveness` reads your filesystem and runs `git`
+
+Every other tool in this server has no filesystem/git access to your repo
+at all (see [Per-project judgment ledger](./README.md#per-project-judgment-ledger)).
+`check_ledger_liveness`, and `recommend_component`'s `snapshot_ref`
+capture at write time, are the one deliberate exception — see [Ledger
+integrity and decision provenance](./README.md#ledger-integrity-and-decision-provenance)
+for the full design. Concretely:
+
+- `git rev-parse HEAD` runs against `PROJECT_ROOT` on every ledger write —
+  read-only, never touches repo state, never any other git subcommand.
+- `check_ledger_liveness` calls `fs.existsSync` and reads one file's
+  content, only for a `file_path` a caller explicitly passed to
+  `recommend_component`, only if it resolves inside `PROJECT_ROOT` — a
+  path that's absolute or escapes `PROJECT_ROOT` via `../` is rejected
+  (resolves to `live_status: "unknown"`) rather than read.
+- `PROJECT_ROOT` defaults to this server process's own working directory
+  (`process.cwd()`), not something derived from `project_id` or any other
+  caller-supplied string — override with `PATTERN_PROJECT_ROOT` if your
+  MCP host doesn't launch this server with the consuming repo as its
+  working directory.
+- Neither of these ever writes to your repo, and neither ever runs an
+  arbitrary shell/git command beyond the fixed `git rev-parse HEAD`
+  above.
+
+If you're running this server in a context where its working directory
+might not be the repo you expect (e.g. a shared or multi-tenant host),
+set `PATTERN_PROJECT_ROOT` explicitly rather than relying on the default.
+
 ## Cost ceiling is a session cap, not a spend cap
 
 The server caps itself at 40 `recommend_component` calls per process

@@ -34,10 +34,11 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import {
   captureApiError,
   captureRecommendation,
@@ -153,6 +154,64 @@ const MAX_DECISIONS_PER_PROJECT = 50;
 // call is about, only the caller-supplied project_id string.
 const LEDGER_PATH = process.env.PATTERN_LEDGER_PATH ?? join(homedir(), ".pattern", "ledger.jsonl");
 const LEDGER_TTL_DAYS = Number(process.env.PATTERN_LEDGER_TTL_DAYS ?? 30);
+
+// Ledger integrity + decision provenance
+// (pattern-ledger-integrity-and-provenance-spec.md). This deliberately
+// reverses the principle stated above report_outcome_proxy elsewhere in
+// this file ("Pattern has no process.cwd()/repo-path concept and no
+// filesystem access to a caller's repo at all") -- but narrowly: the only
+// two things this grants are (1) checking whether one caller-supplied
+// file_path still exists / still mentions a chosen_candidate
+// (checkFileLiveStatus) and (2) reading the current commit SHA via
+// `git rev-parse HEAD` (computeSnapshotRef). Both are read-only, both are
+// scoped to PROJECT_ROOT (see resolveWithinRoot's traversal guard), and
+// neither ever runs an arbitrary shell command. report_build_cost/
+// report_outcome_proxy remain self-reported by design -- rework rate and
+// time-to-merge need real git *history*, a materially bigger and more
+// failure-prone surface than "does this one file exist right now" or
+// "what commit is HEAD."
+//
+// Defaults to process.cwd() -- for a locally-run stdio MCP server, that's
+// normally the consuming repo's root, since MCP hosts typically launch
+// the server with the project directory as its working directory. When
+// that assumption doesn't hold (or for tests), override with
+// PATTERN_PROJECT_ROOT.
+const PROJECT_ROOT = process.env.PATTERN_PROJECT_ROOT ?? process.cwd();
+
+// Belt-and-suspenders guard against a file_path (ultimately caller-
+// supplied, see recommend_component's input schema) that's absolute or
+// escapes PROJECT_ROOT via "../" -- the calling agent already has real fs
+// access to its own machine regardless, but a stray path should degrade
+// to "unknown" rather than silently stat-ing something outside the
+// project. Returns null (never throws) on anything that doesn't resolve
+// cleanly inside root.
+function resolveWithinRoot(root: string, relPath: string): string | null {
+  if (!relPath || isAbsolute(relPath)) return null;
+  const resolved = resolve(root, relPath);
+  const rel = relative(root, resolved);
+  if (rel.startsWith("..") || isAbsolute(rel)) return null;
+  return resolved;
+}
+
+// Feature 2 / Decision Provenance, P0: best-effort commit SHA at
+// ledger-write time. Never throws -- not being in a git repo, git not
+// being installed, or the call simply timing out all degrade to null
+// rather than failing the judgment call that triggered this write (see
+// buildLedgerEntry). Read-only: `git rev-parse HEAD` never touches repo
+// state.
+function computeSnapshotRef(root: string): string | null {
+  try {
+    const sha = execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: root,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 2000,
+    }).trim();
+    return /^[0-9a-f]{7,40}$/i.test(sha) ? sha : null;
+  } catch {
+    return null;
+  }
+}
 // Kill switch for the cache-hit short-circuit specifically -- does NOT
 // disable the ledger itself. Entries still get written and read_ledger
 // still works either way; this only controls whether judgeComponent is
@@ -446,6 +505,7 @@ const EXTRACT_REQUIREMENTS_TOOL_NAME = "extract_requirements";
 const READ_LEDGER_TOOL_NAME = "read_ledger";
 const REPORT_BUILD_COST_TOOL_NAME = "report_build_cost";
 const REPORT_OUTCOME_PROXY_TOOL_NAME = "report_outcome_proxy";
+const CHECK_LEDGER_LIVENESS_TOOL_NAME = "check_ledger_liveness";
 
 const INPUT_SCHEMA = {
   type: "object",
@@ -511,6 +571,17 @@ const INPUT_SCHEMA = {
         "project_id+component_need -- repeat calls for the same feature " +
         "then land under the same id automatically, with no coordination " +
         "needed between calls. Only meaningful together with project_id.",
+    },
+    file_path: {
+      type: "string",
+      description:
+        "Optional. Path (relative to the project root) where this component " +
+        "decision is expected to be implemented, if already known -- usually " +
+        "not known yet at this call, since the decision typically precedes " +
+        "the file existing. When provided, it's stored on the resulting " +
+        "ledger entry and check_ledger_liveness can later confirm the file " +
+        "still exists and still references chosen_candidate. Omit if unknown; " +
+        "it cannot currently be attached to an entry after the fact.",
     },
   },
   required: ["component_need", "domain", "framework"],
@@ -673,6 +744,23 @@ const REPORT_OUTCOME_PROXY_INPUT_SCHEMA = {
     },
   },
   required: ["feature_id"],
+} as const;
+
+const CHECK_LEDGER_LIVENESS_INPUT_SCHEMA = {
+  type: "object",
+  properties: {
+    project_id: {
+      type: "string",
+      description: "The project_id used in the recommend_component call(s) whose ledger entries you want live-checked.",
+    },
+    ledger_entry_id: {
+      type: "string",
+      description:
+        "Optional. Check just this one entry (its id, from read_ledger) " +
+        "instead of every entry for project_id that has a file_path set.",
+    },
+  },
+  required: ["project_id"],
 } as const;
 
 // Shared between buildSystemPrompt's own step 2 and
@@ -1452,6 +1540,16 @@ export interface LedgerEntry {
   cost_usd: number;
   cache_hit: boolean;
   project_conventions_snapshot: string | null;
+  // Ledger integrity + decision provenance fields (see PROJECT_ROOT above).
+  // file_path/snapshot_ref are set once at write time and never change;
+  // last_verified_live/live_status are the write-time defaults ("not yet
+  // checked") -- readLedgerEntries overlays the latest real check from
+  // ledger_liveness.jsonl on top of these at read time (see
+  // withLatestLiveness), so the persisted line itself is never mutated.
+  file_path: string | null;
+  snapshot_ref: string | null;
+  last_verified_live: string | null;
+  live_status: "live" | "orphaned" | "dangling" | "unknown";
 }
 
 function hashConventions(existingStack?: string): string | null {
@@ -1474,6 +1572,149 @@ function deriveFeatureId(componentNeed: string, projectId: string, provided?: st
     .slice(0, 8);
 }
 
+// Overlay store for live-check results, same "append-only, latest-value-
+// per-key wins at read time, never mutate the source-of-truth line"
+// convention as outcome_proxies.jsonl/latestOutcomeProxy above -- a check
+// is a new observation, not a correction of the original ledger entry, so
+// ledger.jsonl itself stays untouched by it.
+const LEDGER_LIVENESS_PATH =
+  process.env.PATTERN_LEDGER_LIVENESS_PATH ?? join(homedir(), ".pattern", "ledger_liveness.jsonl");
+
+export interface LedgerLivenessRecord {
+  id: string;
+  timestamp: string;
+  ledger_entry_id: string;
+  project_id: string;
+  live_status: "live" | "orphaned" | "dangling" | "unknown";
+  checked_file_path: string | null;
+}
+
+function appendLedgerLivenessRecord(record: LedgerLivenessRecord): void {
+  mkdirSync(dirname(LEDGER_LIVENESS_PATH), { recursive: true });
+  appendFileSync(LEDGER_LIVENESS_PATH, JSON.stringify(record) + "\n", "utf8");
+}
+
+function readLedgerLivenessRecords(ledgerEntryId: string): LedgerLivenessRecord[] {
+  let raw: string;
+  try {
+    raw = readFileSync(LEDGER_LIVENESS_PATH, "utf8");
+  } catch {
+    return [];
+  }
+  const records: LedgerLivenessRecord[] = [];
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const parsed = JSON.parse(line);
+      if (parsed && typeof parsed === "object" && parsed.ledger_entry_id === ledgerEntryId) {
+        records.push(parsed as LedgerLivenessRecord);
+      }
+    } catch {
+      // skip malformed line
+    }
+  }
+  return records;
+}
+
+function latestLiveness(ledgerEntryId: string): LedgerLivenessRecord | null {
+  const records = readLedgerLivenessRecords(ledgerEntryId).sort(
+    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+  );
+  return records[0] ?? null;
+}
+
+function withLatestLiveness(entry: LedgerEntry): LedgerEntry {
+  const latest = latestLiveness(entry.id);
+  if (!latest) return entry;
+  return { ...entry, live_status: latest.live_status, last_verified_live: latest.timestamp };
+}
+
+// Feature 1 / Referential Integrity, P1: the single-entry live-check.
+// Orphaned when file_path is set but the file no longer exists; live when
+// the file exists and (best-effort) still mentions chosen_candidate;
+// unknown when file_path was never supplied, escapes PROJECT_ROOT (see
+// resolveWithinRoot), or exists but the candidate name can't be confirmed
+// in its content -- conservative on purpose, per the spec's own risk
+// mitigation (a false "orphaned" is worse than a lingering "unknown").
+// "dangling" (an entry only cross-referenced by other ledger entries, no
+// live anchor anywhere) is graph-level analysis across the whole ledger,
+// not a single-entry check -- Feature 1 P3, not built here.
+function checkFileLiveStatus(entry: LedgerEntry): "live" | "orphaned" | "unknown" {
+  if (!entry.file_path) return "unknown";
+  const abs = resolveWithinRoot(PROJECT_ROOT, entry.file_path);
+  if (!abs) return "unknown";
+  if (!existsSync(abs)) return "orphaned";
+  if (!entry.chosen_candidate) return "live";
+  try {
+    const content = readFileSync(abs, "utf8");
+    return content.toLowerCase().includes(entry.chosen_candidate.toLowerCase()) ? "live" : "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+function checkLedgerEntryLiveness(entry: LedgerEntry): LedgerLivenessRecord {
+  const record: LedgerLivenessRecord = {
+    id: randomUUID(),
+    timestamp: new Date().toISOString(),
+    ledger_entry_id: entry.id,
+    project_id: entry.project_id,
+    live_status: checkFileLiveStatus(entry),
+    checked_file_path: entry.file_path,
+  };
+  appendLedgerLivenessRecord(record);
+  return record;
+}
+
+// check_ledger_liveness tool: on-demand invocation of the live-check above
+// (the design's "on demand via an MCP call" case -- a scheduled/batch
+// sweep is Feature 1 P2, not built here). Entries with no file_path are
+// reported but never checked/recorded -- their status is permanently
+// "unknown" by construction, so re-checking them on every call would only
+// grow ledger_liveness.jsonl without ever learning anything new.
+function checkLedgerLiveness(input: { project_id: string; ledger_entry_id?: string }): {
+  checked: number;
+  total_entries: number;
+  results: Array<{
+    ledger_entry_id: string;
+    component_need: string;
+    file_path: string | null;
+    live_status: LedgerLivenessRecord["live_status"];
+    checked_at: string | null;
+    note: string | null;
+  }>;
+} {
+  const entries = readLedgerEntries(input.project_id).filter(
+    (e) => !input.ledger_entry_id || e.id === input.ledger_entry_id
+  );
+  const results = entries.map((e) => {
+    if (!e.file_path) {
+      return {
+        ledger_entry_id: e.id,
+        component_need: e.component_need,
+        file_path: null,
+        live_status: "unknown" as const,
+        checked_at: null,
+        note: "no file_path recorded on this entry -- nothing to check",
+      };
+    }
+    const record = checkLedgerEntryLiveness(e);
+    return {
+      ledger_entry_id: e.id,
+      component_need: e.component_need,
+      file_path: e.file_path,
+      live_status: record.live_status,
+      checked_at: record.timestamp,
+      note: null,
+    };
+  });
+  return {
+    checked: results.filter((r) => r.checked_at !== null).length,
+    total_entries: results.length,
+    results,
+  };
+}
+
 // Same "missing/malformed collapses to empty" philosophy as readMemory,
 // but line-oriented (JSONL) rather than whole-file JSON -- a single
 // corrupted line (e.g. a hand-edited file, or a write that got cut off)
@@ -1491,7 +1732,19 @@ function readLedgerEntries(projectId: string): LedgerEntry[] {
     try {
       const parsed = JSON.parse(line);
       if (parsed && typeof parsed === "object" && parsed.project_id === projectId) {
-        entries.push(parsed as LedgerEntry);
+        // Backward-compatible defaults for entries written before the
+        // ledger integrity/provenance fields existed -- a missing key
+        // (not merely a null one) falls back to these rather than
+        // `undefined` leaking into the returned shape.
+        const rawEntry = parsed as Partial<LedgerEntry>;
+        const normalized: LedgerEntry = {
+          ...(rawEntry as LedgerEntry),
+          file_path: rawEntry.file_path ?? null,
+          snapshot_ref: rawEntry.snapshot_ref ?? null,
+          last_verified_live: rawEntry.last_verified_live ?? null,
+          live_status: rawEntry.live_status ?? "unknown",
+        };
+        entries.push(withLatestLiveness(normalized));
       }
     } catch {
       // skip malformed line
@@ -1820,7 +2073,14 @@ function aggregateMeta(passes: Array<{ ok: true; result: JudgmentResult }>): Jud
 // -- that field captures what was actually scored regardless of whether the
 // caller pre-supplied it or this call extracted it internally.
 function buildLedgerEntry(
-  input: { component_need: string; domain: string; framework: string; existing_stack?: string; feature_id?: string },
+  input: {
+    component_need: string;
+    domain: string;
+    framework: string;
+    existing_stack?: string;
+    feature_id?: string;
+    file_path?: string;
+  },
   projectId: string,
   result: JudgmentResult,
   opts: { costUsd: number; cacheHit: boolean; featureId?: string }
@@ -1848,6 +2108,19 @@ function buildLedgerEntry(
     cost_usd: opts.costUsd,
     cache_hit: opts.cacheHit,
     project_conventions_snapshot: hashConventions(input.existing_stack),
+    // Feature 2 P0: captured fresh for every entry (cache hits included),
+    // not inherited from a matched ledger_cache_hit -- this reflects the
+    // codebase state at the moment *this line* was written, not the
+    // moment the original judgment ran (see PROJECT_ROOT above).
+    snapshot_ref: computeSnapshotRef(PROJECT_ROOT),
+    // Feature 1 P0: caller-supplied at write time (recommend_component's
+    // optional file_path), null when not yet known -- typically the case,
+    // since the decision is usually made before the file exists. Always
+    // starts "unknown"/unchecked; check_ledger_liveness fills these in
+    // later via the ledger_liveness.jsonl overlay (see withLatestLiveness).
+    file_path: input.file_path ?? null,
+    last_verified_live: null,
+    live_status: "unknown",
   };
 }
 
@@ -1859,6 +2132,7 @@ async function judgeComponent(input: {
   project_id?: string;
   checklist?: string[];
   feature_id?: string;
+  file_path?: string;
 }): Promise<string> {
   // The one deliberate exception to "coverage is scored fresh every time"
   // (see file header and runSinglePass's memory-lookup comment) -- bounded
@@ -2693,6 +2967,25 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         "This only appends a local record; it never calls the Anthropic API.",
       inputSchema: REPORT_OUTCOME_PROXY_INPUT_SCHEMA,
     },
+    {
+      name: CHECK_LEDGER_LIVENESS_TOOL_NAME,
+      description:
+        "Checks whether recommend_component ledger entries for a project_id " +
+        "are still 'live' -- the file_path recorded on the entry (if any) " +
+        "still exists and still mentions chosen_candidate. Requires real, " +
+        "read-only filesystem access to PROJECT_ROOT (defaults to this " +
+        "server's working directory; override with PATTERN_PROJECT_ROOT) -- " +
+        "this is the one exception to Pattern otherwise having no " +
+        "filesystem access to a caller's repo (see report_build_cost/" +
+        "report_outcome_proxy above). Entries with no file_path are listed " +
+        "but not checked -- their status is permanently 'unknown' since " +
+        "there's nothing to check. Never writes to your repo, never runs " +
+        "an arbitrary git/shell command beyond `git rev-parse HEAD` " +
+        "elsewhere in this server. Results are also layered onto " +
+        "read_ledger's live_status/last_verified_live fields for the same " +
+        "entries afterward.",
+      inputSchema: CHECK_LEDGER_LIVENESS_INPUT_SCHEMA,
+    },
   ],
 }));
 
@@ -2706,6 +2999,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       project_id?: string;
       checklist?: string[];
       feature_id?: string;
+      file_path?: string;
     };
 
     try {
@@ -2857,6 +3151,23 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const record = recordOutcomeProxy(args);
       return {
         content: [{ type: "text", text: JSON.stringify({ status: "recorded", record }) }],
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return {
+        content: [{ type: "text", text: `Error: ${message}` }],
+        isError: true,
+      };
+    }
+  }
+
+  if (request.params.name === CHECK_LEDGER_LIVENESS_TOOL_NAME) {
+    const args = request.params.arguments as { project_id: string; ledger_entry_id?: string };
+
+    try {
+      const result = checkLedgerLiveness(args);
+      return {
+        content: [{ type: "text", text: JSON.stringify({ project_id: args.project_id, ...result }) }],
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

@@ -32,7 +32,7 @@ whether to:
 
 Pattern is designed for agents to use **while they are building**.
 
-It exposes six tools:
+It exposes seven tools:
 
 - `recommend_component` — evaluates a UI component need and returns a
   structured recommendation.
@@ -54,6 +54,9 @@ It exposes six tools:
   merge, kept-vs-replaced) for one feature, deliberately independent of
   Pattern's own verdict -- see [Outcome
   proxies](#outcome-proxies).
+- `check_ledger_liveness` — checks whether a ledger entry's recorded
+  `file_path` still exists and still references its `chosen_candidate` --
+  see [Tool: `check_ledger_liveness`](#tool-check_ledger_liveness).
 
 ## How it works
 
@@ -428,6 +431,17 @@ Omit it to have one derived deterministically from `project_id` +
 `component_need`; only meaningful together with `project_id`. See
 [Feature cost attribution](#feature-cost-attribution).
 
+#### `file_path`
+
+`file_path` is optional -- path (relative to `PROJECT_ROOT`) where this
+component decision is expected to be implemented, if already known.
+Usually not known yet at call time, since the decision typically precedes
+the file existing. When provided, it's stored on the resulting ledger
+entry and [`check_ledger_liveness`](#tool-check_ledger_liveness) can later
+confirm the file still exists and still references `chosen_candidate`. It
+cannot currently be attached to an entry after the fact -- see [Ledger
+integrity and decision provenance](#ledger-integrity-and-decision-provenance).
+
 **Is the checklist actually skipped, not just re-derived?** Checked, not
 assumed. `breakdown_ms.extract` for a `checklist`-provided call is smaller
 than the default path's, but not near-zero -- which raised the question of
@@ -717,11 +731,23 @@ came back with `served_from_ledger: true`.
       "coverage": "5/8 (62.5%)",
       "cost_usd": 0.087,
       "cache_hit": false,
-      "project_conventions_snapshot": "9f3a1c7e2b0d4f5a"
+      "project_conventions_snapshot": "9f3a1c7e2b0d4f5a",
+      "file_path": null,
+      "snapshot_ref": "a1b2c3d4e5f6...",
+      "last_verified_live": null,
+      "live_status": "unknown"
     }
   ]
 }
 ```
+
+`file_path`/`snapshot_ref`/`last_verified_live`/`live_status` are the
+ledger integrity + decision provenance fields -- see [Ledger integrity and
+decision provenance](#ledger-integrity-and-decision-provenance) and [Tool:
+`check_ledger_liveness`](#tool-check_ledger_liveness). Entries written
+before this feature shipped read back with `file_path`/`snapshot_ref`/
+`last_verified_live` as `null` and `live_status` as `"unknown"` rather
+than missing keys.
 
 Passing `feature_id` instead returns:
 
@@ -814,10 +840,12 @@ Pattern's own verdict -- the whole point is a signal that could
 `coverage_pct`, `confidence`, or any other Pattern-produced field. Compute
 `reworked`/`days_to_rework` and `time_to_merge_hours` from your own repo's
 real git history (e.g. `git log --follow` against the files this
-feature's build touched) -- Pattern has no `process.cwd()`/repo-path
-concept and no filesystem access to your repo at all, so it can't compute
-these itself. Report `status_at_30d` only once a real ~30-day-post-merge
-horizon has actually passed.
+feature's build touched) rather than relying on Pattern -- rework rate and
+time-to-merge need real git *history*, a materially bigger surface than
+the one narrow, read-only exception described in [Ledger integrity and
+decision provenance](#ledger-integrity-and-decision-provenance) below.
+Report `status_at_30d` only once a real ~30-day-post-merge horizon has
+actually passed.
 
 Safe to call more than once for the same `feature_id` as more signal
 becomes available over time -- e.g. `time_to_merge_hours` right after
@@ -863,6 +891,73 @@ fields it includes, never the others).
 This only appends a local record to `~/.pattern/outcome_proxies.jsonl`
 (override with `PATTERN_OUTCOME_PROXY_PATH`) -- it never calls the
 Anthropic API.
+
+## Tool: `check_ledger_liveness`
+
+Checks whether ledger entries for a `project_id` are still **live** --
+does the `file_path` recorded on the entry (if any, see
+[`file_path`](#tool-recommend_component)) still exist, and does it still
+mention `chosen_candidate`. See [Ledger integrity and decision
+provenance](#ledger-integrity-and-decision-provenance) for the full design
+and its deliberate limits.
+
+This is the **one exception** to Pattern otherwise having no filesystem
+access to your repo (see [Outcome proxies](#outcome-proxies) above) --
+scoped narrowly to read-only `fs.existsSync`/file-read calls against
+`PROJECT_ROOT` (defaults to this server's own working directory; override
+with `PATTERN_PROJECT_ROOT`). It never writes to your repo and never runs
+an arbitrary shell command.
+
+### Input
+
+```json
+{
+  "project_id": "my-booking-app",
+  "ledger_entry_id": "a1b2c3d4-..."
+}
+```
+
+- `project_id` is required.
+- `ledger_entry_id` is optional -- check just that one entry instead of
+  every entry for `project_id` that has a `file_path` set.
+
+### Output
+
+```json
+{
+  "project_id": "my-booking-app",
+  "checked": 1,
+  "total_entries": 2,
+  "results": [
+    {
+      "ledger_entry_id": "a1b2c3d4-...",
+      "component_need": "cancellation policy display with refund tiers by date",
+      "file_path": "src/components/CancellationPolicy.tsx",
+      "live_status": "live",
+      "checked_at": "2026-09-02T20:11:03.442Z",
+      "note": null
+    },
+    {
+      "ledger_entry_id": "e5f6a7b8-...",
+      "component_need": "gallery",
+      "file_path": null,
+      "live_status": "unknown",
+      "checked_at": null,
+      "note": "no file_path recorded on this entry -- nothing to check"
+    }
+  ]
+}
+```
+
+`live_status` is one of `"live"`, `"orphaned"`, `"unknown"`, or
+(reserved, not yet produced -- see [Ledger integrity and decision
+provenance](#ledger-integrity-and-decision-provenance)) `"dangling"`.
+Entries with no `file_path` are listed but never checked or written to
+`ledger_liveness.jsonl` -- their status is permanently `"unknown"` since
+there's nothing to check. Results here are also layered onto
+`read_ledger`'s `live_status`/`last_verified_live` fields for the same
+entries afterward -- `check_ledger_liveness` is the only thing that
+advances those fields past their write-time defaults.
 
 ## Feature cost attribution
 
@@ -978,6 +1073,96 @@ Every candidate is reduced to exactly four fields before it's written --
 convention: a raw or extended object throws rather than silently
 persisting. Run `node scripts/verify-ledger-boundary.mjs` (after
 `npm run build`) to check this boundary directly.
+
+## Ledger integrity and decision provenance
+
+Two gaps in the ledger, surfaced from user feedback: it tracks that a
+decision was made, but not whether the thing it decided about is still
+live in your codebase, and it stores the checklist/verdict but not a
+version pin or an exportable artifact you can attach to a PR or issue.
+This section covers what's shipped so far -- **P0/P1 of both halves**, not
+the full spec. See `pattern-ledger-integrity-and-provenance-spec.md` for
+the complete phased plan; P2/P3 (a scheduled/batch sweep, dangling-cluster
+detection, the provenance-artifact exporter, and GitHub PR/issue posting)
+are not built yet.
+
+**This is the one deliberate exception** to Pattern otherwise having [no
+filesystem/git access to your repo](#per-project-judgment-ledger) at all
+(the principle `report_build_cost`/`report_outcome_proxy` are built
+around). It's narrow on purpose:
+
+- `git rev-parse HEAD` (read-only, never touches repo state) to capture
+  `snapshot_ref` on every ledger write.
+- `fs.existsSync` plus a plain-text read of one file, only for a
+  `file_path` you explicitly passed to `recommend_component`, only inside
+  `PROJECT_ROOT` (see below), to answer `check_ledger_liveness`.
+
+Nothing here runs an arbitrary git or shell command, and nothing writes to
+your repo.
+
+### `PROJECT_ROOT`
+
+Defaults to `process.cwd()` -- for a locally-run stdio MCP server, that's
+normally the consuming repo's root, since MCP hosts typically launch the
+server with the project directory as its working directory. Override with
+`PATTERN_PROJECT_ROOT` if that assumption doesn't hold for your setup.
+
+A `file_path` that's absolute or escapes `PROJECT_ROOT` via `../` resolves
+to `live_status: "unknown"` rather than being read -- belt-and-suspenders,
+since the calling agent already has real filesystem access to its own
+machine regardless.
+
+### Decision provenance: `snapshot_ref`
+
+Every ledger entry -- fresh judgment or [ledger cache
+hit](#the-cache-hit-exception) -- now carries `snapshot_ref`: the commit
+SHA of `PROJECT_ROOT` at the moment that line was written, or `null` when
+`PROJECT_ROOT` isn't a git repo (or `git` isn't installed, or the call
+times out) -- this never fails the underlying `recommend_component` call.
+Entries written before this shipped read back with `snapshot_ref: null`.
+
+A cache-hit entry's `snapshot_ref` reflects the codebase state *when that
+cache-hit line was written*, not the original judgment's -- to see the
+original judgment's snapshot, look up the entry named in its
+`ledger_entry_id`/`original_verdict_timestamp` fields instead.
+
+Not yet built (P1-P3 of Feature 2): a markdown export of one entry's full
+record for attaching to a PR/issue, and the GitHub posting action itself.
+
+### Referential integrity: `file_path` / `live_status`
+
+`recommend_component` optionally accepts `file_path` (see [Tool:
+`recommend_component`](#tool-recommend_component)) -- usually not known at
+call time, since the decision typically precedes the file existing. When
+set, [`check_ledger_liveness`](#tool-check_ledger_liveness) can later
+check whether that file still exists and still mentions
+`chosen_candidate`:
+
+- **`live`** -- the file exists and mentions `chosen_candidate`.
+- **`orphaned`** -- `file_path` is set but the file no longer exists.
+- **`unknown`** -- no `file_path` was ever recorded, the path escapes
+  `PROJECT_ROOT`, or the file exists but `chosen_candidate` can't be
+  confirmed in it. Deliberately the default outcome for anything
+  ambiguous: a false `"orphaned"` is worse than a lingering `"unknown"`.
+- **`dangling`** -- reserved, not yet produced. Feature 1's second
+  staleness type (a cluster of entries that only reference each other,
+  with no live anchor anywhere) is graph-level analysis across the whole
+  ledger, not a single-entry check -- P3, not built here.
+
+Checks are on-demand only right now (call `check_ledger_liveness`
+yourself, or on whatever schedule you want) -- there's no automatic
+sweep. `live_status`/`last_verified_live` start `"unknown"`/`null` on
+every entry at write time and only ever advance via a
+`check_ledger_liveness` call; results are stored append-only in
+`~/.pattern/ledger_liveness.jsonl` (override with
+`PATTERN_LEDGER_LIVENESS_PATH`, same "append, never mutate the source
+line, most recent record wins at read time" convention as
+`outcome_proxies.jsonl`, see [Outcome proxies](#outcome-proxies)) and
+layered onto `ledger.jsonl`'s own entries at read time -- the ledger line
+itself is never rewritten.
+
+Not yet built (P2-P3 of Feature 1): a scheduled/batch sweep across an
+entire ledger, and dangling-cluster detection.
 
 ## Per-project decision memory
 
