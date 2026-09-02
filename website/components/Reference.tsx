@@ -5,11 +5,11 @@ import { H2, LABEL, MONO, PANEL, SECTION } from "./tokens";
 import { Reveal } from "./ui";
 
 const RECORD_DECISION_INPUT_ROWS = [
-  ["project_id", "string, required", "Stable per project — a directory path or project name works well"],
+  ["project_id", "string, required", "Stable per project: a directory path or project name works well"],
   ["component_need", "string, required", "The same need passed to recommend_component"],
   ["action", "installed | custom_built", "What the agent actually did with the verdict"],
   ["source", "shadcn | 21st.dev | reui | custom", "Where the installed component came from, or custom for a build"],
-  ["time_saved_minutes", "number, optional", "Your own estimate — self-reported, never computed or verified by Pattern"],
+  ["time_saved_minutes", "number, optional", "Your own estimate, self-reported, never computed or verified by Pattern"],
 ];
 
 const RECORD_DECISION_OUTPUT_ROWS = [
@@ -51,11 +51,11 @@ const READ_LEDGER_INPUT_ROWS = [
 ];
 
 const READ_LEDGER_OUTPUT_ROWS = [
-  ["entries[]", "verdict, confidence, coverage, chosen_candidate, ...", "Distilled fields only — never the raw per-requirement evidence text"],
+  ["entries[]", "verdict, confidence, coverage, chosen_candidate, ...", "Distilled fields only, never the raw per-requirement evidence text"],
   ["entries[].snapshot_ref", "string | null", "Commit SHA of the project at the moment this entry was written, or null outside a git repo"],
-  ["entries[].live_status", "live | orphaned | unknown | dangling", "Whether file_path (if set) still exists and still references chosen_candidate — see check_ledger_liveness"],
+  ["entries[].live_status", "live | orphaned | unknown | dangling", "Whether file_path (if set) still exists and still references chosen_candidate. See check_ledger_liveness"],
   ["entries[].last_verified_live", "string | null", "Timestamp of the most recent check_ledger_liveness check, or null if never checked"],
-  ["total_cost_usd", "number", "Only present when feature_id is passed — judgment cost plus report_build_cost, summed"],
+  ["total_cost_usd", "number", "Only present when feature_id is passed: judgment cost plus report_build_cost, summed"],
 ];
 
 const CHECK_LIVENESS_INPUT_ROWS = [
@@ -64,9 +64,9 @@ const CHECK_LIVENESS_INPUT_ROWS = [
 ];
 
 const CHECK_LIVENESS_OUTPUT_ROWS = [
-  ["checked", "number", "Entries actually checked — entries with no file_path are listed but skipped"],
-  ["results[].live_status", "live | orphaned | unknown", "unknown on anything ambiguous, by design — a false orphaned is worse than a lingering unknown"],
-  ["results[].note", "string | null", 'e.g. "no file_path recorded on this entry — nothing to check"'],
+  ["checked", "number", "Entries actually checked; entries with no file_path are listed but skipped"],
+  ["results[].live_status", "live | orphaned | unknown", "unknown on anything ambiguous, by design: a false orphaned is worse than a lingering unknown"],
+  ["results[].note", "string | null", 'e.g. "no file_path recorded on this entry, nothing to check"'],
 ];
 
 const REPORT_BUILD_COST_INPUT_ROWS = [
@@ -78,7 +78,7 @@ const REPORT_BUILD_COST_INPUT_ROWS = [
 
 const REPORT_OUTCOME_INPUT_ROWS = [
   ["feature_id", "string, required", "Same value used in the feature's other calls"],
-  ["reworked", "boolean, optional", "Computed by you from real git history — never guessed"],
+  ["reworked", "boolean, optional", "Computed by you from real git history, never guessed"],
   ["time_to_merge_hours", "number, optional", "Hours from first commit to merge"],
   ["status_at_30d", "kept | replaced | removed", "Report only once a real ~30-day horizon has passed"],
 ];
@@ -96,11 +96,11 @@ const POST_PROVENANCE_INPUT_ROWS = [
   ["project_id", "string, required", "The project_id used in the recommend_component call that produced this entry"],
   ["ledger_entry_id", "string, required", "The specific entry to post"],
   ["repo", "string, required", 'GitHub repo in "owner/repo" form'],
-  ["issue_number", "number, required", "The PR or issue number to comment on — GitHub treats both identically"],
+  ["issue_number", "number, required", "The PR or issue number to comment on; GitHub treats both identically"],
 ];
 
 const POST_PROVENANCE_OUTPUT_ROWS = [
-  ["posted", "boolean", "false when a matching comment already exists — idempotent, never double-posts"],
+  ["posted", "boolean", "false when a matching comment already exists (idempotent, never double-posts)"],
   ["comment_url", "string", "The new or existing comment's URL"],
   ["reason", '"already_posted" | undefined', "Present only when posted is false"],
 ];
@@ -124,7 +124,7 @@ const BACKFILL_INPUT_ROWS = [
 const BACKFILL_OUTPUT_ROWS = [
   ["attempted", "number", "Entries missing snapshot_ref that backfill actually tried (entries with a real one are skipped)"],
   ["reconstructed", "number", "How many of those attempts found a commit"],
-  ["results[].reconstructed_snapshot_ref", "string | null", "Always labeled as reconstructed wherever rendered — never presented as a real captured snapshot_ref"],
+  ["results[].reconstructed_snapshot_ref", "string | null", "Always labeled as reconstructed wherever rendered, never presented as a real captured snapshot_ref"],
 ];
 
 const EXTRACT_INPUT_ROWS = [
@@ -229,7 +229,7 @@ export function Reference() {
           <div style={{ display: "grid", gap: 12 }}>
             <h2 style={{ ...H2, maxWidth: 620 }}>Reference</h2>
             <p style={{ color: "var(--text-secondary)", margin: 0, maxWidth: 640 }}>
-              Eleven tools in three groups — the judgment call itself, tracking what it cost and what happened, and
+              Eleven tools in three groups: the judgment call itself, tracking what it cost and what happened, and
               verifying or exporting old decisions later.
             </p>
           </div>
@@ -245,7 +245,7 @@ export function Reference() {
             <Table head={["Field", "Values", "Notes"]} rows={OUTPUT_ROWS} mono={1} />
           </div>
           <div style={{ display: "grid", gap: 12 }}>
-            <div style={LABEL}>extract_requirements input — optional, runs extraction on its own</div>
+            <div style={LABEL}>extract_requirements input: optional, runs extraction on its own</div>
             <Table head={["Field", "Type", "Notes"]} rows={EXTRACT_INPUT_ROWS} mono={1} />
           </div>
           <div style={{ display: "grid", gap: 12 }}>
@@ -256,7 +256,7 @@ export function Reference() {
 
         <Group title="Track cost and outcome">
           <div style={{ display: "grid", gap: 12 }}>
-            <div style={LABEL}>record_component_decision input — call after acting on a verdict, not on every call</div>
+            <div style={LABEL}>record_component_decision input: call after acting on a verdict, not on every call</div>
             <Table head={["Field", "Type", "Notes"]} rows={RECORD_DECISION_INPUT_ROWS} mono={1} />
           </div>
           <div style={{ display: "grid", gap: 12 }}>
@@ -264,7 +264,7 @@ export function Reference() {
             <Table head={["Field", "Values", "Notes"]} rows={RECORD_DECISION_OUTPUT_ROWS} mono={1} />
           </div>
           <div style={{ display: "grid", gap: 12 }}>
-            <div style={LABEL}>read_ledger input — every past judgment for a project_id</div>
+            <div style={LABEL}>read_ledger input: every past judgment for a project_id</div>
             <Table head={["Field", "Type", "Notes"]} rows={READ_LEDGER_INPUT_ROWS} mono={1} />
           </div>
           <div style={{ display: "grid", gap: 12 }}>
@@ -272,18 +272,18 @@ export function Reference() {
             <Table head={["Field", "Values", "Notes"]} rows={READ_LEDGER_OUTPUT_ROWS} mono={1} />
           </div>
           <div style={{ display: "grid", gap: 12 }}>
-            <div style={LABEL}>report_build_cost input — self-reported, free</div>
+            <div style={LABEL}>report_build_cost input: self-reported, free</div>
             <Table head={["Field", "Type", "Notes"]} rows={REPORT_BUILD_COST_INPUT_ROWS} mono={1} />
           </div>
           <div style={{ display: "grid", gap: 12 }}>
-            <div style={LABEL}>report_outcome_proxy input — self-reported, free</div>
+            <div style={LABEL}>report_outcome_proxy input: self-reported, free</div>
             <Table head={["Field", "Type", "Notes"]} rows={REPORT_OUTCOME_INPUT_ROWS} mono={1} />
           </div>
         </Group>
 
         <Group title="Verify and export old decisions">
           <div style={{ display: "grid", gap: 12 }}>
-            <div style={LABEL}>check_ledger_liveness input — is a past decision's file still alive?</div>
+            <div style={LABEL}>check_ledger_liveness input: is a past decision's file still alive?</div>
             <Table head={["Field", "Type", "Notes"]} rows={CHECK_LIVENESS_INPUT_ROWS} mono={1} />
           </div>
           <div style={{ display: "grid", gap: 12 }}>
@@ -291,7 +291,7 @@ export function Reference() {
             <Table head={["Field", "Values", "Notes"]} rows={CHECK_LIVENESS_OUTPUT_ROWS} mono={1} />
           </div>
           <div style={{ display: "grid", gap: 12 }}>
-            <div style={LABEL}>sweep_ledger_liveness input — batch/scheduled, meant for your own cron or CI</div>
+            <div style={LABEL}>sweep_ledger_liveness input: batch/scheduled, meant for your own cron or CI</div>
             <Table head={["Field", "Type", "Notes"]} rows={SWEEP_LIVENESS_INPUT_ROWS} mono={1} />
           </div>
           <div style={{ display: "grid", gap: 12 }}>
@@ -299,7 +299,7 @@ export function Reference() {
             <Table head={["Field", "Values", "Notes"]} rows={SWEEP_LIVENESS_OUTPUT_ROWS} mono={1} />
           </div>
           <div style={{ display: "grid", gap: 12 }}>
-            <div style={LABEL}>export_ledger_provenance input — one decision as a paste-able markdown block</div>
+            <div style={LABEL}>export_ledger_provenance input: one decision as a paste-able markdown block</div>
             <Table head={["Field", "Type", "Notes"]} rows={EXPORT_PROVENANCE_INPUT_ROWS} mono={1} />
           </div>
           <div style={{ display: "grid", gap: 12 }}>
@@ -315,7 +315,7 @@ export function Reference() {
             <Table head={["Field", "Values", "Notes"]} rows={BACKFILL_OUTPUT_ROWS} mono={1} />
           </div>
           <div style={{ display: "grid", gap: 12 }}>
-            <div style={LABEL}>post_ledger_provenance_to_github input — the one tool here with a real, visible side effect off your machine</div>
+            <div style={LABEL}>post_ledger_provenance_to_github input: the one tool here with a real, visible side effect off your machine</div>
             <Table head={["Field", "Type", "Notes"]} rows={POST_PROVENANCE_INPUT_ROWS} mono={1} />
           </div>
           <div style={{ display: "grid", gap: 12 }}>

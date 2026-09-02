@@ -10,7 +10,7 @@ const CAPS: { icon: ReactNode; h: string; p: [string, string] }[] = [
     icon: <Receipt size={18} />,
     h: "Every decision tracks whether it was actually worth it",
     p: [
-      "A verdict alone doesn't say whether it paid off. report_build_cost attaches the real build cost after the fact, and report_outcome_proxy adds a value signal — reworked, time to merge, kept or replaced — computed from your own repo, deliberately independent of Pattern's own verdict.",
+      "A verdict alone doesn't say whether it paid off. report_build_cost attaches the real build cost after the fact, and report_outcome_proxy adds a value signal (reworked, time to merge, kept or replaced) computed from your own repo, deliberately independent of Pattern's own verdict.",
       "read_ledger rolls both up per feature, so \"what did this decision cost end to end, and did it hold up\" is one call away, not a guess.",
     ],
   },
@@ -26,7 +26,7 @@ const CAPS: { icon: ReactNode; h: string; p: [string, string] }[] = [
     icon: <FileText size={18} />,
     h: "Any decision can become a record you hand someone",
     p: [
-      "export_ledger_provenance turns one decision — checklist, candidates compared, verdict, the exact commit it was judged against — into a single markdown block.",
+      "export_ledger_provenance turns one decision (checklist, candidates compared, verdict, the exact commit it was judged against) into a single markdown block.",
       "post_ledger_provenance_to_github can attach it straight to the PR or issue it belongs to, so the reasoning behind a UI decision doesn't live only in an agent's chat history.",
     ],
   },
@@ -38,9 +38,9 @@ export function TracksDecisions() {
       <div className="pt-sec" style={{ ...SECTION, display: "grid", gap: 36 }}>
         <Reveal>
           <div style={{ display: "grid", gap: 12 }}>
-            <h2 style={{ ...H2, maxWidth: 680 }}>An AI made this decision. Here's the paper trail.</h2>
+            <h2 style={{ ...H2, maxWidth: 680 }}>Your agent made this decision. Here's the paper trail.</h2>
             <p style={{ ...BODY, fontSize: "var(--text-body-lg)", maxWidth: 640, margin: 0 }}>
-              Without Pattern, that decision still happens — just with nothing to check afterward. Pattern keeps a
+              Without Pattern, that decision still happens, just with nothing to check afterward. Pattern keeps a
               real record of what was checked, what it cost, and whether it held up.
             </p>
           </div>
