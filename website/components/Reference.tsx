@@ -70,6 +70,15 @@ const REPORT_OUTCOME_INPUT_ROWS = [
   ["status_at_30d", "kept | replaced | removed", "Report only once a real ~30-day horizon has passed"],
 ];
 
+const EXPORT_PROVENANCE_INPUT_ROWS = [
+  ["project_id", "string, required", "The project_id used in the recommend_component call that produced this entry"],
+  ["ledger_entry_id", "string, required", "The specific entry to export, from read_ledger or check_ledger_liveness"],
+];
+
+const EXPORT_PROVENANCE_OUTPUT_ROWS = [
+  ["markdown", "string", "Checklist, candidates compared, verdict, confidence, and snapshot_ref as one markdown block"],
+];
+
 const EXTRACT_INPUT_ROWS = [
   ["component_need", "string, required", "Same field as recommend_component's input"],
   ["domain", "string, required", "Extraction is grounded in this, not the component name alone"],
@@ -208,6 +217,18 @@ export function Reference() {
           <div style={{ display: "grid", gap: 12 }}>
             <div style={LABEL}>report_outcome_proxy input — self-reported, free</div>
             <Table head={["Field", "Type", "Notes"]} rows={REPORT_OUTCOME_INPUT_ROWS} mono={1} />
+          </div>
+        </Reveal>
+        <Reveal>
+          <div style={{ display: "grid", gap: 12 }}>
+            <div style={LABEL}>export_ledger_provenance input — one decision as a paste-able markdown block</div>
+            <Table head={["Field", "Type", "Notes"]} rows={EXPORT_PROVENANCE_INPUT_ROWS} mono={1} />
+          </div>
+        </Reveal>
+        <Reveal>
+          <div style={{ display: "grid", gap: 12 }}>
+            <div style={LABEL}>export_ledger_provenance output</div>
+            <Table head={["Field", "Values", "Notes"]} rows={EXPORT_PROVENANCE_OUTPUT_ROWS} mono={1} />
           </div>
         </Reveal>
         <Reveal>
