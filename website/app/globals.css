@@ -85,6 +85,15 @@ button {
   font-family: inherit;
 }
 
+@keyframes pt-breathe {
+  0%,
+  100% {
+    transform: scaleX(1);
+  }
+  50% {
+    transform: scaleX(0.62);
+  }
+}
 @keyframes pt-pop {
   0% {
     transform: translateY(6px);
