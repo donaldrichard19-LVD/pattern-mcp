@@ -89,7 +89,7 @@ export function Hero() {
           <h1
             style={{
               margin: 0,
-              maxWidth: 820,
+              maxWidth: 900,
               fontWeight: 500,
               fontSize: "clamp(32px, 5.4vw, var(--text-display-md))",
               lineHeight: "var(--leading-display)",
@@ -98,19 +98,27 @@ export function Hero() {
               textWrap: "pretty",
             }}
           >
-            Catch the{" "}
+            Make design guidance for agents{" "}
             <span style={{ backgroundImage: "linear-gradient(transparent 62%, rgba(199,125,10,.32) 62%)" }}>
-              wrong UI decision
-            </span>{" "}
-            before your agent builds it
+              enforceable
+            </span>
+            , decisions{" "}
+            <span style={{ backgroundImage: "linear-gradient(transparent 62%, rgba(199,125,10,.32) 62%)" }}>
+              auditable
+            </span>
+            , and feature costs{" "}
+            <span style={{ backgroundImage: "linear-gradient(transparent 62%, rgba(199,125,10,.32) 62%)" }}>
+              visible
+            </span>
+            .
           </h1>
         </Reveal>
         <Reveal delay={120}>
           <p style={{ ...BODY, maxWidth: 700, fontSize: "var(--text-body-lg)" }}>
-            Pattern solves agents ignoring your skills.md: it replaces hope with enforced guidance. It scores
-            component options, from external libraries or your own design spec, against a requirements checklist,
-            and returns use existing or build custom with a coverage score and evidence. Enforced, not suggested,
-            and logged to a ledger you can export straight to a PR or issue.
+            Instead of relying on the agent to interpret and follow instructions, Pattern turns design guidance into
+            a checkable process. It evaluates UI components from external libraries or your own design system
+            against a requirements checklist, then tells the agent whether to use an existing component or build one
+            from scratch using a concrete design reference.
           </p>
         </Reveal>
         <Reveal delay={160}>
