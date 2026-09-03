@@ -1,7 +1,7 @@
 {
   "name": "pattern-mcp",
-  "version": "0.8.0",
-  "description": "MCP tool that judges whether a UI component need should be met with an existing shadcn/ui, 21st.dev, or ReUI component or requires a custom build, using field/requirement coverage scored against real component code.",
+  "version": "0.8.1",
+  "description": "MCP server that turns your design guidance into a checkable process -- evaluates UI components from external libraries (shadcn/ui, 21st.dev, ReUI) or your own registered design system against a requirements checklist, then tells the agent whether to reuse an existing component or build one from a concrete design reference.",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
