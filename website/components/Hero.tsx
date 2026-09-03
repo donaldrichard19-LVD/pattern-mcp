@@ -60,8 +60,9 @@ export function Hero() {
         </Reveal>
         <Reveal delay={80}>
           <p style={{ ...BODY, maxWidth: 640, fontSize: "var(--text-body-lg)" }}>
-            Pattern checks a UI component need against real, current evidence before your agent commits to it. It finds a
-            component that fits or shows you when nothing does, so you find out before it&apos;s built, not after.
+            Pattern checks a UI component need against real evidence, not a name and a guess. It returns one verdict,
+            a component that actually fits or a grounded product reference when nothing does, so you find out before
+            it&apos;s built, not after.
           </p>
         </Reveal>
         <Reveal delay={140}>
