@@ -35,6 +35,7 @@ const OUTPUT_ROWS: Row[] = [
   ["confidence", "high | medium | low", "Forced to low on a genuine 2/3 ensemble split"],
   ["reason", "scored | no_candidates_found | skip_list | ledger_cache_hit", "Zero candidates stays distinct from low coverage"],
   ["coverage", '"5/7 (71%)"', "Recomputed from requirements_checked, not taken from the model"],
+  ["computed_at", '"2026-08-25"', "Coverage is a snapshot at this point in time, not a permanent fact — component libraries change"],
   ["requirements_checked[]", "requirement, met, evidence", "The checklist, with the evidence behind each judgment"],
   ["recommendation.reference", "object | array | null", "Both sources grounded → array. One → object. Neither → null"],
   ["reference.url_type", "deep_link | entry_point", "Whether the URL is the actual screen or a browse page"],
@@ -288,7 +289,7 @@ function mergedRows(tool: Tool): FieldRow[] {
 function FieldTable({ tool }: { tool: Tool }) {
   const rows = mergedRows(tool);
   return (
-    <div role="table" aria-label={tool.name + " fields"} style={{ border: "1px solid var(--border-subtle)", borderRadius: 12, overflow: "hidden" }}>
+    <div role="table" aria-label={tool.name + " fields"} style={{ border: "1px solid var(--border-subtle)", borderRadius: 12, overflow: "hidden", background: "#fff" }}>
       <div
         role="row"
         style={{
@@ -420,9 +421,14 @@ export function Reference() {
   const selectedTool = TOOLS.find((t) => t.name === selected) ?? filtered[0] ?? TOOLS[0];
 
   return (
-    <section id="reference" className="pt-pad-y" style={{ padding: "64px 0", borderTop: "1px solid var(--border-subtle)" }}>
+    <section id="reference" className="pt-pad-y" style={{ padding: "64px 0", borderTop: "1px solid var(--border-subtle)", background: "var(--surface-sunken)" }}>
       <div className="pt-sec" style={{ ...SECTION, display: "grid", gap: 8 }}>
         <Reveal>
+          <div style={{ display: "flex", gap: 4, marginBottom: 18 }} aria-hidden="true">
+            <span style={{ width: 34, height: 8, borderRadius: 6, background: "var(--blue-500)" }} />
+            <span style={{ width: 22, height: 8, borderRadius: 6, background: "var(--green-500)" }} />
+            <span style={{ width: 14, height: 8, borderRadius: 6, background: "var(--amber-500)" }} />
+          </div>
           <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 16, marginBottom: 8 }}>
             <h2 style={{ ...H2, margin: 0 }}>Reference</h2>
           </div>
@@ -434,7 +440,7 @@ export function Reference() {
 
         <Reveal delay={60}>
           <div className="pt-cols-2" style={{ display: "grid", gridTemplateColumns: "300px 1fr", gap: 20, alignItems: "start" }}>
-            <div style={{ border: "1px solid var(--border-subtle)", borderRadius: 12, overflow: "hidden" }}>
+            <div style={{ border: "1px solid var(--border-subtle)", borderRadius: 12, overflow: "hidden", background: "#fff" }}>
               <div style={{ padding: "10px 12px", borderBottom: "1px solid var(--border-subtle)", background: "var(--surface-sunken)" }}>
                 <input
                   value={filter}
@@ -510,7 +516,7 @@ export function Reference() {
               </div>
             </div>
 
-            <div style={{ border: "1px solid var(--border-subtle)", borderRadius: 12, overflow: "hidden", display: "grid", gap: 20, padding: 16 }}>
+            <div style={{ border: "1px solid var(--border-subtle)", borderRadius: 12, overflow: "hidden", display: "grid", gap: 20, padding: 16, background: "#fff" }}>
               <div>
                 <div style={{ fontFamily: "var(--font-mono)", fontSize: 14, color: "var(--text-primary)", marginBottom: 8 }}>{selectedTool.name}</div>
                 <p style={{ margin: 0, fontSize: 14, lineHeight: "var(--leading-body)", color: "var(--text-secondary)" }}>{selectedTool.description}</p>

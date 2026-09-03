@@ -51,11 +51,23 @@ const CAPS: { icon: ReactNode; h: string; p: [string, string] | [string, string,
 
 export function AvoidsMistakes() {
   return (
-    <section className="pt-pad-y" style={{ padding: "80px 0", borderTop: "1px solid var(--border-subtle)" }}>
+    <section
+      className="pt-pad-y"
+      style={{
+        padding: "80px 0",
+        borderTop: "1px solid var(--border-subtle)",
+        background: "var(--surface-sunken)",
+        backgroundImage: "radial-gradient(680px 280px at 88% 0%, rgba(199,125,10,.14), transparent 70%)",
+      }}
+    >
       <div className="pt-sec" style={{ ...SECTION, display: "grid", gap: 36 }}>
         <Reveal>
-          <div style={{ display: "grid", gap: 12 }}>
-            <h2 style={{ ...H2, maxWidth: 680 }}>How Pattern helps avoid costly mistakes</h2>
+          <div style={{ display: "grid", gap: 18 }}>
+            <div style={{ display: "flex", gap: 4 }} aria-hidden="true">
+              <span style={{ width: 34, height: 8, borderRadius: 6, background: "var(--amber-500)" }} />
+              <span style={{ width: 18, height: 8, borderRadius: 6, background: "var(--amber-500)", opacity: 0.45 }} />
+            </div>
+            <h2 style={{ ...H2, maxWidth: 680, margin: 0 }}>How Pattern helps avoid costly mistakes</h2>
           </div>
         </Reveal>
         <div className="pt-cols-3" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 28 }}>

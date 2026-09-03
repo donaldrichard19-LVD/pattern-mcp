@@ -47,11 +47,23 @@ const CAPS: { icon: ReactNode; h: string; p: [string, string] }[] = [
 
 export function SavesTime() {
   return (
-    <section id="capabilities" className="pt-pad-y" style={{ padding: "80px 0", borderTop: "1px solid var(--border-subtle)" }}>
+    <section
+      id="capabilities"
+      className="pt-pad-y"
+      style={{
+        padding: "80px 0",
+        borderTop: "1px solid var(--border-subtle)",
+        backgroundImage: "radial-gradient(680px 260px at 12% 0%, rgba(14,159,110,.12), transparent 70%)",
+      }}
+    >
       <div className="pt-sec" style={{ ...SECTION, display: "grid", gap: 36 }}>
         <Reveal>
-          <div style={{ display: "grid", gap: 12 }}>
-            <h2 style={{ ...H2, maxWidth: 680 }}>How Pattern saves time</h2>
+          <div style={{ display: "grid", gap: 18 }}>
+            <div style={{ display: "flex", gap: 4 }} aria-hidden="true">
+              <span style={{ width: 34, height: 8, borderRadius: 6, background: "var(--green-500)" }} />
+              <span style={{ width: 18, height: 8, borderRadius: 6, background: "var(--green-500)", opacity: 0.45 }} />
+            </div>
+            <h2 style={{ ...H2, maxWidth: 680, margin: 0 }}>How Pattern saves time</h2>
           </div>
         </Reveal>
         <div className="pt-cols-3" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 28 }}>
