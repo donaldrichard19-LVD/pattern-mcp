@@ -319,6 +319,10 @@ function DesktopDemo() {
   return (
     <section id="demo" ref={wrap} style={{ borderTop: "1px solid var(--border-subtle)", background: "#fff" }}>
       <div className="pt-sec" style={{ ...SECTION, padding: "72px 32px 0" }}>
+        <div style={{ display: "flex", gap: 4, marginBottom: 18 }} aria-hidden="true">
+          <span style={{ width: 34, height: 8, borderRadius: 6, background: "var(--blue-500)" }} />
+          <span style={{ width: 18, height: 8, borderRadius: 6, background: "var(--blue-500)", opacity: 0.45 }} />
+        </div>
         <h2 style={H2}>How it works</h2>
       </div>
       <div className="pt-sec" style={{ ...SECTION, padding: "24px 32px 96px", display: "grid", gridTemplateColumns: "1fr 1.05fr", gap: 64, alignItems: "start" }}>
@@ -382,6 +386,10 @@ function MobileDemo() {
   return (
     <section id="demo" ref={wrap} style={{ position: "relative", height: BEATS.length * 100 + "svh", borderTop: "1px solid var(--border-subtle)", background: "#fff" }}>
       <div className="pt-sec" style={{ ...SECTION, padding: "20px 32px 0" }}>
+        <div style={{ display: "flex", gap: 4, marginBottom: 18 }} aria-hidden="true">
+          <span style={{ width: 34, height: 8, borderRadius: 6, background: "var(--blue-500)" }} />
+          <span style={{ width: 18, height: 8, borderRadius: 6, background: "var(--blue-500)", opacity: 0.45 }} />
+        </div>
         <h2 style={H2}>How it works</h2>
       </div>
       <div className="pt-mstage" style={stageStyle}>
