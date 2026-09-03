@@ -13,15 +13,15 @@ export function onScrollEvt(fn: () => void) {
   };
 }
 
-export function useIsMobile() {
+export function useIsMobile(breakpoint = 900) {
   const [m, setM] = useState(false);
   useEffect(() => {
-    const mq = window.matchMedia("(max-width: 900px)");
+    const mq = window.matchMedia(`(max-width: ${breakpoint}px)`);
     const h = () => setM(mq.matches);
     h();
     mq.addEventListener("change", h);
     return () => mq.removeEventListener("change", h);
-  }, []);
+  }, [breakpoint]);
   return m;
 }
 

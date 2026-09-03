@@ -2,6 +2,7 @@
 
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { useState } from "react";
+import { useIsMobile } from "./hooks";
 import { BODY, H2, SECTION } from "./tokens";
 import { Reveal } from "./ui";
 
@@ -93,6 +94,33 @@ function StatusPill({ status }: { status: LiveStatus }) {
 
 const GRID_COLS = "1.4fr 1fr 1.2fr 130px 44px";
 
+function ProvenancePanel({ row, mobile }: { row: LedgerRow; mobile?: boolean }) {
+  return (
+    <div style={{ padding: mobile ? "0 14px 14px" : "0 16px 16px" }}>
+      <div
+        className="pt-msg"
+        style={{
+          background: "rgba(255,255,255,.05)",
+          border: "1px solid rgba(255,255,255,.14)",
+          borderRadius: 8,
+          padding: mobile ? 12 : 14,
+          fontFamily: "var(--font-mono)",
+          fontSize: mobile ? 11 : 11.5,
+          lineHeight: mobile ? 1.7 : 1.75,
+          color: "rgba(255,255,255,.8)",
+          whiteSpace: "pre-wrap",
+        }}
+      >
+        {row.provenance}
+      </div>
+      <div style={{ display: "flex", gap: 16, marginTop: 8, flexWrap: "wrap" }}>
+        <span style={{ fontFamily: "var(--font-mono)", fontSize: mobile ? 10.5 : 11, color: "rgba(255,255,255,.5)" }}>export_ledger_provenance</span>
+        <span style={{ fontFamily: "var(--font-mono)", fontSize: mobile ? 10.5 : 11, color: "rgba(255,255,255,.5)" }}>post_ledger_provenance_to_github</span>
+      </div>
+    </div>
+  );
+}
+
 function LedgerRowView({
   row,
   open,
@@ -139,30 +167,63 @@ function LedgerRowView({
           {open ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
         </button>
       </div>
-      {open && (
-        <div style={{ padding: "0 16px 16px" }}>
-          <div
-            className="pt-msg"
+      {open && <ProvenancePanel row={row} />}
+    </div>
+  );
+}
+
+function LedgerCardView({
+  row,
+  open,
+  onToggle,
+}: {
+  row: LedgerRow;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <div style={{ border: "1px solid rgba(255,255,255,.18)", borderRadius: 12, overflow: "hidden" }}>
+      <div style={{ padding: 14, display: "grid", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
+          <span style={{ fontSize: 14, lineHeight: 1.35, color: "#fff" }}>{row.need}</span>
+          <button
+            onClick={onToggle}
+            aria-expanded={open}
+            aria-label={open ? "Collapse provenance" : "Expand provenance"}
             style={{
-              background: "rgba(255,255,255,.05)",
-              border: "1px solid rgba(255,255,255,.14)",
-              borderRadius: 8,
-              padding: 14,
+              flex: "none",
+              width: 34,
+              height: 34,
+              borderRadius: 6,
+              border: "1px solid rgba(255,255,255,.22)",
+              background: "transparent",
+              color: "#fff",
               fontFamily: "var(--font-mono)",
-              fontSize: 11.5,
-              lineHeight: 1.75,
-              color: "rgba(255,255,255,.8)",
-              whiteSpace: "pre-wrap",
+              fontSize: 13,
+              cursor: "pointer",
             }}
           >
-            {row.provenance}
-          </div>
-          <div style={{ display: "flex", gap: 16, marginTop: 8 }}>
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "rgba(255,255,255,.5)" }}>export_ledger_provenance</span>
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "rgba(255,255,255,.5)" }}>post_ledger_provenance_to_github</span>
-          </div>
+            {open ? "−" : "+"}
+          </button>
         </div>
-      )}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 7, alignItems: "center" }}>
+          <span
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: 11.5,
+              color: "rgba(255,255,255,.72)",
+              border: "1px solid rgba(255,255,255,.18)",
+              borderRadius: 999,
+              padding: "3px 9px",
+            }}
+          >
+            {row.verdict}
+          </span>
+          <StatusPill status={row.status} />
+        </div>
+        <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "rgba(255,255,255,.5)", wordBreak: "break-all" }}>{row.filePath}</div>
+      </div>
+      {open && <ProvenancePanel row={row} mobile />}
     </div>
   );
 }
@@ -190,6 +251,7 @@ export function TracksDecisions() {
   const [rows, setRows] = useState(INITIAL_ROWS);
   const [openIndex, setOpenIndex] = useState<number | null>(null);
   const [sweeping, setSweeping] = useState(false);
+  const isMobile = useIsMobile(720);
 
   const runSweep = () => {
     if (sweeping) return;
@@ -224,8 +286,27 @@ export function TracksDecisions() {
       <div className="pt-sec" style={{ ...SECTION, display: "grid", gap: 28 }}>
         <Reveal>
           <ThreeBarMark />
-          <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 24, flexWrap: "wrap" }}>
-            <h2 style={{ ...H2, color: "#fff", maxWidth: 680 }}>Your agent made this decision. Here&apos;s the paper trail.</h2>
+          <div
+            style={{
+              display: "flex",
+              alignItems: isMobile ? "flex-start" : "flex-end",
+              flexDirection: isMobile ? "column" : "row",
+              justifyContent: "space-between",
+              gap: isMobile ? 14 : 24,
+              flexWrap: "wrap",
+            }}
+          >
+            <h2
+              style={{
+                ...H2,
+                color: "#fff",
+                maxWidth: isMobile ? "26ch" : 680,
+                fontSize: isMobile ? 28 : undefined,
+                lineHeight: isMobile ? 1.1 : undefined,
+              }}
+            >
+              Your agent made this decision. Here&apos;s the paper trail.
+            </h2>
             <button
               onClick={runSweep}
               style={{
@@ -235,6 +316,8 @@ export function TracksDecisions() {
                 borderRadius: 6,
                 padding: "11px 18px",
                 minHeight: 44,
+                width: isMobile ? "100%" : undefined,
+                maxWidth: isMobile ? 280 : undefined,
                 fontFamily: "var(--font-mono)",
                 fontSize: 12,
                 cursor: "pointer",
@@ -250,36 +333,44 @@ export function TracksDecisions() {
         </Reveal>
 
         <Reveal delay={80}>
-          <div style={{ border: "1px solid rgba(255,255,255,.18)", borderRadius: 12, overflow: "hidden" }}>
-            <div
-              role="row"
-              style={{
-                display: "grid",
-                gridTemplateColumns: GRID_COLS,
-                gap: 12,
-                padding: "10px 16px",
-                background: "rgba(255,255,255,.04)",
-                borderBottom: "1px solid rgba(255,255,255,.18)",
-                fontFamily: "var(--font-mono)",
-                fontSize: 11,
-                textTransform: "uppercase",
-                letterSpacing: "var(--tracking-caps)",
-                color: "rgba(255,255,255,.55)",
-              }}
-            >
-              <span>component_need</span>
-              <span>verdict</span>
-              <span>file_path</span>
-              <span>live_status</span>
-              <span aria-hidden="true" />
+          {isMobile ? (
+            <div style={{ display: "grid", gap: 10 }}>
+              {rows.map((row, i) => (
+                <LedgerCardView key={row.need} row={row} open={openIndex === i} onToggle={() => setOpenIndex(openIndex === i ? null : i)} />
+              ))}
             </div>
-            {rows.map((row, i) => (
-              <LedgerRowView key={row.need} row={row} open={openIndex === i} onToggle={() => setOpenIndex(openIndex === i ? null : i)} />
-            ))}
-          </div>
+          ) : (
+            <div style={{ border: "1px solid rgba(255,255,255,.18)", borderRadius: 12, overflow: "hidden" }}>
+              <div
+                role="row"
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: GRID_COLS,
+                  gap: 12,
+                  padding: "10px 16px",
+                  background: "rgba(255,255,255,.04)",
+                  borderBottom: "1px solid rgba(255,255,255,.18)",
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 11,
+                  textTransform: "uppercase",
+                  letterSpacing: "var(--tracking-caps)",
+                  color: "rgba(255,255,255,.55)",
+                }}
+              >
+                <span>component_need</span>
+                <span>verdict</span>
+                <span>file_path</span>
+                <span>live_status</span>
+                <span aria-hidden="true" />
+              </div>
+              {rows.map((row, i) => (
+                <LedgerRowView key={row.need} row={row} open={openIndex === i} onToggle={() => setOpenIndex(openIndex === i ? null : i)} />
+              ))}
+            </div>
+          )}
         </Reveal>
 
-        <div className="pt-cols-4" style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 20, marginTop: 8 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 20, marginTop: 8 }}>
           {GRID.map((c, i) => (
             <Reveal key={c.h} delay={i * 70}>
               <div style={{ borderTop: "1px solid rgba(255,255,255,.24)", paddingTop: 14 }}>
