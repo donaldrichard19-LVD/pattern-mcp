@@ -5,10 +5,13 @@
 [![npm downloads](https://img.shields.io/npm/dt/pattern-mcp.svg)](https://www.npmjs.com/package/pattern-mcp)
 [![MIT license](https://img.shields.io/badge/license-MIT-111111.svg)](./LICENSE)
 
-Pattern is an MCP server that checks a UI component need against real
-evidence, not a name and a guess. It returns one verdict: a component
-that actually fits, or a grounded product reference when nothing does,
-so a wrong decision gets caught before it's built, not after.
+Pattern solves a simple problem: agents don't always follow your design
+guidance. Instead of relying on the agent to interpret and follow
+instructions, Pattern turns that guidance into a checkable process. It
+evaluates UI components from external libraries or your own design
+system against a requirements checklist, then tells the agent whether to
+use an existing component or build one from scratch using a concrete
+design reference.
 
 [Website](https://usepattern.sh) · [npm](https://www.npmjs.com/package/pattern-mcp) · [Report an issue](https://github.com/donaldrichard19-LVD/pattern-mcp/issues/new/choose)
 
