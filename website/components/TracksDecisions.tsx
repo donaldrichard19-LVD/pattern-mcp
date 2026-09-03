@@ -19,6 +19,7 @@ type LedgerRow = {
   verdict: string;
   filePath: string;
   status: LiveStatus;
+  resolvedStatus: LiveStatus;
   provenance: string;
 };
 
@@ -26,32 +27,36 @@ const INITIAL_ROWS: LedgerRow[] = [
   {
     need: "price breakdown with fees and taxes",
     verdict: "custom_build",
-    filePath: "src/components/PriceBreakdown.tsx",
-    status: "live",
-    provenance:
-      "checklist: 8 requirements extracted\ncandidates_evaluated: 3 (shadcn/ui, 21st.dev, reui)\nverdict: custom_build, confidence high\nreason: no_candidates_found\nsnapshot_ref: a91f3c2 (2026-08-25)",
-  },
-  {
-    need: "confirmation modal before redeeming rewards balance",
-    verdict: "use_existing → shadcn/ui AlertDialog",
-    filePath: "src/components/RedeemConfirmModal.tsx",
-    status: "orphaned",
-    provenance:
-      "checklist: 8 requirements extracted\ncandidates_evaluated: 1 (shadcn/ui AlertDialog)\nverdict: use_existing, confidence low, coverage 4/8 (50%)\nsnapshot_ref: 43870563 (2026-09-02)\nlast_verified_live: 2026-09-03 — file_path no longer references the recommended component",
-  },
-  {
-    need: "referral banner with share and copy CTA",
-    verdict: "custom_build",
-    filePath: "src/components/ReferralBanner.tsx",
+    filePath: "app/checkout/PriceBreakdown.tsx",
     status: "pending",
+    resolvedStatus: "live",
     provenance:
-      "checklist: 8 requirements extracted\nverdict: custom_build, confidence high, reason ledger_cache_hit\nsnapshot_ref: 7df0555 (2026-09-02)\nlast_verified_live: never — run the sweep to check this row",
+      "checklist: 8 requirements extracted\ncandidates_evaluated: 3 (shadcn/ui, 21st.dev, reui)\nverdict: custom_build, confidence high\nreason: no_candidates_found\nsnapshot_ref: a91f3c2 (2026-08-25)\nlast_verified_live: never — run the sweep to check this row",
   },
   {
-    need: "earning streak badge near rewards balance",
+    need: "host earnings dashboard",
+    verdict: "use_existing",
+    filePath: "app/host/Earnings.tsx",
+    status: "pending",
+    resolvedStatus: "orphaned",
+    provenance:
+      "checklist: 7 requirements extracted\ncandidates_evaluated: 1 (shadcn/ui data table)\nverdict: use_existing, confidence medium, coverage 5/7 (71%)\nsnapshot_ref: 8e21c40 (2026-08-25)\nlast_verified_live: never — run the sweep to check this row",
+  },
+  {
+    need: "cancellation policy display",
     verdict: "custom_build",
-    filePath: "—",
-    status: "unknown",
+    filePath: "app/stay/CancellationPolicy.tsx",
+    status: "pending",
+    resolvedStatus: "live",
+    provenance:
+      "checklist: 6 requirements extracted\ncandidates_evaluated: 2 (shadcn/ui, 21st.dev)\nverdict: custom_build, confidence high\nreason: scored, coverage 2/6 (33%)\nsnapshot_ref: 8e21c40 (2026-08-25)\nlast_verified_live: never — run the sweep to check this row",
+  },
+  {
+    need: "host and guest messaging thread",
+    verdict: "use_existing",
+    filePath: "not recorded",
+    status: "pending",
+    resolvedStatus: "unknown",
     provenance: "no file_path recorded on this entry, nothing to check — the calling agent never reported one",
   },
 ];
@@ -191,15 +196,24 @@ export function TracksDecisions() {
     setSweeping(true);
     setTimeout(() => {
       setRows((prev) =>
-        prev.map((r) =>
-          r.status === "pending"
-            ? {
-                ...r,
-                status: "live",
-                provenance: r.provenance.replace("last_verified_live: never — run the sweep to check this row", "last_verified_live: 2026-09-03 — file still exists and still references the recommended build"),
-              }
-            : r
-        )
+        prev.map((r) => {
+          if (r.status !== "pending") return r;
+          const verified =
+            r.resolvedStatus === "live"
+              ? "last_verified_live: 2026-09-03 — file still exists and still references the recommended build"
+              : r.resolvedStatus === "orphaned"
+                ? "last_verified_live: 2026-09-03 — file_path no longer references the recommended component"
+                : r.provenance.includes("no file_path recorded")
+                  ? null
+                  : "last_verified_live: 2026-09-03 — unable to confirm";
+          return {
+            ...r,
+            status: r.resolvedStatus,
+            provenance: verified
+              ? r.provenance.replace("last_verified_live: never — run the sweep to check this row", verified)
+              : r.provenance,
+          };
+        })
       );
       setSweeping(false);
     }, 1200);
