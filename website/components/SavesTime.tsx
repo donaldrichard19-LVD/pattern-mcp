@@ -48,7 +48,7 @@ const CAPS: { icon: ReactNode; h: string; p: [string, string] }[] = [
 export function SavesTime() {
   return (
     <section
-      id="capabilities"
+      id="outcomes"
       className="pt-pad-y"
       style={{
         padding: "80px 0",

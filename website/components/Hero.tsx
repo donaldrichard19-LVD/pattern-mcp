@@ -106,10 +106,11 @@ export function Hero() {
           </h1>
         </Reveal>
         <Reveal delay={120}>
-          <p style={{ ...BODY, maxWidth: 640, fontSize: "var(--text-body-lg)" }}>
-            Pattern checks a UI component need against real evidence, not a name and a guess. It returns one verdict,
-            a component that actually fits or a grounded product reference when nothing does, so you find out before
-            it&apos;s built, not after.
+          <p style={{ ...BODY, maxWidth: 700, fontSize: "var(--text-body-lg)" }}>
+            Pattern solves agents ignoring your skills.md: it replaces hope with enforced guidance. It scores
+            component options, from external libraries or your own design spec, against a requirements checklist,
+            and returns use existing or build custom with a coverage score and evidence. Enforced, not suggested,
+            and logged to a ledger you can export straight to a PR or issue.
           </p>
         </Reveal>
         <Reveal delay={160}>
