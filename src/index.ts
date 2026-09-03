@@ -36,9 +36,9 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import {
   captureApiError,
   captureRecommendation,
@@ -168,6 +168,17 @@ const LOG_PATH = process.env.PATTERN_LOG_PATH ?? join(homedir(), ".pattern", "ca
 // of what's in this file (see README's "no verdict caching" rule).
 const MEMORY_PATH = process.env.PATTERN_MEMORY_PATH ?? join(homedir(), ".pattern", "memory.json");
 const MAX_DECISIONS_PER_PROJECT = 50;
+
+// Registered design systems (Solo Dev architecture,
+// pattern-solo-design-system-architecture.md) -- one registration per
+// project_id, config-shaped like MEMORY_PATH (overwritten wholesale by a
+// fresh register_design_system call, not appended to). Same homedir
+// convention as LOG_PATH/MEMORY_PATH/LEDGER_PATH: a local file keyed by
+// the caller-supplied project_id string, no server-side component. When a
+// project has a registration, recommend_component scores ONLY against it
+// (one-or-the-other per project, not additive with shadcn/21st.dev/reui --
+// see runSinglePass's designSystem branch).
+const DESIGN_SYSTEMS_PATH = process.env.PATTERN_DESIGN_SYSTEMS_PATH ?? join(homedir(), ".pattern", "design_systems.json");
 
 // Per-project judgment ledger -- distinct from both LOG_PATH and
 // MEMORY_PATH above. Every recommend_component call that reaches the API
@@ -567,6 +578,7 @@ const EXPORT_LEDGER_PROVENANCE_TOOL_NAME = "export_ledger_provenance";
 const POST_LEDGER_PROVENANCE_TOOL_NAME = "post_ledger_provenance_to_github";
 const SWEEP_LEDGER_LIVENESS_TOOL_NAME = "sweep_ledger_liveness";
 const BACKFILL_LEDGER_SNAPSHOT_REF_TOOL_NAME = "backfill_ledger_snapshot_ref";
+const REGISTER_DESIGN_SYSTEM_TOOL_NAME = "register_design_system";
 
 const INPUT_SCHEMA = {
   type: "object",
@@ -892,6 +904,28 @@ const BACKFILL_LEDGER_SNAPSHOT_REF_INPUT_SCHEMA = {
   required: ["project_id"],
 } as const;
 
+const REGISTER_DESIGN_SYSTEM_INPUT_SCHEMA = {
+  type: "object",
+  properties: {
+    project_id: {
+      type: "string",
+      description:
+        "The project this registration belongs to -- must match the project_id used in recommend_component calls for it to be scored against. Registering a design system replaces (does not merge with) any prior registration for this same project_id, and switches recommend_component to score ONLY against it for this project -- shadcn/ui, 21st.dev, and ReUI are no longer searched once a project has a registration.",
+    },
+    manifest_path: {
+      type: "string",
+      description:
+        "Path to a components manifest, relative to the project root (PATTERN_PROJECT_ROOT, defaults to this server's working directory) -- never an absolute path. Two recognized shapes: a hand-authored JSON array of {name, props, description, usage_example} objects (optionally wrapped in {\"components\": [...]}); or a Storybook-exported stories/index JSON file (an object with a top-level \"entries\" or \"stories\" map) -- component names only in that case, since Storybook's basic export doesn't carry prop data. Exactly one of manifest_path or directory_path is required.",
+    },
+    directory_path: {
+      type: "string",
+      description:
+        "Path to a directory of component source files, relative to the project root -- never an absolute path. Scanned recursively for .jsx/.tsx/.js/.ts files (excluding node_modules/dist/build/.git and test/story files); each exported, uppercase-named function or const component found is a candidate, with props read from a `<Name>Props` interface/type, a `.propTypes` block, or (as a last resort) the component's own destructured parameters. This is a heuristic scan, not a full parser -- an empty or partial props list for some components is expected, not a bug, especially on plain JS with no prop typing at all. Exactly one of manifest_path or directory_path is required.",
+    },
+  },
+  required: ["project_id"],
+} as const;
+
 // Shared between buildSystemPrompt's own step 2 and
 // buildExtractionSystemPrompt (the extract_requirements tool's standalone
 // prompt) -- the extraction *instructions* are one piece of text reused
@@ -902,6 +936,57 @@ const BACKFILL_LEDGER_SNAPSHOT_REF_INPUT_SCHEMA = {
 // here: the wording, not a shared HTTP call.
 const EXTRACTION_INSTRUCTIONS =
   "Turn the component need + domain into a concrete checklist of elements the component must contain -- specific enough to check against real code, not a vibe. Ground it in the stated domain, not the component name alone. Extract exactly 8 checklist items, ranked by importance to the component's core function (most important first) -- a fixed count, not a range, so coverage = met/total isn't itself a moving target across runs.";
+
+// Shared between buildSystemPrompt and buildDesignSystemSystemPrompt --
+// step 6 (custom_build reference grounding via Mobbin/Figma Community) is
+// entirely candidate-source-agnostic: it fires identically whether step 3
+// discovered candidates via live search or scored against a registered
+// design system, so this is one wording, not two copies that could drift
+// out of sync (see EXTRACTION_INSTRUCTIONS's comment for the same
+// "factor out the wording, not a function" reasoning).
+const CUSTOM_BUILD_REFERENCE_INSTRUCTIONS = `Search TWO reference sources, one search call each (two calls total, reserved separately from the discovery budget above):
+- Mobbin (site:mobbin.com) for the closest real-app screen matching the stated domain (e.g. real Airbnb screens for an Airbnb-style app).
+- Figma Community (site:figma.com/community) for a relevant real component or template file matching the stated domain and component need. Plain web search only -- there is no Figma API token available, don't attempt to use one.
+
+A search result URL is very often a category/browse page (e.g. mobbin.com/explore/mobile/screens/notifications), not a direct link to the specific screen or flow you actually identified (e.g. "Saturn Calendar - Notifications List"). Figma Community results are different: a URL containing "/community/file/" is already file-specific by Figma's own URL structure -- there is nothing more specific to find, so leave it as-is and do not spend a fetch on it. Only a Figma result that is NOT a "/community/file/" URL (a browse/tag/search page, e.g. figma.com/community/mobile-apps) has the same category-vs-specific gap Mobbin has.
+
+For each Mobbin result, and for any Figma Community result that isn't already a "/community/file/" URL: fetch that result's URL with the web_fetch tool (reserved separately from both search budgets above, and separately from steps 2-5 -- see step 4) and look in the fetched page content for a more specific permalink pointing at that same specific screen or flow you already identified. Use that permalink as the reference "url" ONLY if you can actually see it written in the fetched content -- never construct, guess, or pattern-match your way to a deep-link URL that isn't literally present on the page, even if you're confident you know the site's URL scheme. Note that Figma's robots.txt blocks automated fetching of the entire site, so a Figma category-page fetch will very likely fail outright -- that's expected, not a bug. Mobbin fetches are also very likely to fail: Mobbin blocks Anthropic's fetch bot specifically (confirmed directly -- the same URL that 403s to that bot returns 200 to a generic browser user agent), so treat a failed Mobbin fetch the same way, expected, not a sign anything went wrong. Each source gets at most ONE fetch attempt: if it fails for any reason, do not retry it by guessing a different URL variant for the same page (e.g. adding or removing a path segment) -- that guessed variant isn't a URL you actually found, it's exactly the kind of construction this process forbids, and the tool will reject it anyway since it never appeared in a real search or fetch result. Accept the failure and move on. If a fetch fails, or the fetched page doesn't expose a more specific link (login-gated, or the specific screen genuinely isn't linkable separately from the browse view), keep the category/search URL as "url" and say so plainly in "reference_description" -- e.g. "This is a Mobbin search entry point for the notifications category, not a direct link to the Saturn Calendar screen described below" -- so the reader knows they're landing on a browse page and will need to find the specific screen themselves.
+
+Include a reference for each source that actually returned a real, relevant result from a search you actually ran -- never name a plausible-sounding URL from memory for either source. If out of search budget, or a search found nothing relevant, that source is simply not included; there is no benefit to guessing, since anything not backed by an actual successful search for that source will be silently discarded server-side. The same no-fabrication rule applies to the fetch step: a claimed deep-link URL that isn't backed by an actual fetch of that page literally containing that link will be silently replaced server-side with the honest category-URL fallback, so there is no benefit to guessing there either.
+
+Shape the "reference" field based on how many sources actually grounded:
+- Both Mobbin and Figma Community grounded: an array of both reference objects.
+- Only one grounded: a single reference object (not a one-element array).
+- Neither grounded: omit "reference" entirely (null), same as a custom_build verdict with no usable reference at all today.
+
+Each reference object has: "source" ("Mobbin" or "Figma Community"), "url", and either "flow_name" (Mobbin) or "file_name" (Figma Community) -- whichever matches its own source. Each also gets its own "reference_description": 1-2 sentences of plain-language description of what that specific screen or file actually shows -- specific enough that an agent that can't open the URL still has something to act on. E.g. "Airbnb's checkout screen shows the cancellation policy as an expandable section below the price breakdown, with the exact refund percentage next to each date threshold." Base each description only on what you actually saw in that source's own search result, not a generic guess, and not by borrowing detail from the other source.`;
+
+// Shared for the same reason as CUSTOM_BUILD_REFERENCE_INSTRUCTIONS above
+// -- step 8 doesn't depend on where candidates came from, only on whether
+// past-decision context was included in the user message.
+const PAST_DECISION_SIGNAL_INSTRUCTIONS = `Include a top-level "past_decision_signal" field in your response: { "considered": true|false, "note": "string" }. Set "considered": true only if at least one listed past decision was genuinely similar enough to this need that it actually factored into your scoring or recommendation -- not just present in the list. "note" is one sentence: if considered is true, name which past decision and how it factored in (e.g. "Consistent with this project's prior custom build of a similar price breakdown component"); if false, one sentence on why none applied (e.g. "No past decision matches this need closely enough to be a relevant signal"). This field is mandatory whenever the section is present in the user message -- do not omit it, and do not include it at all if the section was absent.`;
+
+// Shared for the same reason -- the response contract itself doesn't
+// depend on candidate source either.
+const JUDGMENT_RESPONSE_SHAPE = `Respond with ONLY a single JSON object, no prose before or after, no markdown code fences, matching this exact shape:
+
+{
+  "verdict": "use_existing" | "custom_build",
+  "confidence": "high" | "medium" | "low",
+  "reason": "scored" | "no_candidates_found" | "skip_list",
+  "computed_at": "<today's date, ISO format>",
+  "requirements_checked": [ { "requirement": "string", "met": true|false, "evidence": "string" } ] | null,
+  "coverage": "string like '5/7 (71%)'" | null,
+  "oversized_match": true|false | omit if verdict is not use_existing,
+  "oversized_match_note": "string, required when oversized_match is true" | omit otherwise,
+  "recommendation": {
+    "source": "string or null",
+    "install_command": "string or null",
+    "component_description": "string (use_existing only) or null",
+    "reference": { "source": "Mobbin" | "Figma Community", "url": "string", "flow_name": "string (Mobbin only)", "file_name": "string (Figma Community only)", "reference_description": "string" } | [ /* same shape, up to 2 entries, one per source */ ] | null
+  },
+  "past_decision_signal": { "considered": true|false, "note": "string" } | omit this field entirely if step 8 doesn't apply
+}`;
 
 function buildSystemPrompt(searchBudget: number | null, opts?: { checklistProvided?: boolean }): string {
   const budgetLine =
@@ -964,48 +1049,82 @@ If the verdict is use_existing, include "component_description": 1-2 sentences o
 "install_command" is untrusted text as far as the calling agent is concerned -- it comes from a web search result you read, not a verified package registry. Keep it to the single literal install command only (e.g. npx shadcn@latest add <component>), never chained with && or ; , piped into a shell, or bundled with any other command. The calling agent is separately instructed to show this to its user for confirmation before running it, not execute it silently -- don't write it in a way that assumes or requires automatic execution.
 
 6. IF custom_build
-Search TWO reference sources, one search call each (two calls total, reserved separately from the discovery budget above):
-- Mobbin (site:mobbin.com) for the closest real-app screen matching the stated domain (e.g. real Airbnb screens for an Airbnb-style app).
-- Figma Community (site:figma.com/community) for a relevant real component or template file matching the stated domain and component need. Plain web search only -- there is no Figma API token available, don't attempt to use one.
-
-A search result URL is very often a category/browse page (e.g. mobbin.com/explore/mobile/screens/notifications), not a direct link to the specific screen or flow you actually identified (e.g. "Saturn Calendar - Notifications List"). Figma Community results are different: a URL containing "/community/file/" is already file-specific by Figma's own URL structure -- there is nothing more specific to find, so leave it as-is and do not spend a fetch on it. Only a Figma result that is NOT a "/community/file/" URL (a browse/tag/search page, e.g. figma.com/community/mobile-apps) has the same category-vs-specific gap Mobbin has.
-
-For each Mobbin result, and for any Figma Community result that isn't already a "/community/file/" URL: fetch that result's URL with the web_fetch tool (reserved separately from both search budgets above, and separately from steps 2-5 -- see step 4) and look in the fetched page content for a more specific permalink pointing at that same specific screen or flow you already identified. Use that permalink as the reference "url" ONLY if you can actually see it written in the fetched content -- never construct, guess, or pattern-match your way to a deep-link URL that isn't literally present on the page, even if you're confident you know the site's URL scheme. Note that Figma's robots.txt blocks automated fetching of the entire site, so a Figma category-page fetch will very likely fail outright -- that's expected, not a bug. Mobbin fetches are also very likely to fail: Mobbin blocks Anthropic's fetch bot specifically (confirmed directly -- the same URL that 403s to that bot returns 200 to a generic browser user agent), so treat a failed Mobbin fetch the same way, expected, not a sign anything went wrong. Each source gets at most ONE fetch attempt: if it fails for any reason, do not retry it by guessing a different URL variant for the same page (e.g. adding or removing a path segment) -- that guessed variant isn't a URL you actually found, it's exactly the kind of construction this process forbids, and the tool will reject it anyway since it never appeared in a real search or fetch result. Accept the failure and move on. If a fetch fails, or the fetched page doesn't expose a more specific link (login-gated, or the specific screen genuinely isn't linkable separately from the browse view), keep the category/search URL as "url" and say so plainly in "reference_description" -- e.g. "This is a Mobbin search entry point for the notifications category, not a direct link to the Saturn Calendar screen described below" -- so the reader knows they're landing on a browse page and will need to find the specific screen themselves.
-
-Include a reference for each source that actually returned a real, relevant result from a search you actually ran -- never name a plausible-sounding URL from memory for either source. If out of search budget, or a search found nothing relevant, that source is simply not included; there is no benefit to guessing, since anything not backed by an actual successful search for that source will be silently discarded server-side. The same no-fabrication rule applies to the fetch step: a claimed deep-link URL that isn't backed by an actual fetch of that page literally containing that link will be silently replaced server-side with the honest category-URL fallback, so there is no benefit to guessing there either.
-
-Shape the "reference" field based on how many sources actually grounded:
-- Both Mobbin and Figma Community grounded: an array of both reference objects.
-- Only one grounded: a single reference object (not a one-element array).
-- Neither grounded: omit "reference" entirely (null), same as a custom_build verdict with no usable reference at all today.
-
-Each reference object has: "source" ("Mobbin" or "Figma Community"), "url", and either "flow_name" (Mobbin) or "file_name" (Figma Community) -- whichever matches its own source. Each also gets its own "reference_description": 1-2 sentences of plain-language description of what that specific screen or file actually shows -- specific enough that an agent that can't open the URL still has something to act on. E.g. "Airbnb's checkout screen shows the cancellation policy as an expandable section below the price breakdown, with the exact refund percentage next to each date threshold." Base each description only on what you actually saw in that source's own search result, not a generic guess, and not by borrowing detail from the other source.
+${CUSTOM_BUILD_REFERENCE_INSTRUCTIONS}
 
 7. EXISTING STACK TIEBREAKER
 If existing_stack is provided and two candidates score similarly, prefer the one matching the existing stack. Never use it as a hard filter that excludes a genuinely better-scoring candidate from a different source.
 
 8. PAST DECISION SIGNAL (only if the user message included a "Past confirmed decisions in this project" section)
-Include a top-level "past_decision_signal" field in your response: { "considered": true|false, "note": "string" }. Set "considered": true only if at least one listed past decision was genuinely similar enough to this need that it actually factored into your scoring or recommendation -- not just present in the list. "note" is one sentence: if considered is true, name which past decision and how it factored in (e.g. "Consistent with this project's prior custom build of a similar price breakdown component"); if false, one sentence on why none applied (e.g. "No past decision matches this need closely enough to be a relevant signal"). This field is mandatory whenever the section is present in the user message -- do not omit it, and do not include it at all if the section was absent.
+${PAST_DECISION_SIGNAL_INSTRUCTIONS}
 
-Respond with ONLY a single JSON object, no prose before or after, no markdown code fences, matching this exact shape:
+${JUDGMENT_RESPONSE_SHAPE}`;
+}
 
-{
-  "verdict": "use_existing" | "custom_build",
-  "confidence": "high" | "medium" | "low",
-  "reason": "scored" | "no_candidates_found" | "skip_list",
-  "computed_at": "<today's date, ISO format>",
-  "requirements_checked": [ { "requirement": "string", "met": true|false, "evidence": "string" } ] | null,
-  "coverage": "string like '5/7 (71%)'" | null,
-  "oversized_match": true|false | omit if verdict is not use_existing,
-  "oversized_match_note": "string, required when oversized_match is true" | omit otherwise,
-  "recommendation": {
-    "source": "string or null",
-    "install_command": "string or null",
-    "component_description": "string (use_existing only) or null",
-    "reference": { "source": "Mobbin" | "Figma Community", "url": "string", "flow_name": "string (Mobbin only)", "file_name": "string (Figma Community only)", "reference_description": "string" } | [ /* same shape, up to 2 entries, one per source */ ] | null
-  },
-  "past_decision_signal": { "considered": true|false, "note": "string" } | omit this field entirely if step 8 doesn't apply
-}`;
+// Design-system-scored variant of buildSystemPrompt -- used by
+// runSinglePass instead of buildSystemPrompt whenever the caller's
+// project_id has a registration from register_design_system (see
+// getRegisteredDesignSystem). Steps 1, 2, 5 (skip-list, checklist,
+// thresholds/oversized-match), 6, 7, 8, and the response shape are
+// unchanged in substance from buildSystemPrompt -- only step 3 (discovery)
+// and step 4 (scoring evidence) differ, because there's no live search to
+// run: the candidate pool is already fully known from the registration,
+// passed inline in the user message (see runSinglePass's designSystemBlock).
+function buildDesignSystemSystemPrompt(opts?: { checklistProvided?: boolean }): string {
+  const step2 = opts?.checklistProvided
+    ? `2. USE THE PROVIDED CHECKLIST
+The user message includes a "Provided checklist" section -- a requirement checklist already prepared for you (either hand-written by the calling agent, or produced by a prior extract_requirements call). Do not extract your own checklist, and do not add, remove, reorder, or reword any item. Treat it as fixed input and score coverage against exactly these items in step 4 below.`
+    : `2. EXTRACT REQUIREMENTS
+${EXTRACTION_INSTRUCTIONS}`;
+  return `You are a UI component judgment layer. Given a component need, you decide whether it should be met with a component already in this project's own registered design system, or requires a custom build guided by a real-app reference. This project has registered its own design system as the candidate pool for this call (see the "Registered design system candidates" section in the user message below) -- score ONLY against those candidates, never against shadcn/ui, 21st.dev, ReUI, or any other external library. You have access to a web_search tool, but it is reserved entirely for step 6 below (custom_build reference grounding) -- do not use it for candidate discovery, there is nothing to discover, the candidate pool is already given to you in full.
+
+If the user message includes a "Past confirmed decisions in this project" section, treat it only as a signal, not a rule: if a highly similar past decision exists, consider consistency with it while scoring and recommending, but don't let it override a genuinely better match among the registered candidates, and don't skip or shortcut your own scoring because a past decision exists. You decide relevance yourself. Step 8 below tells you exactly how to report what you did with it.
+
+Follow this process exactly:
+
+1. SKIP-LIST CHECK
+If the component need is a trivial, single-purpose primitive with no meaningful internal structure (button, input, checkbox, label, badge, spinner, loader, tooltip, avatar, icon), skip the rest of this process and return verdict "use_existing" with reason "skip_list", confidence "high", and a note that this is a commodity primitive not worth scoring.
+
+${step2}
+
+3. MATCH AGAINST THE REGISTERED DESIGN SYSTEM
+The "Registered design system candidates" section below lists every candidate available for this call: each has a name and, where known, its props and a description/usage example. This data was already extracted from this project's own manifest or component code -- do not search the web for candidates, do not invent props or capabilities beyond what's listed, and do not assume a candidate has a prop just because a similarly-named external component typically would. A candidate with an empty or sparse props list is expected on some registered design systems (a directory scan or a bare-bones manifest can only capture what was actually written) -- score it honestly against what's listed, which will often mean lower coverage or lower confidence, not a bug in this process.
+
+If none of the registered candidates are even plausibly relevant to the component need -- not just a weak match, but nothing on-topic at all -- stop here and return verdict "custom_build" with reason "no_candidates_found". Do not fabricate a coverage score in this case; omit requirements_checked and coverage entirely.
+
+4. SCORE COVERAGE AGAINST THE CHECKLIST
+For each plausibly relevant registered candidate, evaluate against the checklist using only the props/description/usage_example data given for it in the user message. There is nothing to fetch here -- unlike an external library, this data already IS this project's own real source of truth, not a summary of it. Mark each requirement met or not-met with a one-line reason grounded in what the candidate's listed data actually shows, never a guess at what a component with this name would probably support elsewhere. Compute coverage = (requirements met) / (total requirements) for the best-fitting candidate.
+
+5. APPLY VERDICT THRESHOLDS
+coverage >= 80% -> verdict "use_existing", confidence "high"
+coverage 40-79% -> verdict "use_existing", confidence "low" (list the missing fields)
+coverage < 40% -> verdict "custom_build"
+
+Before finalizing a "high" confidence use_existing verdict, check for an OVERSIZED MATCH: a
+candidate can satisfy every checklist item and still be the wrong call if its real capabilities
+substantially exceed what the stated project scope actually needs. This is a distinct check from
+coverage -- a component can be 100% covered and still be an Oversized Match. Weigh it against what
+the component_need and domain actually state about scale.
+
+Report this via two top-level fields, "oversized_match" (boolean) and "oversized_match_note" (string,
+required when true): set oversized_match true and name the specific excess capability in the note, not
+a vague "this may be more than needed." Do this regardless of what you also write for "confidence"
+below -- the server derives the actual confidence cap from oversized_match deterministically, so don't
+rely on your own "confidence" value alone to carry this signal.
+
+If the verdict is use_existing, include "component_description": 1-2 sentences of plain-language description of what the recommended candidate actually does, grounded only in the data given for it above -- not a generic guess at what a component with this name would typically look like.
+
+"install_command" should be omitted (null) for a registered-design-system candidate -- there is no install step for a component that's already part of this project's own codebase or design spec; the calling agent already has it.
+
+6. IF custom_build
+${CUSTOM_BUILD_REFERENCE_INSTRUCTIONS}
+
+7. EXISTING STACK TIEBREAKER
+If existing_stack is provided and two registered candidates score similarly, prefer the one matching the existing stack. Never use it as a hard filter that excludes a genuinely better-scoring registered candidate.
+
+8. PAST DECISION SIGNAL (only if the user message included a "Past confirmed decisions in this project" section)
+${PAST_DECISION_SIGNAL_INSTRUCTIONS}
+
+${JUDGMENT_RESPONSE_SHAPE}`;
 }
 
 // Standalone prompt for the extract_requirements tool -- shares
@@ -1121,10 +1240,29 @@ async function runSinglePass(input: {
           .join("\n")}`
       : "";
 
+  // Solo Dev design-system architecture: a project_id with a registration
+  // (see registerDesignSystem) switches this whole call onto
+  // buildDesignSystemSystemPrompt below -- no live search, score directly
+  // against the candidates listed here instead. No registration -> this
+  // stays null and every line below behaves exactly as it did before this
+  // feature existed (see registerDesignSystem's own comment: one-or-the-
+  // other per project, not additive with the external-library path).
+  const designSystem = input.project_id ? getRegisteredDesignSystem(input.project_id) : null;
+  const designSystemBlock = designSystem
+    ? `\n\nRegistered design system candidates (source: ${designSystem.source_kind}, ${designSystem.source_path}):\n${designSystem.candidates
+        .map((c, i) => {
+          const propsPart = c.props.length > 0 ? `props: ${c.props.join(", ")}` : "props: (none captured)";
+          const descPart = c.description ? `; description: ${c.description}` : "";
+          const usagePart = c.usage_example ? `; usage_example: ${c.usage_example}` : "";
+          return `${i + 1}. ${c.name} -- ${propsPart}${descPart}${usagePart}`;
+        })
+        .join("\n")}`
+    : "";
+
   const userMessage = `component_need: ${input.component_need}
 domain: ${input.domain}
 framework: ${input.framework}
-existing_stack: ${input.existing_stack ?? "(not specified)"}${checklistBlock}${pastDecisionsBlock}`;
+existing_stack: ${input.existing_stack ?? "(not specified)"}${checklistBlock}${pastDecisionsBlock}${designSystemBlock}`;
 
   // Diagnostic only, same pattern as the other stderr diagnostics in this
   // file -- proves the memory lookup actually reached the prompt sent to
@@ -1155,7 +1293,9 @@ existing_stack: ${input.existing_stack ?? "(not specified)"}${checklistBlock}${p
     system: [
       {
         type: "text",
-        text: buildSystemPrompt(SEARCH_BUDGET, { checklistProvided: checklistSource === "provided" }),
+        text: designSystem
+          ? buildDesignSystemSystemPrompt({ checklistProvided: checklistSource === "provided" })
+          : buildSystemPrompt(SEARCH_BUDGET, { checklistProvided: checklistSource === "provided" }),
         cache_control: { type: "ephemeral" },
       },
     ],
@@ -1177,7 +1317,13 @@ existing_stack: ${input.existing_stack ?? "(not specified)"}${checklistBlock}${p
         // where 0 Mobbin queries were attempted but a specific Mobbin
         // URL was still returned. Figma Community gets the same
         // treatment now that it's a second reference source.
-        ...(SEARCH_BUDGET !== null ? { max_uses: SEARCH_BUDGET + 2 } : {}),
+        //
+        // Design-system-scored calls skip step 3's discovery search
+        // entirely (the candidate pool is already given, not searched
+        // for), so they only ever need the 2 reserved step-6 slots --
+        // fixed at 2 regardless of SEARCH_BUDGET, which governs external-
+        // library discovery only and has no meaning in this mode.
+        ...(designSystem ? { max_uses: 2 } : SEARCH_BUDGET !== null ? { max_uses: SEARCH_BUDGET + 2 } : {}),
       },
       {
         type: "web_fetch_20250910",
@@ -1195,7 +1341,12 @@ existing_stack: ${input.existing_stack ?? "(not specified)"}${checklistBlock}${p
         // never more than once per source). Not reserved from the
         // web_search budget above; this is a separate tool with its own
         // separate cap.
-        max_uses: 3,
+        //
+        // Design-system-scored calls have no step-4 verification fetch
+        // (there's no URL to verify -- the registered data already IS the
+        // source of truth, see buildDesignSystemSystemPrompt's step 4),
+        // so only the 2 step-6 slots are reserved.
+        max_uses: designSystem ? 2 : 3,
         // Category/browse pages can be large, and all we need from them
         // is a permalink, not the full page -- caps token cost of a
         // fetch that turns out not to have a deep link after all. See
@@ -1345,6 +1496,43 @@ existing_stack: ${input.existing_stack ?? "(not specified)"}${checklistBlock}${p
   enforceCoverageRecount(parsed);
   enforceVerdictThreshold(parsed);
   enforceRecommendationConsistency(parsed);
+
+  // Set server-side, never trusted from the model's own "source" text --
+  // same "server derives what it already knows deterministically" policy
+  // as the other enforce* calls above. A design-system-scored use_existing
+  // verdict always gets the literal string "design_system" here,
+  // regardless of what the model wrote, so downstream consumers (the
+  // ledger, provenance markdown, read_ledger rollups) can match on it
+  // reliably instead of parsing free-text.
+  if (designSystem && parsed.verdict === "use_existing" && parsed.recommendation) {
+    parsed.recommendation.source = "design_system";
+  }
+
+  // Design-system recall check (see findKeywordOverlapCandidates above):
+  // only meaningful when the model claimed nothing registered was even
+  // plausibly relevant -- a "scored" custom_build already means a real
+  // candidate was found, evaluated, and fell below threshold, a
+  // different, already-instrumented failure mode (requirements_checked
+  // shows exactly what was missing). Logged even on a clean miss (no
+  // overlap found) so the check's own execution is visible in stderr,
+  // not just its hits.
+  if (designSystem && parsed.reason === "no_candidates_found") {
+    const overlap = findKeywordOverlapCandidates(input.component_need, input.domain, designSystem.candidates);
+    console.error(
+      JSON.stringify({
+        diagnostic: "design_system_recall_check",
+        project_id: input.project_id,
+        possible_missed_candidates: overlap.map((m) => m.name),
+      })
+    );
+    if (overlap.length > 0) {
+      parsed.design_system_recall_check = {
+        possible_missed_candidates: overlap,
+        note:
+          "These registered design-system candidates share keywords with this component_need but were not selected as a match -- the verdict may have missed a real one. This is a weak, keyword-only signal, not proof of an actual match: double-check these candidates yourself (or re-run this call) before trusting custom_build here.",
+      };
+    }
+  }
 
   // Set server-side rather than trusted from the model -- deterministic
   // from whether input.checklist was actually supplied, same "never trust
@@ -1634,6 +1822,437 @@ function recordDecision(input: {
 export function getPastDecisions(projectId: string): DecisionEntry[] {
   const memory = readMemory();
   return memory[projectId] ?? [];
+}
+
+// ---------------------------------------------------------------------
+// Registered design systems (Solo Dev architecture)
+//
+// Lets a project point recommend_component at its own components instead
+// of only shadcn/ui, 21st.dev, and ReUI -- register_design_system reads a
+// local manifest or scans a local directory once, distills it into a flat
+// candidate list, and stores it here. recommend_component then scores
+// directly against that list (see runSinglePass's designSystem branch)
+// instead of running a live web_search discovery step. Registration is
+// local, per-project, and one-or-the-other: registering a design system
+// replaces external-source scoring for that project_id entirely, it does
+// not add to it (see the architecture doc's own scoping decision).
+// ---------------------------------------------------------------------
+
+export interface DesignSystemCandidate {
+  name: string;
+  props: string[];
+  description: string | null;
+  usage_example: string | null;
+  // Relative to the scanned directory -- only ever set for source_kind
+  // "directory_scan"; a manifest-sourced candidate has no single file of
+  // its own to point at.
+  file_path: string | null;
+}
+
+export interface DesignSystemRegistration {
+  project_id: string;
+  source_kind: "manifest" | "directory_scan";
+  // The path as passed to register_design_system, relative to
+  // PROJECT_ROOT -- never the resolved absolute path (see
+  // resolveWithinRoot), so this stays portable across machines.
+  source_path: string;
+  registered_at: string;
+  candidate_count: number;
+  candidates: DesignSystemCandidate[];
+}
+
+type DesignSystemsFile = Record<string, DesignSystemRegistration>;
+
+// Same "malformed/missing collapses to empty, never throws" policy as
+// readMemory -- a fresh install or a hand-edited file that doesn't parse
+// shouldn't break recommend_component for every project, it should just
+// behave as if nothing is registered.
+function readDesignSystems(): DesignSystemsFile {
+  try {
+    const raw = readFileSync(DESIGN_SYSTEMS_PATH, "utf8");
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as DesignSystemsFile;
+    }
+    return {};
+  } catch {
+    return {};
+  }
+}
+
+function writeDesignSystems(file: DesignSystemsFile): void {
+  mkdirSync(dirname(DESIGN_SYSTEMS_PATH), { recursive: true });
+  writeFileSync(DESIGN_SYSTEMS_PATH, JSON.stringify(file, null, 2), "utf8");
+}
+
+// Read-only lookup used by runSinglePass. No project_id -> no lookup,
+// same "never fall back to a shared/global bucket" rule as
+// getPastDecisions above.
+export function getRegisteredDesignSystem(projectId: string): DesignSystemRegistration | null {
+  return readDesignSystems()[projectId] ?? null;
+}
+
+// Extracts the substring between the first "{" at or after fromIndex and
+// its matching "}", tracking brace depth so a nested object type inside a
+// props interface doesn't truncate the capture early -- a plain non-greedy
+// regex on "{...}" breaks on exactly that shape (e.g. `style?: { color:
+// string }`).
+function extractBalancedBraceBody(text: string, fromIndex: number): string | null {
+  const openIdx = text.indexOf("{", fromIndex);
+  if (openIdx === -1) return null;
+  let depth = 0;
+  for (let i = openIdx; i < text.length; i++) {
+    if (text[i] === "{") depth++;
+    else if (text[i] === "}") {
+      depth--;
+      if (depth === 0) return text.slice(openIdx + 1, i);
+    }
+  }
+  return null;
+}
+
+// Heuristic, not a parser -- matches "name:" / "name?:" field declarations
+// at the start of a line or after a separator. Good enough for the flat,
+// single-level prop interfaces real components typically declare; a
+// deliberately best-effort choice over pulling in a full TypeScript AST
+// parser for this (see BACKLOG.md's manifest-quality risk -- sparse or
+// imperfect extraction here is expected, not a bug).
+function extractPropNamesFromBody(body: string): string[] {
+  const names = new Set<string>();
+  const re = /(?:^|[;,{(\n])\s*([A-Za-z_$][A-Za-z0-9_$]*)\??\s*:/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(body)) !== null) {
+    names.add(m[1]);
+  }
+  return [...names];
+}
+
+// Best-effort extraction of a destructured function-parameter's field
+// names, e.g. `({ title, onClose, variant = "default" })` -> ["title",
+// "onClose", "variant"]. Only used as a last-resort fallback when neither
+// a `<Name>Props` interface/type nor a `.propTypes` block was found.
+function extractDestructuredParamNames(defWindow: string): string[] {
+  const match = defWindow.match(/\(\s*\{([^}]*)\}/);
+  if (!match) return [];
+  return match[1]
+    .split(",")
+    .map((p) => p.trim().split(/[:=]/)[0].trim())
+    .filter((p) => /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(p));
+}
+
+const DESIGN_SYSTEM_SCAN_EXCLUDED_DIRS = new Set([
+  "node_modules",
+  "dist",
+  "build",
+  ".git",
+  ".next",
+  ".turbo",
+  "coverage",
+]);
+const DESIGN_SYSTEM_SCAN_EXTENSIONS = new Set([".jsx", ".tsx", ".js", ".ts"]);
+// .d.ts (type declarations, not components) and test/story files (not the
+// component's own definition, and .stories.* would otherwise double-count
+// alongside the real component file) are excluded by filename fragment.
+const DESIGN_SYSTEM_SCAN_EXCLUDED_NAME_FRAGMENTS = [".test.", ".spec.", ".stories.", ".d.ts"];
+
+function walkComponentFiles(root: string): string[] {
+  const files: string[] = [];
+  const stack = [root];
+  while (stack.length > 0) {
+    const dir = stack.pop()!;
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        if (!DESIGN_SYSTEM_SCAN_EXCLUDED_DIRS.has(entry.name)) stack.push(join(dir, entry.name));
+        continue;
+      }
+      if (!DESIGN_SYSTEM_SCAN_EXTENSIONS.has(extname(entry.name))) continue;
+      if (DESIGN_SYSTEM_SCAN_EXCLUDED_NAME_FRAGMENTS.some((frag) => entry.name.includes(frag))) continue;
+      files.push(join(dir, entry.name));
+    }
+  }
+  return files;
+}
+
+// Component detection: an uppercase-leading exported function or const,
+// React's own naming convention for components -- deliberately excludes
+// lowercase exported helpers/hooks, which aren't components. Props are
+// resolved in priority order: a `<Name>Props` interface/type (most
+// reliable, TypeScript projects), then a `.propTypes` block (plain JS
+// with PropTypes), then a best-effort destructure of the function's own
+// parameter list. An empty result from all three is a real, expected
+// outcome for an untyped, undestructured component -- not an error.
+function scanComponentFile(absPath: string, relPath: string): DesignSystemCandidate[] {
+  let content: string;
+  try {
+    content = readFileSync(absPath, "utf8");
+  } catch {
+    return [];
+  }
+
+  const names = new Map<string, number>();
+  const fnRe = /export\s+(?:default\s+)?function\s+([A-Z][A-Za-z0-9_]*)\s*\(/g;
+  const constRe = /export\s+(?:default\s+)?const\s+([A-Z][A-Za-z0-9_]*)\s*(?::[^=\n]+)?=/g;
+  let m: RegExpExecArray | null;
+  while ((m = fnRe.exec(content)) !== null) names.set(m[1], m.index);
+  while ((m = constRe.exec(content)) !== null) if (!names.has(m[1])) names.set(m[1], m.index);
+
+  const candidates: DesignSystemCandidate[] = [];
+  for (const [name, idx] of names) {
+    let props: string[] = [];
+
+    const interfaceMatch = content.match(new RegExp(`(?:interface|type)\\s+${name}Props\\b`));
+    if (interfaceMatch?.index !== undefined) {
+      const body = extractBalancedBraceBody(content, interfaceMatch.index);
+      if (body) props = extractPropNamesFromBody(body);
+    }
+
+    if (props.length === 0) {
+      const propTypesMatch = content.match(new RegExp(`${name}\\.propTypes\\s*=`));
+      if (propTypesMatch?.index !== undefined) {
+        const body = extractBalancedBraceBody(content, propTypesMatch.index);
+        if (body) props = extractPropNamesFromBody(body);
+      }
+    }
+
+    if (props.length === 0) {
+      props = extractDestructuredParamNames(content.slice(idx, Math.min(content.length, idx + 500)));
+    }
+
+    candidates.push({ name, props, description: null, usage_example: null, file_path: relPath });
+  }
+  return candidates;
+}
+
+function scanDirectoryForDesignSystem(absRoot: string): DesignSystemCandidate[] {
+  const candidates: DesignSystemCandidate[] = [];
+  for (const abs of walkComponentFiles(absRoot)) {
+    candidates.push(...scanComponentFile(abs, relative(absRoot, abs)));
+  }
+  return candidates;
+}
+
+// Parses a manifest file's raw text into a flat candidate list. Two
+// recognized shapes, matching the architecture doc's launch scope:
+//  - Hand-authored: a top-level array of {name, props?, description?,
+//    usage_example?} objects, optionally wrapped in {"components": [...]}.
+//  - Storybook-exported index (stories.json v3, or index.json v4+): both
+//    key stories/entries by id, each carrying a "title" like
+//    "Components/Button" that groups stories under a component name.
+//    Props aren't part of this export (only Storybook's heavier docgen
+//    addon captures those), so candidates from this path start with an
+//    empty props list -- expected, not a bug, per the same manifest-
+//    quality risk noted on the directory-scan path above.
+// Throws with a clear, specific message on anything else, per the
+// architecture doc's own risk mitigation: "fail loud on malformed input
+// rather than scoring against garbage."
+function parseManifestCandidates(raw: string, sourcePath: string): DesignSystemCandidate[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error(`Manifest at "${sourcePath}" is not valid JSON.`);
+  }
+
+  const handAuthoredArray = Array.isArray(parsed)
+    ? parsed
+    : parsed && typeof parsed === "object" && Array.isArray((parsed as Record<string, unknown>).components)
+      ? ((parsed as Record<string, unknown>).components as unknown[])
+      : null;
+
+  if (handAuthoredArray) {
+    return handAuthoredArray.map((item, i) => {
+      if (!item || typeof item !== "object" || typeof (item as Record<string, unknown>).name !== "string" || !(item as Record<string, unknown>).name) {
+        throw new Error(
+          `Manifest entry at index ${i} in "${sourcePath}" is missing a required "name" string.`
+        );
+      }
+      const record = item as Record<string, unknown>;
+      return {
+        name: record.name as string,
+        props: Array.isArray(record.props) ? record.props.filter((p): p is string => typeof p === "string") : [],
+        description: typeof record.description === "string" ? record.description : null,
+        usage_example: typeof record.usage_example === "string" ? record.usage_example : null,
+        file_path: null,
+      };
+    });
+  }
+
+  const storybookEntries =
+    parsed && typeof parsed === "object"
+      ? ((parsed as Record<string, unknown>).entries ?? (parsed as Record<string, unknown>).stories ?? null)
+      : null;
+  if (storybookEntries && typeof storybookEntries === "object") {
+    const names = new Set<string>();
+    for (const entry of Object.values(storybookEntries as Record<string, unknown>)) {
+      const title = entry && typeof entry === "object" ? (entry as Record<string, unknown>).title : null;
+      if (typeof title !== "string") continue;
+      const name = title.split("/").pop()?.trim();
+      if (name) names.add(name);
+    }
+    if (names.size === 0) {
+      throw new Error(
+        `Manifest at "${sourcePath}" looked like a Storybook export (found "entries"/"stories") but no component titles could be extracted from it.`
+      );
+    }
+    return [...names].map((name) => ({ name, props: [], description: null, usage_example: null, file_path: null }));
+  }
+
+  throw new Error(
+    `Manifest at "${sourcePath}" doesn't match a recognized shape. Expected either a hand-authored array of ` +
+      `{name, props, description, usage_example} objects (optionally wrapped in {"components": [...]}), or a ` +
+      `Storybook-exported stories/index JSON file (an object with a top-level "entries" or "stories" map).`
+  );
+}
+
+// Core of the register_design_system tool. Exactly one of manifest_path
+// or directory_path, both resolved via resolveWithinRoot -- same
+// PROJECT_ROOT-scoped, relative-path-only boundary check_ledger_liveness
+// already established for file_path, reused rather than inventing a
+// second filesystem-access convention. Overwrites any prior registration
+// for this project_id wholesale (one-or-the-other per project, not
+// additive/merged across repeat calls).
+export function registerDesignSystem(input: {
+  project_id: string;
+  manifest_path?: string;
+  directory_path?: string;
+}): DesignSystemRegistration {
+  const provided = [input.manifest_path, input.directory_path].filter((v) => v !== undefined && v !== "");
+  if (provided.length !== 1) {
+    throw new Error(
+      "register_design_system requires exactly one of manifest_path or directory_path (both relative to the project root)."
+    );
+  }
+
+  let sourceKind: "manifest" | "directory_scan";
+  let sourcePath: string;
+  let candidates: DesignSystemCandidate[];
+
+  if (input.manifest_path) {
+    sourceKind = "manifest";
+    sourcePath = input.manifest_path;
+    const abs = resolveWithinRoot(PROJECT_ROOT, input.manifest_path);
+    if (!abs) {
+      throw new Error(
+        `manifest_path "${input.manifest_path}" must be a relative path within the project root (${PROJECT_ROOT}) -- it was either absolute or escaped the project root.`
+      );
+    }
+    if (!existsSync(abs) || !statSync(abs).isFile()) {
+      throw new Error(`No file found at "${input.manifest_path}" (resolved to ${abs}).`);
+    }
+    candidates = parseManifestCandidates(readFileSync(abs, "utf8"), input.manifest_path);
+  } else {
+    sourceKind = "directory_scan";
+    sourcePath = input.directory_path as string;
+    const abs = resolveWithinRoot(PROJECT_ROOT, sourcePath);
+    if (!abs) {
+      throw new Error(
+        `directory_path "${sourcePath}" must be a relative path within the project root (${PROJECT_ROOT}) -- it was either absolute or escaped the project root.`
+      );
+    }
+    if (!existsSync(abs) || !statSync(abs).isDirectory()) {
+      throw new Error(`No directory found at "${sourcePath}" (resolved to ${abs}).`);
+    }
+    candidates = scanDirectoryForDesignSystem(abs);
+  }
+
+  if (candidates.length === 0) {
+    throw new Error(
+      `No components could be found at "${sourcePath}" (${sourceKind}). Check the manifest shape, or that the directory actually contains component files recognized by the scan (export default function/const, uppercase-leading name).`
+    );
+  }
+
+  const registration: DesignSystemRegistration = {
+    project_id: input.project_id,
+    source_kind: sourceKind,
+    source_path: sourcePath,
+    registered_at: new Date().toISOString(),
+    candidate_count: candidates.length,
+    candidates,
+  };
+
+  const file = readDesignSystems();
+  file[input.project_id] = registration;
+  writeDesignSystems(file);
+  return registration;
+}
+
+// ---------------------------------------------------------------------
+// Design-system recall check
+//
+// Catches a real, specific failure mode raised after this feature shipped:
+// the model can say "no_candidates_found" against a registered design
+// system even when a genuinely relevant candidate is sitting right there
+// in the prompt it was just given -- a reading-comprehension miss over
+// its own known-complete candidate list, not a live-search gap (compare
+// external-library mode, where "nothing found" is at least grounded in a
+// real search actually coming back empty). Unlike the ensemble
+// (isBoundaryRisk), which only re-checks coverage-boundary "scored"
+// results, nothing previously re-checked a "no_candidates_found" verdict
+// at all -- it was trusted on the first pass. This doesn't fix that by
+// spending another API call; it's a cheap, deterministic, zero-cost local
+// keyword-overlap check between component_need/domain and every
+// registered candidate's own name/props/description, run only when
+// reason is "no_candidates_found" in design-system mode. A hit doesn't
+// override the verdict -- a shared keyword is weak evidence, not proof of
+// a real match -- it only surfaces the risk on the response so the
+// calling agent knows to double-check before trusting a "nothing here"
+// answer, same "show the uncertainty, don't paper over it" policy as
+// ensemble/oversized_match elsewhere in this file.
+// ---------------------------------------------------------------------
+
+// Deliberately generic English filler, not UI-specific -- a UI-specific
+// word like "banner" or "list" is exactly the kind of overlap this check
+// exists to catch, so only true stopwords are excluded here.
+const KEYWORD_STOPWORDS = new Set([
+  "the", "a", "an", "and", "or", "of", "to", "for", "with", "in", "on", "at",
+  "by", "from", "is", "are", "was", "were", "be", "been", "being", "that",
+  "this", "these", "those", "it", "its", "as", "not", "no", "if", "when",
+  "which", "what", "who", "how", "into", "over", "out", "up", "down", "new",
+  "real", "component", "components", "need", "needs", "show", "showing",
+  "shows", "display", "displays", "displaying", "user", "users", "each",
+  "other", "also", "app", "style", "product",
+]);
+
+// Splits on non-alphanumeric boundaries AND camelCase/PascalCase boundaries
+// (so "bonusAmount" -> "bonus", "amount" and "ReferralBanner" -> "referral",
+// "banner"), lowercases, then drops stopwords and anything under 3
+// characters -- short tokens ("id", "on") are too generic to be a
+// meaningful signal either way.
+function extractKeywords(text: string): Set<string> {
+  const words = text
+    .split(/[^A-Za-z0-9]+/)
+    .flatMap((w) => w.replace(/([a-z0-9])([A-Z])/g, "$1 $2").split(/\s+/))
+    .map((w) => w.toLowerCase())
+    .filter((w) => w.length >= 3 && !KEYWORD_STOPWORDS.has(w));
+  return new Set(words);
+}
+
+function candidateKeywords(c: DesignSystemCandidate): Set<string> {
+  return extractKeywords([c.name, ...c.props, c.description ?? "", c.usage_example ?? ""].join(" "));
+}
+
+// Returns every registered candidate sharing at least one real keyword
+// with component_need/domain, ranked by how many keywords it shares --
+// capped at 5 so a large design system can't produce an unreadable dump
+// on a genuinely generic need.
+export function findKeywordOverlapCandidates(
+  componentNeed: string,
+  domain: string,
+  candidates: DesignSystemCandidate[]
+): Array<{ name: string; shared_keywords: string[] }> {
+  const needKeywords = extractKeywords(`${componentNeed} ${domain}`);
+  if (needKeywords.size === 0) return [];
+  const matches = candidates
+    .map((c) => ({ name: c.name, shared_keywords: [...candidateKeywords(c)].filter((k) => needKeywords.has(k)) }))
+    .filter((m) => m.shared_keywords.length > 0);
+  matches.sort((a, b) => b.shared_keywords.length - a.shared_keywords.length);
+  return matches.slice(0, 5);
 }
 
 // One line per judgment call that reached the API with a project_id and
@@ -2236,6 +2855,15 @@ export function formatProvenanceArtifact(entry: LedgerEntry): string {
     for (const c of entry.candidates_evaluated) {
       const chosen = c.name !== null && c.name === entry.chosen_candidate ? "✓" : "";
       lines.push(`| ${c.source ?? "n/a"} | ${c.name ?? "n/a"} | ${c.coverage_pct ?? "n/a"} | ${chosen} |`);
+    }
+    // Solo Dev design-system architecture P3: distinguish a design_system
+    // source from an external library at render time -- reads only
+    // entry.candidates_evaluated (already-persisted, distilled data), so
+    // this stays a pure function of the entry alone like the rest of this
+    // formatter.
+    if (entry.candidates_evaluated.some((c) => c.source === "design_system")) {
+      lines.push("");
+      lines.push("_Sourced from this project's own registered design system (`register_design_system`), not an external library._");
     }
   }
   lines.push("");
@@ -2928,6 +3556,21 @@ export interface JudgmentResult {
   // confidence "high").
   oversized_match?: boolean;
   oversized_match_note?: string | null;
+  // Design-system-mode only (see findKeywordOverlapCandidates): a cheap,
+  // deterministic, zero-cost local check run whenever reason is
+  // "no_candidates_found" -- the model said nothing registered was even
+  // plausibly relevant, but the model can miss a real match sitting in
+  // its own prompt the same way it can hallucinate one that isn't there.
+  // This never overrides the verdict (a keyword overlap is a weak signal,
+  // not proof of a real match) -- it only surfaces the risk so the
+  // calling agent knows to double-check before trusting a "nothing here"
+  // verdict, the same "show uncertainty instead of papering over it"
+  // policy as ensemble/oversized_match above. null/absent when not
+  // applicable (external-library mode, or reason !== "no_candidates_found").
+  design_system_recall_check?: {
+    possible_missed_candidates: Array<{ name: string; shared_keywords: string[] }>;
+    note: string;
+  } | null;
   requirements_checked?: Array<{ requirement?: string; met?: boolean; evidence?: string }> | null;
   recommendation?: {
     source?: string | null;
@@ -3415,7 +4058,18 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         "the user after the call (e.g. 'that judgment cost ~$0.12'), the " +
         "same way install_command is shown before running -- it's real " +
         "spend against the user's own API key, not internal bookkeeping " +
-        "to keep from them.",
+        "to keep from them. If project_id has a design system registered " +
+        "via register_design_system, this call scores ONLY against that " +
+        "project's own registered candidates instead of shadcn/ui, " +
+        "21st.dev, and ReUI -- no separate flag needed, it's automatic " +
+        "based on project_id alone. In that mode, a custom_build verdict " +
+        "with reason no_candidates_found may also carry a top-level " +
+        "design_system_recall_check field -- a deterministic, zero-cost " +
+        "keyword-overlap check flagging registered candidates that share " +
+        "real keywords with this need but weren't selected. This is a " +
+        "weak signal, not proof of a missed match -- if present, surface " +
+        "it to the user before accepting the custom_build verdict at " +
+        "face value.",
       inputSchema: INPUT_SCHEMA,
     },
     {
@@ -3586,6 +4240,27 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         "but never touched. Persists every attempt (including failures) " +
         "for later lookup; never modifies ledger.jsonl itself.",
       inputSchema: BACKFILL_LEDGER_SNAPSHOT_REF_INPUT_SCHEMA,
+    },
+    {
+      name: REGISTER_DESIGN_SYSTEM_TOOL_NAME,
+      description:
+        "Points recommend_component at THIS project's own design system " +
+        "instead of shadcn/ui, 21st.dev, and ReUI -- for a solo dev with " +
+        "their own component library or design spec who wants Pattern's " +
+        "coverage scoring against real candidates they'll actually use, " +
+        "not external libraries they won't. Pass either manifest_path (a " +
+        "hand-authored JSON manifest or a Storybook-exported stories/" +
+        "index JSON file) or directory_path (a components folder, scanned " +
+        "heuristically for exported components and their props) -- both " +
+        "relative to the project root, never absolute. Registering " +
+        "REPLACES any prior registration for this project_id, and once " +
+        "registered, recommend_component scores ONLY against these " +
+        "candidates for this project_id -- external-library search stops " +
+        "entirely, it does not layer on top. This only writes local " +
+        "config; it never calls the Anthropic API. Re-run this whenever " +
+        "the design system's own components change meaningfully -- " +
+        "registration is a point-in-time snapshot, not a live link.",
+      inputSchema: REGISTER_DESIGN_SYSTEM_INPUT_SCHEMA,
     },
   ],
 }));
@@ -3849,6 +4524,27 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const result = backfillLedgerSnapshotRefs(args);
       return {
         content: [{ type: "text", text: JSON.stringify({ project_id: args.project_id, ...result }) }],
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return {
+        content: [{ type: "text", text: `Error: ${message}` }],
+        isError: true,
+      };
+    }
+  }
+
+  if (request.params.name === REGISTER_DESIGN_SYSTEM_TOOL_NAME) {
+    const args = request.params.arguments as {
+      project_id: string;
+      manifest_path?: string;
+      directory_path?: string;
+    };
+
+    try {
+      const registration = registerDesignSystem(args);
+      return {
+        content: [{ type: "text", text: JSON.stringify({ status: "registered", registration }) }],
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

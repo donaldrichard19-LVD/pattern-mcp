@@ -40,6 +40,7 @@ const OUTPUT_ROWS = [
   ["past_decision_signal", "{ considered, note }", "Only when project_id was passed and a real past decision applied"],
   ["checklist_source", "extracted | provided", "Which path actually produced the checklist that got scored"],
   ["served_from_ledger", "boolean", "True when this verdict was replayed from a recent, high-confidence ledger entry at $0 instead of freshly scored"],
+  ["design_system_recall_check", "{ possible_missed_candidates, note } | absent", "Design-system mode only: present when a custom_build/no_candidates_found verdict shares real keywords with a registered candidate it didn't select. A hint to double-check, never an override of the verdict"],
   ["_meta", "{ total_ms, breakdown_ms, tokens_used, estimated_cost_usd }", "Real timing, tokens, and cost for this call. Summed across all 3 runs when the ensemble fires"],
 ];
 
@@ -138,6 +139,19 @@ const EXTRACT_OUTPUT_ROWS = [
   ["_meta", "{ total_ms, tokens_used, estimated_cost_usd }", "No search happens here, so this is typically a few seconds and a fraction of a cent"],
 ];
 
+const REGISTER_DESIGN_SYSTEM_INPUT_ROWS = [
+  ["project_id", "string, required", "Must match the project_id used in later recommend_component calls"],
+  ["manifest_path", "string, optional", "A hand-authored JSON manifest or a Storybook-exported stories/index file, relative to the project root"],
+  ["directory_path", "string, optional", "A real components folder, scanned for exported components and their props. Exactly one of manifest_path or directory_path is required"],
+];
+
+const REGISTER_DESIGN_SYSTEM_OUTPUT_ROWS = [
+  ["status", '"registered"', "Confirms the registration was saved"],
+  ["registration.source_kind", "manifest | directory_scan", "Which input mode produced this registration"],
+  ["registration.candidate_count", "number", "How many components were found"],
+  ["registration.candidates[]", "name, props, description, usage_example, file_path", "The full list, so you can sanity-check what got captured before it's scored against"],
+];
+
 const CONFIG_ROWS = [
   ["ANTHROPIC_API_KEY", "required", "Your own Console key. Every call bills your account"],
   ["PATTERN_MODEL", "claude-sonnet-5", "Swap models without a code change. Re-run the five test cases first"],
@@ -149,6 +163,7 @@ const CONFIG_ROWS = [
   ["PATTERN_PROJECT_ROOT", "process.cwd()", "Root check_ledger_liveness reads files from, and snapshot_ref's git commands run in"],
   ["GITHUB_TOKEN", "required for post_ledger_provenance_to_github", "Personal access token, repo scope. Not needed for any other tool"],
   ["PATTERN_SNAPSHOT_BACKFILL_PATH", "~/.pattern/snapshot_backfill.jsonl", "Every backfill_ledger_snapshot_ref attempt, including failures"],
+  ["PATTERN_DESIGN_SYSTEMS_PATH", "~/.pattern/design_systems.json", "Registered design systems, one per project_id, local only"],
 ];
 
 function Table({ head, rows, mono = 0 }: { head: string[]; rows: string[][]; mono?: number }) {
@@ -229,7 +244,7 @@ export function Reference() {
           <div style={{ display: "grid", gap: 12 }}>
             <h2 style={{ ...H2, maxWidth: 620 }}>Reference</h2>
             <p style={{ color: "var(--text-secondary)", margin: 0, maxWidth: 640 }}>
-              Eleven tools in three groups: the judgment call itself, tracking what it cost and what happened, and
+              Twelve tools in three groups: the judgment call itself, tracking what it cost and what happened, and
               verifying or exporting old decisions later.
             </p>
           </div>
@@ -251,6 +266,14 @@ export function Reference() {
           <div style={{ display: "grid", gap: 12 }}>
             <div style={LABEL}>extract_requirements output</div>
             <Table head={["Field", "Values", "Notes"]} rows={EXTRACT_OUTPUT_ROWS} mono={1} />
+          </div>
+          <div style={{ display: "grid", gap: 12 }}>
+            <div style={LABEL}>register_design_system input: point recommend_component at your own components instead of shadcn/ui, 21st.dev, and ReUI</div>
+            <Table head={["Field", "Type", "Notes"]} rows={REGISTER_DESIGN_SYSTEM_INPUT_ROWS} mono={1} />
+          </div>
+          <div style={{ display: "grid", gap: 12 }}>
+            <div style={LABEL}>register_design_system output</div>
+            <Table head={["Field", "Values", "Notes"]} rows={REGISTER_DESIGN_SYSTEM_OUTPUT_ROWS} mono={1} />
           </div>
         </Group>
 

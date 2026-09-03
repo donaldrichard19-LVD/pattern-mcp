@@ -597,6 +597,114 @@ The calling agent should:
 
 See [SECURITY.md](./SECURITY.md) for more details.
 
+## Tool: `register_design_system`
+
+Points `recommend_component` at *this project's own* design system instead
+of shadcn/ui, 21st.dev, and ReUI -- for a solo dev with their own component
+library or design spec who wants Pattern's coverage scoring against
+candidates they'll actually use, not external libraries they won't. This is
+the Solo Dev architecture from `pattern-solo-design-system-architecture.md`:
+local, per-project, one-or-the-other -- registering a design system for a
+`project_id` **replaces** external-library scoring for that project
+entirely, it does not add to it. There's no shared/remote ledger, no
+multi-user attribution, and no team auth in this scope -- those are
+deliberately deferred to a team phase, only if this use case proves out.
+
+### Input
+
+Exactly one of `manifest_path` or `directory_path` is required, both
+relative to the project root (`PATTERN_PROJECT_ROOT`, defaults to this
+server's working directory) -- never an absolute path.
+
+```json
+{
+  "project_id": "my-booking-app",
+  "directory_path": "src/components"
+}
+```
+
+- **`manifest_path`** -- a components manifest. Two recognized shapes:
+  - A hand-authored JSON array of `{name, props, description,
+    usage_example}` objects, optionally wrapped in `{"components": [...]}`.
+  - A Storybook-exported `stories.json`/`index.json` file (an object with a
+    top-level `entries` or `stories` map). Component names only in this
+    case -- Storybook's basic export doesn't carry prop data, so candidates
+    from this path start with an empty `props` list.
+- **`directory_path`** -- a directory of real component source files,
+  scanned recursively for `.jsx`/`.tsx`/`.js`/`.ts` files (excluding
+  `node_modules`/`dist`/`build`/`.git` and `.test.`/`.spec.`/`.stories.`
+  files). Each exported, uppercase-named function or const component found
+  becomes a candidate, with props read in priority order from a
+  `<Name>Props` interface/type, a `.propTypes` block, or (last resort) the
+  component's own destructured parameters. This is a heuristic scan, not a
+  full parser -- a sparse or partial props list for some components is
+  expected, not a bug, especially on plain JS with no prop typing at all.
+
+### Output
+
+```json
+{
+  "status": "registered",
+  "registration": {
+    "project_id": "my-booking-app",
+    "source_kind": "directory_scan",
+    "source_path": "src/components",
+    "registered_at": "2026-09-03T18:04:11.201Z",
+    "candidate_count": 29,
+    "candidates": [
+      { "name": "ReferralBanner", "props": ["code", "bonusAmount"], "description": null, "usage_example": null, "file_path": "rewards/ReferralBanner.jsx" }
+    ]
+  }
+}
+```
+
+Registering overwrites (does not merge with) any prior registration for the
+same `project_id`. Once registered, `recommend_component` scores ONLY
+against these candidates for calls with this `project_id` -- no separate
+flag needed, it's automatic based on `project_id` alone, and step 3's live
+web search is skipped entirely (`web_search` is still available, but
+reserved for a `custom_build` verdict's Mobbin/Figma Community reference
+grounding, same as the external-library path). A `use_existing` verdict
+scored this way always carries `"source": "design_system"` on the
+resulting ledger entry, set server-side regardless of what the model wrote,
+so `read_ledger` and `export_ledger_provenance` can match on it reliably.
+
+This only writes local config to `~/.pattern/design_systems.json` (override
+with `PATTERN_DESIGN_SYSTEMS_PATH`) -- it never calls the Anthropic API.
+Registration is a point-in-time snapshot, not a live link: re-run this
+whenever the design system's own components change meaningfully.
+
+### A safety net for a missed match
+
+The model can occasionally say `custom_build`/`no_candidates_found`
+against a registered design system even when a real match is sitting
+right there in its own prompt -- a reading-comprehension miss over its own
+known-complete candidate list, not evidence the list was actually empty.
+When this happens, `recommend_component`'s response may carry a
+`design_system_recall_check` field: a deterministic, zero-cost, local
+keyword-overlap check (component name, props, description/usage_example
+vs. `component_need`/`domain`) run automatically whenever reason is
+`no_candidates_found` in this mode.
+
+```json
+{
+  "verdict": "custom_build",
+  "reason": "no_candidates_found",
+  "design_system_recall_check": {
+    "possible_missed_candidates": [
+      { "name": "ReferralBanner", "shared_keywords": ["referral", "bonus"] }
+    ],
+    "note": "These registered design-system candidates share keywords with this component_need but were not selected as a match -- the verdict may have missed a real one. This is a weak, keyword-only signal, not proof of an actual match: double-check these candidates yourself (or re-run this call) before trusting custom_build here."
+  }
+}
+```
+
+This never overrides the verdict -- a shared keyword is weak evidence, not
+proof of a real match -- it only surfaces the risk so you (or the calling
+agent) know to double-check before accepting a `custom_build` verdict at
+face value. Absent entirely when there's no overlap, or outside
+design-system mode.
+
 ## Tool: `extract_requirements`
 
 Runs only the requirement-extraction step `recommend_component` normally
@@ -2003,6 +2111,25 @@ This is a limitation of model-based evidence judgment, not necessarily a
 search or code problem.
 
 The boundary-risk ensemble exists to detect and surface this uncertainty.
+
+### A missed match in your own design system isn't automatically re-checked
+
+In [design-system mode](#tool-register_design_system), the model can say
+`custom_build`/`no_candidates_found` even when a real, relevant candidate
+is sitting right in its own prompt -- a reading-comprehension miss over a
+fully-known candidate list, not a live-search gap. The boundary-risk
+ensemble above doesn't catch this: it only re-checks a `"scored"` result
+near the 40%/80% threshold, never a `"no_candidates_found"` verdict.
+
+The [keyword-overlap safety net](#a-safety-net-for-a-missed-match) flags
+this risk (`design_system_recall_check` on the response) but does not fix
+it -- it's a detection layer, not a re-check. The actual fix (re-running
+the model on a suspicious `no_candidates_found` verdict, the same way a
+close `"scored"` call already gets re-checked) is scoped but not built.
+`custom_build` ledger entries in this mode also record zero candidates
+(`candidates_evaluated: []`), same as the external-library path, so a
+genuine miss and a correct "nothing here" still look identical in
+`read_ledger` afterward unless the recall check happened to catch it.
 
 ### A staged pipeline was evaluated and not adopted
 

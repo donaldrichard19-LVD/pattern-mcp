@@ -1,6 +1,6 @@
 "use client";
 
-import { BookOpen, CircleSlash, History, ListChecks, Search } from "lucide-react";
+import { Blocks, BookOpen, CircleSlash, History, ListChecks, Search } from "lucide-react";
 import type { ReactNode } from "react";
 import { BODY, H2, SECTION } from "./tokens";
 import { Reveal } from "./ui";
@@ -41,6 +41,14 @@ const CAPS: { icon: ReactNode; h: string; p: [string, string] }[] = [
     p: [
       "Confirmed decisions can inform future recommendations in the same project.",
       "Pattern uses that history as context without letting old decisions override better evidence.",
+    ],
+  },
+  {
+    icon: <Blocks size={18} />,
+    h: "Works against your own design system too",
+    p: [
+      "Point Pattern at a real directory of your own components, a hand-authored manifest, or a Storybook export, and it scores against those instead of shadcn/ui, 21st.dev, and ReUI.",
+      "Same checklist, same evidence-based scoring, same verdict shape — just checked against components you'll actually reuse, not a library you don't have.",
     ],
   },
 ];

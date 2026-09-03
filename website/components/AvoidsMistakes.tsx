@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, CircleSlash, Link as LinkIcon, Receipt, Scale } from "lucide-react";
+import { Activity, CircleSlash, Link as LinkIcon, Receipt, Scale, ShieldCheck } from "lucide-react";
 import type { ReactNode } from "react";
 import { BODY, H2, SECTION } from "./tokens";
 import { Reveal } from "./ui";
@@ -45,6 +45,14 @@ const CAPS: { icon: ReactNode; h: string; p: [string, string] | [string, string,
     p: [
       "Pattern makes the cost of each decision visible.",
       "You can see the time, tokens, and estimated API cost instead of working from an opaque usage budget.",
+    ],
+  },
+  {
+    icon: <ShieldCheck size={18} />,
+    h: 'A "nothing matches" verdict against your own design system gets double-checked',
+    p: [
+      "When scoring against your own registered design system, a missed match is a reading mistake, not a search coming up empty.",
+      "A free, automatic check compares the request against every registered candidate's real name, props, and description, and flags any it shares real overlap with — so a wrong \"build it from scratch\" doesn't pass by silently.",
     ],
   },
 ];
