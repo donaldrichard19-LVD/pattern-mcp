@@ -11,7 +11,10 @@ const DO = [
 
 const AVOID = [
   { t: "Trivial primitives", d: "Buttons, inputs, badges, spinners. The skip-list already answers these for free" },
-  { t: "Anything you'd cache and reuse", d: "Coverage is a snapshot with a computed_at date. Keep caching session-scoped, never across builds" },
+  {
+    t: "Anything you'd cache and reuse",
+    d: "Coverage is a snapshot with a computed_at date, not a permanent fact — component libraries change. The judgment ledger's own cache-hit path is the one bounded exception; don't add a second cache on top of it.",
+  },
 ];
 
 function GuidanceCard({ on, t, d, delay }: { on: boolean; t: string; d: string; delay: number }) {

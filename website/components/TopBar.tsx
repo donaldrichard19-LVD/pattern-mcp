@@ -10,7 +10,7 @@ import { Mark, Wordmark } from "./ui";
 const NAV: [string, string][] = [
   ["Installation", "#install"],
   ["How it works", "#demo"],
-  ["Capabilities", "#capabilities"],
+  ["Outcomes", "#outcomes"],
   ["Reference", "#reference"],
   ["Docs", REPO],
 ];

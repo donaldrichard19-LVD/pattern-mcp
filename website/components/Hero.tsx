@@ -38,11 +38,54 @@ const INSTALL_LINES = ["npm install pattern-mcp"];
 const AGENT_PROMPT =
   "Use recommend_component before picking a UI component: pass the specific need, my domain, and framework, then act on the verdict. Install what it recommends, or build from the reference it returns";
 
+const PILL_ROWS: { widths: [number, number]; colors: [string, string]; opacities: [number, number] }[] = [
+  { widths: [150, 104], colors: ["var(--blue-500)", "var(--green-500)"], opacities: [1, 0.85] },
+  { widths: [104, 150], colors: ["var(--amber-500)", "var(--blue-500)"], opacities: [1, 0.55] },
+  { widths: [176, 78], colors: ["var(--green-500)", "var(--amber-500)"], opacities: [1, 0.7] },
+];
+
+function PillStack() {
+  return (
+    <div style={{ display: "grid", gap: 5, maxWidth: 520 }} aria-hidden="true">
+      {PILL_ROWS.map((row, ri) => (
+        <div key={ri} style={{ display: "flex", gap: 5 }}>
+          {row.widths.map((w, ci) => (
+            <span
+              key={ci}
+              style={{
+                width: w,
+                height: 11,
+                borderRadius: 7,
+                background: row.colors[ci],
+                opacity: row.opacities[ci],
+                transformOrigin: "left",
+                animation: "pt-breathe 5.2s ease-in-out infinite",
+                animationDelay: `${(ri * 2 + ci) * 0.5}s`,
+              }}
+            />
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function Hero() {
   return (
-    <section id="top" className="pt-pad-y" style={{ padding: "72px 0 24px" }}>
+    <section
+      id="top"
+      className="pt-pad-y"
+      style={{
+        padding: "72px 0 24px",
+        backgroundImage:
+          "radial-gradient(760px 300px at 88% -6%, rgba(26,115,232,.13), transparent 70%), radial-gradient(520px 260px at 8% 4%, rgba(14,159,110,.10), transparent 70%), radial-gradient(420px 220px at 60% 30%, rgba(199,125,10,.08), transparent 70%)",
+      }}
+    >
       <div className="pt-sec" style={{ ...SECTION, display: "grid", gap: 28 }}>
         <Reveal>
+          <PillStack />
+        </Reveal>
+        <Reveal delay={60}>
           <h1
             style={{
               margin: 0,
@@ -55,17 +98,22 @@ export function Hero() {
               textWrap: "pretty",
             }}
           >
-            Catch the wrong UI decision before your agent builds it
+            Catch the{" "}
+            <span style={{ backgroundImage: "linear-gradient(transparent 62%, rgba(199,125,10,.32) 62%)" }}>
+              wrong UI decision
+            </span>{" "}
+            before your agent builds it
           </h1>
         </Reveal>
-        <Reveal delay={80}>
-          <p style={{ ...BODY, maxWidth: 640, fontSize: "var(--text-body-lg)" }}>
-            Pattern checks a UI component need against real evidence, not a name and a guess. It returns one verdict,
-            a component that actually fits or a grounded product reference when nothing does, so you find out before
-            it&apos;s built, not after.
+        <Reveal delay={120}>
+          <p style={{ ...BODY, maxWidth: 700, fontSize: "var(--text-body-lg)" }}>
+            Pattern solves agents ignoring your skills.md: it replaces hope with enforced guidance. It scores
+            component options, from external libraries or your own design spec, against a requirements checklist,
+            and returns use existing or build custom with a coverage score and evidence. Enforced, not suggested,
+            and logged to a ledger you can export straight to a PR or issue.
           </p>
         </Reveal>
-        <Reveal delay={140}>
+        <Reveal delay={160}>
           <div style={{ maxWidth: 520 }}>
             <CopyBlock label="install command" lines={INSTALL_LINES} />
           </div>
@@ -99,22 +147,6 @@ export function Hero() {
                 </pre>
               </div>
             </div>
-          </div>
-        </Reveal>
-        <Reveal delay={210}>
-          <div style={{ display: "grid", gap: 10, maxWidth: 640 }}>
-            <span style={LABEL}>Pattern checks</span>
-            <ul style={{ margin: 0, paddingLeft: 20, display: "grid", gap: 6 }}>
-              <li style={{ ...BODY, fontSize: "var(--text-body-sm)" }}>What the component needs to do</li>
-              <li style={{ ...BODY, fontSize: "var(--text-body-sm)" }}>What existing components actually support</li>
-              <li style={{ ...BODY, fontSize: "var(--text-body-sm)" }}>How well each option covers the requirements</li>
-              <li style={{ ...BODY, fontSize: "var(--text-body-sm)" }}>Whether an existing component is the right fit</li>
-              <li style={{ ...BODY, fontSize: "var(--text-body-sm)" }}>What real references to use when nothing fits</li>
-            </ul>
-            <p style={{ ...BODY, fontSize: "var(--text-body-sm)", margin: 0 }}>
-              The agent gets a verdict: <strong>use an existing component</strong> or <strong>build it custom from a real
-              reference</strong>, with the evidence behind the decision.
-            </p>
           </div>
         </Reveal>
         <Reveal delay={220}>
