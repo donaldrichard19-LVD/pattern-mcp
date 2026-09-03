@@ -2,7 +2,7 @@
 
 [![Publish](https://github.com/donaldrichard19-LVD/pattern-mcp/actions/workflows/publish.yml/badge.svg)](https://github.com/donaldrichard19-LVD/pattern-mcp/actions/workflows/publish.yml)
 [![npm version](https://img.shields.io/npm/v/pattern-mcp.svg)](https://www.npmjs.com/package/pattern-mcp)
-[![npm downloads](https://img.shields.io/npm/dm/pattern-mcp.svg)](https://www.npmjs.com/package/pattern-mcp)
+[![npm downloads](https://img.shields.io/npm/dt/pattern-mcp.svg)](https://www.npmjs.com/package/pattern-mcp)
 [![MIT license](https://img.shields.io/badge/license-MIT-111111.svg)](./LICENSE)
 
 Pattern is an MCP server that checks a UI component need against real
