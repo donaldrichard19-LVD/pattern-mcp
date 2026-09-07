@@ -40,6 +40,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   captureApiError,
   captureRecommendation,
@@ -4016,8 +4017,16 @@ export function extractJson(text: string): string {
   return text.slice(start, end + 1);
 }
 
+// Read from package.json rather than hardcoding, so $mcp_server_version in
+// PostHog's MCP tool-call analytics (and any client that reads the MCP
+// initialize response) reflects the version actually installed instead of
+// staying frozen at whatever it was when this line was first written.
+const PACKAGE_VERSION: string = JSON.parse(
+  readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "package.json"), "utf8")
+).version;
+
 const server = new Server(
-  { name: "pattern-mcp", version: "0.1.0" },
+  { name: "pattern-mcp", version: PACKAGE_VERSION },
   { capabilities: { tools: {} } }
 );
 
