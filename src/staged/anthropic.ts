@@ -3,7 +3,7 @@
 // fetch logic (which is tuned for the single bundled call) rather than
 // reused, since each stage here has a different tool/budget shape.
 
-import { ANTHROPIC_API_KEY, MODEL, extractJson, extractUrlsForDomain } from "../index.js";
+import { ANTHROPIC_API_KEY, ANTHROPIC_WORKSPACE_ID, MODEL, extractJson, extractUrlsForDomain } from "../index.js";
 
 export interface AnthropicCallOptions {
   systemPrompt: string;
@@ -35,6 +35,7 @@ export async function callAnthropic({ systemPrompt, userMessage, tools, maxToken
       "content-type": "application/json",
       "x-api-key": ANTHROPIC_API_KEY,
       "anthropic-version": "2023-06-01",
+      ...(ANTHROPIC_WORKSPACE_ID ? { "anthropic-workspace-id": ANTHROPIC_WORKSPACE_ID } : {}),
     },
     body: JSON.stringify({
       model: MODEL,

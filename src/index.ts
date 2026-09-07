@@ -51,6 +51,9 @@ import {
 } from "./telemetry.js";
 
 export const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+// Only required for org-scoped keys (not tied to one workspace); unset for
+// legacy workspace-scoped keys, which don't need it.
+export const ANTHROPIC_WORKSPACE_ID = process.env.ANTHROPIC_WORKSPACE_ID;
 // Configurable so Sonnet vs. Haiku can be A/B tested without a code change.
 // Defaults to Sonnet 5. Try MODEL=claude-haiku-4-5-20251001 to test the
 // cheaper tier -- re-run the 5 validated test cases from the product brief
@@ -455,6 +458,7 @@ async function streamAnthropicMessage(body: Record<string, unknown>): Promise<St
       "content-type": "application/json",
       "x-api-key": ANTHROPIC_API_KEY!,
       "anthropic-version": "2023-06-01",
+      ...(ANTHROPIC_WORKSPACE_ID ? { "anthropic-workspace-id": ANTHROPIC_WORKSPACE_ID } : {}),
     },
     body: JSON.stringify({ ...body, stream: true }),
   });
