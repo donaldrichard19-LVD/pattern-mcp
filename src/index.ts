@@ -34,6 +34,7 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+import { instrument } from "@posthog/mcp";
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
@@ -42,8 +43,11 @@ import { dirname, extname, isAbsolute, join, relative, resolve } from "node:path
 import {
   captureApiError,
   captureRecommendation,
+  getClient as getPostHogClient,
+  installId,
   printTelemetryNoticeOnce,
   shutdownTelemetry,
+  TELEMETRY_ENABLED,
 } from "./telemetry.js";
 
 export const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
@@ -4012,6 +4016,46 @@ const server = new Server(
   { name: "pattern-mcp", version: "0.1.0" },
   { capabilities: { tools: {} } }
 );
+
+// Standard MCP tool-call analytics (tool name, duration, success/failure,
+// unique installs/sessions) via PostHog's own MCP SDK -- separate from
+// this file's captureRecommendation()/captureApiError() calls, which carry
+// the distilled verdict shape. Both are gated by the same TELEMETRY_ENABLED
+// flag (see telemetry.ts) and share installId() as the distinct_id so an
+// install counts as the same "user" across both event streams.
+//
+// context: false skips injecting an extra `context` argument into every
+// tool's schema. beforeSend strips $mcp_parameters/$mcp_response/$mcp_intent/
+// $mcp_error_message before anything is sent -- by default this SDK
+// captures full tool call arguments, response text, AND the raw thrown
+// error message (which for a failed Anthropic call is the full HTTP
+// response body -- verified live: a 401 test call shipped the entire
+// JSON error body in $mcp_error_message before this strip was added).
+// SECURITY.md and README.md both promise component_need/domain/framework/
+// existing_stack are never sent and that a failed API call never sends its
+// response body; this is what keeps both true for this event stream too.
+// enableExceptionAutocapture is off for the same reason -- it would also
+// fan the same raw message out to a separate $exception event.
+if (TELEMETRY_ENABLED) {
+  const posthogClient = getPostHogClient();
+  if (posthogClient) {
+    instrument(server, posthogClient, {
+      context: false,
+      enableExceptionAutocapture: false,
+      identify: async () => ({ distinctId: installId() }),
+      beforeSend: (event) => {
+        if (event.properties) {
+          delete event.properties["$mcp_parameters"];
+          delete event.properties["$mcp_response"];
+          delete event.properties["$mcp_intent"];
+          delete event.properties["$mcp_intent_source"];
+          delete event.properties["$mcp_error_message"];
+        }
+        return event;
+      },
+    });
+  }
+}
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [

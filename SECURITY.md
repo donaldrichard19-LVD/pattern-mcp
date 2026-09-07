@@ -72,18 +72,22 @@ doesn't invalidate a key that already appeared in history.
   this file persists across restarts *and* is read back into future API
   calls, so treat its contents with the same care as the live inputs
   above, not just as a passive record.
-- **If you've explicitly set `PATTERN_TELEMETRY=1`** (off by default --
-  telemetry is opt-in, not opt-out), an anonymous per-install UUID
-  (`~/.pattern/install_id`), a SHA-256 hash of `project_id` (never the raw
-  string), and the distilled verdict shape already in `calls.log`
+- **Unless you've explicitly set `PATTERN_TELEMETRY=0`** (on by default as
+  of v0.9.0 -- telemetry is opt-out, not opt-in), an anonymous per-install
+  UUID (`~/.pattern/install_id`), a SHA-256 hash of `project_id` (never the
+  raw string), and the distilled verdict shape already in `calls.log`
   (verdict, confidence, reason, ensemble_triggered, estimated_cost_usd) go
   to Pattern's PostHog project over HTTPS. A failed Anthropic API call
   additionally sends the HTTP status and a coarse error classification
   (`rate_limit` / `insufficient_credit` / `other`) -- never the response
-  body. `component_need`, `domain`, `framework`, `existing_stack`, and the
-  raw `project_id` are never included in telemetry, on or off. See
-  [Telemetry](./README.md#telemetry) for the full field list and how to
-  confirm it's off.
+  body. Separately, standard MCP tool-call analytics (tool name, duration,
+  success/failure) are sent via `@posthog/mcp`; its default capture of full
+  tool call arguments, response text, and raw error messages is explicitly
+  stripped before send (see [Telemetry](./README.md#telemetry)) so the same
+  guarantee holds there too. `component_need`, `domain`, `framework`,
+  `existing_stack`, and the raw `project_id` are never included in
+  telemetry, on or off. See [Telemetry](./README.md#telemetry) for the
+  full field list and how to turn it off.
 - The server emits diagnostic JSON lines to **stderr** on every call
   (search queries, coverage recounts, verdict corrections, ensemble
   decisions). These are not written to disk by this server, but depending

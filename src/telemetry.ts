@@ -1,8 +1,9 @@
 /**
- * Opt-in, anonymous product telemetry.
+ * Anonymous product telemetry.
  *
- * Off by default. Enabling it (PATTERN_TELEMETRY=1) answers two questions
- * the product can't answer any other way without asking users directly:
+ * On by default. Disabling it (PATTERN_TELEMETRY=0) turns off both halves
+ * described below. It answers two questions the product can't answer any
+ * other way without asking users directly:
  *
  *  - Do people come back and use Pattern on a second or third project on
  *    their own, unprompted? (tracked via distinct project hashes seen per
@@ -11,16 +12,27 @@
  *    limited in real sessions, not just the one time it happened during
  *    manual testing? (tracked via captureApiError)
  *
- * What gets sent, when enabled: an anonymous, randomly generated install
- * ID (see installId() below); a one-way SHA-256 hash of project_id,
- * truncated to 16 hex chars -- never the raw project_id string; the verdict
- * shape already written to the local call log (verdict, confidence,
- * ensemble_triggered, estimated cost); and, on a failed Anthropic API call,
- * only the HTTP status and a coarse error classification (rate_limit /
- * insufficient_credit / other) -- never the request or response body.
+ * There are two halves to what ships, both gated by the same flag:
+ *
+ *  1. This file's own capture() calls: an anonymous, randomly generated
+ *     install ID (see installId() below); a one-way SHA-256 hash of
+ *     project_id, truncated to 16 hex chars -- never the raw project_id
+ *     string; the verdict shape already written to the local call log
+ *     (verdict, confidence, ensemble_triggered, estimated cost); and, on a
+ *     failed Anthropic API call, only the HTTP status and a coarse error
+ *     classification (rate_limit / insufficient_credit / other) -- never
+ *     the request or response body.
+ *  2. `@posthog/mcp`'s standard MCP instrumentation, wired up in index.ts:
+ *     tool name, call duration, error/success, and the same anonymous
+ *     install ID as the distinct_id (via its `identify` option), so both
+ *     halves count the same "user." Its `beforeSend` hook strips
+ *     `$mcp_parameters`, `$mcp_response`, and `$mcp_intent`/
+ *     `$mcp_intent_source` before anything leaves the process -- those
+ *     would otherwise carry tool call arguments and output text.
+ *
  * component_need text, requirements_checked evidence, and the API key
- * itself are never sent. See SECURITY.md and README.md for the full
- * disclosure and the exact opt-in instructions.
+ * itself are never sent, by either half. See SECURITY.md and README.md for
+ * the full disclosure and how to opt out.
  *
  * Reuses Pattern's existing PostHog project (the same one the marketing
  * site sends browser events to) with its public, write-only project key --
@@ -36,12 +48,13 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
-// Opt-in, not opt-out -- deliberate, given who this tool is for. See
-// README's telemetry section: a local-first tool aimed at developers who
-// notice and care about silent tracking is exactly the audience §06 of the
-// product brief already flags as sensitive to "no paper trail" trust gaps.
-// Any of "1", "true", "yes" (case-insensitive) turns it on.
-const TELEMETRY_ENABLED = /^(1|true|yes)$/i.test(process.env.PATTERN_TELEMETRY ?? "");
+// Opt-out, not opt-in. Previously opt-in; changed because opt-in meant
+// near-zero real signal in practice (installs happened, but almost no one
+// ever set the env var) -- see the one-time notice below, which is the
+// disclosure mechanism that replaces an interactive consent prompt for a
+// stdio MCP server. Any of "0", "false", "no" (case-insensitive) turns it
+// off; anything else, including unset, leaves it on.
+export const TELEMETRY_ENABLED = !/^(0|false|no)$/i.test(process.env.PATTERN_TELEMETRY ?? "");
 
 // One-time startup notice, printed to stderr -- the closest thing to an
 // opt-in prompt an MCP stdio server can safely show. stdin is the JSON-RPC
@@ -63,8 +76,8 @@ export function printTelemetryNoticeOnce(): void {
   }
 
   const status = TELEMETRY_ENABLED
-    ? "ON, because PATTERN_TELEMETRY is set"
-    : "OFF (the default -- nothing is sent unless you opt in)";
+    ? "ON (the default)"
+    : "OFF, because PATTERN_TELEMETRY is set to 0/false/no";
 
   console.error(
     [
@@ -72,16 +85,17 @@ export function printTelemetryNoticeOnce(): void {
       "Pattern -- one-time telemetry notice (this will not print again)",
       `Anonymous usage telemetry is currently ${status}.`,
       "",
-      "When enabled, Pattern sends an anonymous per-install ID, a one-way",
-      "hash of project_id (never the raw string), and the same verdict",
-      "summary already written to ~/.pattern/calls.log (verdict,",
-      "confidence, reason, estimated cost). component_need, domain,",
-      "framework, existing_stack, and your API key are never sent.",
+      "When on, Pattern sends an anonymous per-install ID, a one-way hash",
+      "of project_id (never the raw string), the same verdict summary",
+      "already written to ~/.pattern/calls.log (verdict, confidence,",
+      "reason, estimated cost), and standard MCP tool-call analytics (tool",
+      "name, duration, success/failure) via PostHog's MCP SDK. Tool call",
+      "arguments and responses are stripped before sending -- component_need,",
+      "domain, framework, existing_stack, and your API key are never sent.",
       "Full field list: https://github.com/donaldrichard19-LVD/pattern-mcp#telemetry",
       "",
-      "To help improve Pattern by sharing anonymous usage data, opt in:",
-      "  PATTERN_TELEMETRY=1",
-      "Already on and want it off instead? Unset PATTERN_TELEMETRY (or set it to 0).",
+      "To opt out: PATTERN_TELEMETRY=0",
+      "Already off and want it back on? Unset PATTERN_TELEMETRY (or set it to 1).",
       "",
     ].join("\n")
   );
@@ -123,7 +137,7 @@ let cachedInstallId: string | undefined;
 // would look like a brand-new anonymous user. Never derived from anything
 // that identifies a person or machine (no hostname, no MAC, no username) --
 // purely a random UUID with no way to reverse it to an identity.
-function installId(): string {
+export function installId(): string {
   if (cachedInstallId) return cachedInstallId;
   try {
     cachedInstallId = readFileSync(INSTALL_ID_PATH, "utf8").trim();
@@ -171,7 +185,10 @@ export function classifyApiError(message: string): { type: ApiErrorType; status:
 
 let client: PostHog | undefined;
 
-function getClient(): PostHog | undefined {
+// Exported so index.ts's @posthog/mcp instrument() call shares this same
+// client/project instead of standing up a second PostHog connection --
+// same reason both halves share installId() as their distinct_id.
+export function getClient(): PostHog | undefined {
   if (!TELEMETRY_ENABLED || !POSTHOG_KEY) return undefined;
   if (!client) {
     client = new PostHog(POSTHOG_KEY, {
