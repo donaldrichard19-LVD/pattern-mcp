@@ -7,6 +7,10 @@ import { Reveal } from "./ui";
 const DO = [
   { t: "A component with unique requirements", d: "Fee breakdowns, policy displays, dashboards, inboxes. Anything where fit requires judgment" },
   { t: "Before the agent starts writing UI", d: "The verdict is useful while there's still a decision to make" },
+  {
+    t: "A project with its own design system",
+    d: "Register it once with register_design_system and every later call scores only against those components — not shadcn/ui, 21st.dev, or ReUI",
+  },
 ];
 
 const AVOID = [
@@ -14,6 +18,10 @@ const AVOID = [
   {
     t: "Anything you'd cache and reuse",
     d: "Coverage is a snapshot with a computed_at date, not a permanent fact — component libraries change. The judgment ledger's own cache-hit path is the one bounded exception; don't add a second cache on top of it.",
+  },
+  {
+    t: "Auto-running the returned install_command",
+    d: "It's text a search result produced, not a verified package registry lookup. Always show it and get explicit confirmation before running it.",
   },
 ];
 
