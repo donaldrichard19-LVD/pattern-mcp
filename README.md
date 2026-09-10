@@ -31,7 +31,7 @@ design reference.
 ## Install
 
 ```bash
-npm install pattern-mcp
+npx pattern-mcp
 ```
 
 See [Quick Start](#quick-start) below to add your Anthropic API key and connect
@@ -224,11 +224,11 @@ threshold.
 ### 1. Install
 
 ```bash
-npm install pattern-mcp
+npx pattern-mcp
 ```
 
-This installs the `pattern-mcp` command via `npx` (or your project's
-local `node_modules/.bin`), used in the client configs below.
+`npx` runs the `pattern-mcp` command on demand without a separate install
+step, used in the client configs below.
 
 <details>
 <summary>Build from source instead</summary>

@@ -33,7 +33,7 @@ const VERDICT_LINES = [
   "}",
 ];
 
-const INSTALL_LINES = ["npm install pattern-mcp"];
+const INSTALL_LINES = ["npx pattern-mcp"];
 
 const AGENT_PROMPT =
   "Use recommend_component before picking a UI component: pass the specific need, my domain, and framework, then act on the verdict. Install what it recommends, or build from the reference it returns";
