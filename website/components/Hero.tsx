@@ -183,12 +183,11 @@ export function Hero() {
             <CopyBlock label="enforcement setup" lines={ENFORCEMENT_INIT_LINES} />
             <div style={{ ...PANEL, padding: 14 }}>
               <p style={{ ...BODY, margin: 0, fontSize: "var(--text-body-sm)", color: "var(--text-secondary)" }}>
-                pattern-mcp already tells you this exists: the first time you run it, it prints a one-time note
-                about the enforcement boundary, and offers to set it up right there if you&apos;re running it
-                directly in a terminal. Or run the command above yourself whenever you&apos;re ready — it sets up a
-                local hook that blocks a new component from being written until Pattern has judged it, and a CI
-                check that fails the pull request if that decision wasn&apos;t recorded. Opt-in either way —
-                nothing changes until you say yes.
+                pattern-mcp already tells you about this. The first time you run it, you&apos;ll see a one-time
+                note about the enforcement boundary, with the option to set it up right from your terminal. Or run
+                the command above whenever you&apos;re ready. It sets up a local hook that blocks a new component
+                from being written until Pattern has judged it, plus a CI check that fails the pull request if
+                that decision wasn&apos;t recorded.
               </p>
             </div>
           </div>
