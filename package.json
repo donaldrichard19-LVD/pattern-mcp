@@ -1,6 +1,6 @@
 {
   "name": "pattern-mcp",
-  "version": "0.12.0",
+  "version": "0.12.1",
   "description": "MCP server that turns your design guidance into a checkable process -- evaluates UI components from external libraries (shadcn/ui, 21st.dev, ReUI) or your own registered design system against a requirements checklist, then tells the agent whether to reuse an existing component or build one from a concrete design reference.",
   "type": "module",
   "main": "dist/index.js",
