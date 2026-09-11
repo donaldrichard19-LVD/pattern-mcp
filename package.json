@@ -5,7 +5,8 @@
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "pattern-mcp": "dist/index.js"
+    "pattern-mcp": "dist/index.js",
+    "pattern-check-gate": "dist/check-gate.js"
   },
   "author": "Don Richard",
   "license": "MIT",
@@ -28,7 +29,8 @@
   ],
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "templates"
   ],
   "scripts": {
     "build": "tsc",

@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "env PATTERN_PROJECT_ID=your-project-id node ./node_modules/pattern-mcp/templates/hooks/check-gate-hook.mjs",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}

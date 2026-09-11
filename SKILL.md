@@ -30,7 +30,12 @@ past decisions from `record_component_decision` as a consistency signal),
 checklist you already have -- see `extract_requirements` below), and
 `feature_id` (joins this call's cost with a later `report_build_cost` call
 for the same feature -- see below; omit to have one derived
-automatically).
+automatically). **Pass `file_path`** (the path you're about to write) when
+you know it -- if the calling repo has the enforcement-boundary hook
+wired up (see README's [Enforcement boundary: hook + CI
+gate](./README.md#enforcement-boundary-hook--ci-gate)), the write is
+matched against this exact field; omitting it makes that hook fail closed
+(block) since it has nothing to match against.
 
 On `custom_build`, open or read the returned Mobbin/Figma reference
 URL(s) before starting the build -- don't just print the URL. On

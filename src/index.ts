@@ -221,6 +221,12 @@ const LEDGER_TTL_DAYS = Number(process.env.PATTERN_LEDGER_TTL_DAYS ?? 30);
 // failure-prone surface than "does this one file exist right now" or
 // "what commit is HEAD."
 //
+// resolveWithinRoot/computeSnapshotRef/readLedgerEntries are exported so
+// check-gate.ts (the enforcement-boundary CLI, see that file) can reuse
+// this exact scoping rather than growing a second, parallel fs/git-access
+// surface -- it imports these dynamically, after setting
+// PATTERN_NO_AUTOSTART, the same convention scripts/*.mjs already use.
+//
 // Defaults to process.cwd() -- for a locally-run stdio MCP server, that's
 // normally the consuming repo's root, since MCP hosts typically launch
 // the server with the project directory as its working directory. When
@@ -235,7 +241,7 @@ const PROJECT_ROOT = process.env.PATTERN_PROJECT_ROOT ?? process.cwd();
 // to "unknown" rather than silently stat-ing something outside the
 // project. Returns null (never throws) on anything that doesn't resolve
 // cleanly inside root.
-function resolveWithinRoot(root: string, relPath: string): string | null {
+export function resolveWithinRoot(root: string, relPath: string): string | null {
   if (!relPath || isAbsolute(relPath)) return null;
   const resolved = resolve(root, relPath);
   const rel = relative(root, resolved);
@@ -249,7 +255,7 @@ function resolveWithinRoot(root: string, relPath: string): string | null {
 // rather than failing the judgment call that triggered this write (see
 // buildLedgerEntry). Read-only: `git rev-parse HEAD` never touches repo
 // state.
-function computeSnapshotRef(root: string): string | null {
+export function computeSnapshotRef(root: string): string | null {
   try {
     const sha = execFileSync("git", ["rev-parse", "HEAD"], {
       cwd: root,
@@ -2604,7 +2610,7 @@ function backfillLedgerSnapshotRefs(input: { project_id: string; ledger_entry_id
 // but line-oriented (JSONL) rather than whole-file JSON -- a single
 // corrupted line (e.g. a hand-edited file, or a write that got cut off)
 // is skipped rather than failing the whole read.
-function readLedgerEntries(projectId: string): LedgerEntry[] {
+export function readLedgerEntries(projectId: string): LedgerEntry[] {
   let raw: string;
   try {
     raw = readFileSync(LEDGER_PATH, "utf8");

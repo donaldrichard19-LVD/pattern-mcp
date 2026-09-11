@@ -1576,6 +1576,51 @@ the source line, most recent record wins at read time" convention as
 layered onto `ledger.jsonl`'s own entries at read time -- the ledger line
 itself is never rewritten.
 
+## Enforcement boundary: hook + CI gate
+
+**The gap this closes:** SKILL.md instructs the calling agent to call
+`recommend_component` before scaffolding a new, non-trivial UI component,
+but nothing before this feature *enforced* that -- an agent could simply
+skip the call, and nothing server-side would know. This is opt-in and
+Claude-Code-specific for the hook half; a consuming repo that never wires
+either piece up gets Pattern exactly as it worked before, and any other
+MCP host (Cursor, Codex, etc.) is entirely unaffected either way.
+
+Two pieces, both templates under `templates/` -- pattern-mcp never
+installs either into your repo on its own:
+
+- **`templates/hooks/check-gate-hook.mjs`** + **`templates/claude-settings/settings.json`**
+  -- a Claude Code `PreToolUse` hook that runs on `Write`/`Edit` calls. For
+  a genuinely new `.tsx`/`.jsx` file that exports a non-trivial component,
+  it looks up a ledger entry (via `~/.pattern/ledger.jsonl`, same as
+  everywhere else in Pattern) whose `file_path` matches the file being
+  written. A match writes a receipt and allows the write; no match blocks
+  it with a reason fed back to the model as retryable guidance, not a hard
+  failure. **This is the one new exception where Pattern writes into your
+  repo** (`.pattern/receipts/<feature_id>.json`) -- everything else
+  described in this README is read-only.
+- **`templates/github-workflows/pattern-gate.yml`** -- a required PR
+  check that reads the same receipt files back out of the diff. It never
+  touches `~/.pattern/` (not reachable from a CI runner) and needs no
+  `GITHUB_TOKEN` -- it trusts the committed receipt as the artifact of
+  record, the same way it would trust a committed test fixture.
+
+The join between the two depends on `file_path` being passed to
+`recommend_component`/`record_component_decision` -- if it's omitted, the
+gate has nothing to match against and fails closed (blocks) rather than
+guessing. Pass `file_path` whenever you know it.
+
+An escape hatch exists for both a whole-hook kill switch
+(`PATTERN_NO_ENFORCEMENT_HOOK`, local only -- does not affect the CI
+check) and a per-file override (a `// pattern-mcp:override reason="..."`
+comment) -- the override still writes a receipt recording
+`manual_override: true` and the reason, so it stays visible rather than
+silent. See `src/component-gate.ts`, `src/gate-receipt.ts`, and
+`src/check-gate.ts` (the new `pattern-check-gate` CLI, this project's
+first entry point separate from the stdio MCP server) for the
+implementation, and BACKLOG.md's "Enforcement boundary: hook + CI gate"
+entry for the fuller design writeup.
+
 ## Per-project decision memory
 
 Pattern stores confirmed decisions locally in:
