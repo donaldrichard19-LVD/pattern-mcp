@@ -167,6 +167,8 @@ const CONFIG_ROWS: Row[] = [
   ["PATTERN_DESIGN_SYSTEMS_PATH", "~/.pattern/design_systems.json", "Registered design systems, one per project_id, local only"],
   ["PATTERN_PROJECT_ID", "auto-derived", "Overrides the enforcement hook's project ID. If you don't set it, Pattern derives one from your package.json, Git remote, or directory name."],
   ["PATTERN_NO_ENFORCEMENT_HOOK", "unset", "Turns off the local enforcement hook without affecting the CI check."],
+  ["PATTERN_ENFORCEMENT_NOTICE_PATH", "~/.pattern/enforcement_notice_shown", "Marker file for the one-time first-run notice about the enforcement boundary."],
+  ["PATTERN_NO_ENFORCEMENT_NOTICE", "unset", "Suppresses both the first-run notice and its interactive follow-up prompt."],
 ];
 
 const ENFORCEMENT_CLI_ROWS: [string, string][] = [

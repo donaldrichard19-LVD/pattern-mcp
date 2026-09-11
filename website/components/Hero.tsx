@@ -183,10 +183,12 @@ export function Hero() {
             <CopyBlock label="enforcement setup" lines={ENFORCEMENT_INIT_LINES} />
             <div style={{ ...PANEL, padding: 14 }}>
               <p style={{ ...BODY, margin: 0, fontSize: "var(--text-body-sm)", color: "var(--text-secondary)" }}>
-                By default, the agent decides when to call Pattern. pattern-check-gate init removes that dependency
-                by setting up an enforcement boundary: a local hook blocks a new component from being written until
-                Pattern has judged it, and a CI check fails the pull request if that decision wasn&apos;t recorded.
-                It&apos;s opt-in, so nothing changes until you set it up.
+                pattern-mcp already tells you this exists: the first time you run it, it prints a one-time note
+                about the enforcement boundary, and offers to set it up right there if you&apos;re running it
+                directly in a terminal. Or run the command above yourself whenever you&apos;re ready — it sets up a
+                local hook that blocks a new component from being written until Pattern has judged it, and a CI
+                check that fails the pull request if that decision wasn&apos;t recorded. Opt-in either way —
+                nothing changes until you say yes.
               </p>
             </div>
           </div>
