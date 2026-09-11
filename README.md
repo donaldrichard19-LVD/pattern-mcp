@@ -15,6 +15,11 @@ design reference.
 
 [Website](https://usepattern.sh) · [npm](https://www.npmjs.com/package/pattern-mcp) · [Report an issue](https://github.com/donaldrichard19-LVD/pattern-mcp/issues/new/choose)
 
+**Current release: v0.10.0** — adds an opt-in enforcement boundary (a
+`PreToolUse` hook plus a paired CI check) so a new component decision can
+be required, not just logged. See [Enforcement boundary: hook + CI
+gate](#enforcement-boundary-hook--ci-gate).
+
 <details>
 <summary><strong>Contents</strong> (click to expand)</summary>
 
@@ -22,6 +27,7 @@ design reference.
 - **Make the judgment call:** [`recommend_component`](#tool-recommend_component) · [`extract_requirements`](#tool-extract_requirements)
 - **Track cost and outcome:** [`record_component_decision`](#tool-record_component_decision) · [`read_ledger`](#tool-read_ledger) · [`report_build_cost`](#tool-report_build_cost) · [`report_outcome_proxy`](#tool-report_outcome_proxy) · [Feature cost attribution](#feature-cost-attribution) · [Outcome proxies](#outcome-proxies) · [Per-project judgment ledger](#per-project-judgment-ledger)
 - **Verify and export old decisions:** [`check_ledger_liveness`](#tool-check_ledger_liveness) · [`sweep_ledger_liveness`](#tool-sweep_ledger_liveness) · [`export_ledger_provenance`](#tool-export_ledger_provenance) · [`backfill_ledger_snapshot_ref`](#tool-backfill_ledger_snapshot_ref) · [`post_ledger_provenance_to_github`](#tool-post_ledger_provenance_to_github) · [Ledger integrity and decision provenance](#ledger-integrity-and-decision-provenance) (design overview — start here for how the five fit together)
+- [Enforcement boundary: hook + CI gate](#enforcement-boundary-hook--ci-gate) (new in v0.10.0 — require the call, don't just log it)
 - [Per-project decision memory](#per-project-decision-memory) · [Security and privacy](#security-and-privacy) · [Telemetry](#telemetry)
 - **Cost:** [The `_meta` field](#the-_meta-field) · [Prompt caching](#prompt-caching) · [Measured cache and fetch behavior](#measured-cache-and-fetch-behavior) · [Search limits](#search-limits) · [Ensemble cost](#ensemble-cost-boundary-risk-cases-only) · [Session call cap](#session-call-cap)
 - [Local call log](#local-call-log) · [Known limitations](#known-limitations)

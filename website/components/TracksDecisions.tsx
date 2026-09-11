@@ -245,6 +245,10 @@ const GRID: { h: string; p: string }[] = [
     h: "Older entries aren't left behind",
     p: "backfill_ledger_snapshot_ref reconstructs a snapshot_ref for entries written before this feature shipped, so liveness checks work retroactively, not just on decisions made from today forward.",
   },
+  {
+    h: "The decision can be required, not just logged",
+    p: "An opt-in PreToolUse hook blocks a new component from being written until a matching entry exists in this ledger, and a paired GitHub Action fails the PR if the receipt isn't committed alongside it.",
+  },
 ];
 
 export function TracksDecisions() {
