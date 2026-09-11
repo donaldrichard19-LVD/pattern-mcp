@@ -13,6 +13,7 @@
 
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInterface, type Interface } from "node:readline";
@@ -361,4 +362,77 @@ export async function runInit(root: string, options: InitOptions): Promise<void>
   }
 
   console.log("\nDone. Review the changes with `git status` / `git diff`, then commit when ready.");
+}
+
+// Option B from BACKLOG.md's "Enforcement boundary setup" entry: piggyback
+// on the moment someone's already setting Pattern up, rather than leaving
+// enforcement as something only the README mentions. Called once from
+// index.ts's main(), right alongside printTelemetryNoticeOnce, before the
+// stdio transport connects.
+//
+// The literal original phrasing of this option ("extend the first-run
+// notice into a [y/N] prompt") turns out not to be safely buildable as
+// written: stdin is the live JSON-RPC channel a real MCP client uses to
+// talk to this process (see telemetry.ts's printTelemetryNoticeOnce for
+// the same constraint, stated first). Blocking it on a keypress here would
+// fight the protocol handshake, not show a dialog. So this does two
+// different things depending on how stdin is actually connected:
+//
+//  - Always (any context, including a real client subprocess): print a
+//    one-time, non-blocking mention that the enforcement boundary exists
+//    and how to set it up. Same "print once, gated by a marker file"
+//    pattern as the telemetry notice, deliberately a separate marker/
+//    message so the two stay independently legible in a terminal.
+//  - Only when process.stdin.isTTY is true -- which a real MCP client's
+//    spawned subprocess never has, since it always pipes stdio to speak
+//    JSON-RPC over it, but a human running `npx pattern-mcp` bare in
+//    their own terminal does -- also offer a real interactive prompt,
+//    reusing runInit itself rather than duplicating its logic.
+const ENFORCEMENT_NOTICE_PATH =
+  process.env.PATTERN_ENFORCEMENT_NOTICE_PATH ?? join(homedir(), ".pattern", "enforcement_notice_shown");
+
+export async function offerEnforcementSetupOnce(root: string): Promise<void> {
+  if (process.env.PATTERN_NO_ENFORCEMENT_NOTICE) return;
+
+  try {
+    readFileSync(ENFORCEMENT_NOTICE_PATH, "utf8");
+    return; // Already shown -- never repeat, same discipline as the telemetry notice.
+  } catch {
+    // No marker yet -- fall through and show it.
+  }
+
+  console.error(
+    [
+      "",
+      "Pattern -- enforcement boundary available (this will not print again)",
+      "By default, Pattern is something the calling agent chooses to use.",
+      "An opt-in hook + CI check can require it instead: run `npx pattern-check-gate init`",
+      "in your repo to set it up.",
+      "Full details: https://github.com/donaldrichard19-LVD/pattern-mcp#enforcement-boundary-hook--ci-gate",
+      "",
+    ].join("\n"),
+  );
+
+  try {
+    mkdirSync(dirname(ENFORCEMENT_NOTICE_PATH), { recursive: true });
+    writeFileSync(ENFORCEMENT_NOTICE_PATH, new Date().toISOString(), "utf8");
+  } catch {
+    // Couldn't persist the marker -- worst case this prints again next
+    // run. Never blocks startup over it, same as the telemetry notice.
+  }
+
+  if (!process.stdin.isTTY) return;
+
+  try {
+    const setUpNow = await confirm("Set it up now?", { yes: false }, false);
+    if (setUpNow) {
+      await runInit(root, { yes: false }); // closes the shared readline itself, in its own finally block
+    }
+  } finally {
+    // closeRl() is safe to call even if runInit already closed it (checks
+    // rl?.close() and no-ops on null) -- this just guarantees stdin is
+    // always released back before main() connects the stdio transport,
+    // whether the answer was no or runInit already cleaned up after itself.
+    closeRl();
+  }
 }

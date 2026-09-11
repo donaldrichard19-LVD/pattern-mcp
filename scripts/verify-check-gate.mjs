@@ -461,6 +461,102 @@ console.log("17. pattern-check-gate init: interactive (non---yes) prompt sequenc
   rmSync(root, { recursive: true, force: true });
 }
 
+console.log("18. offerEnforcementSetupOnce (Option B): non-TTY never prompts");
+{
+  // Isolated as a real subprocess, not run in-process -- ENFORCEMENT_NOTICE_PATH
+  // is a module-level const read once at import time (same pattern as
+  // TELEMETRY_NOTICE_PATH), so setting the env var *after* this script's own
+  // top-level import of init-enforcement.js has already run has no effect on
+  // it. Found exactly this the hard way: an earlier in-process version of
+  // this test silently checked the real default ~/.pattern path the whole
+  // time. A fresh subprocess with the env var set before Node even starts
+  // is what actually exercises the intended isolated path, matching how
+  // every other test below already spawns dist/check-gate.js.
+  const root = mkdtempSync(join(tmpdir(), "pattern-check-gate-test-"));
+  const markerPath = join(root, "enforcement_notice_marker");
+  const scriptPath = join(tmpdir(), "pattern-notice-test.mjs");
+  const modulePath = fileURLToPath(new URL("../dist/init-enforcement.js", import.meta.url));
+  writeFileSync(
+    scriptPath,
+    [
+      'process.env.PATTERN_NO_AUTOSTART = "1";',
+      "process.stdin.isTTY = false;",
+      `const { offerEnforcementSetupOnce } = await import(${JSON.stringify(modulePath)});`,
+      `await offerEnforcementSetupOnce(${JSON.stringify(root)});`,
+      'console.log("CALL_ONE_DONE");',
+      `await offerEnforcementSetupOnce(${JSON.stringify(root)});`,
+      'console.log("CALL_TWO_DONE");',
+    ].join("\n"),
+    "utf8",
+  );
+
+  const result = spawnSync("node", [scriptPath], {
+    encoding: "utf8",
+    timeout: 5000,
+    env: { ...process.env, PATTERN_ENFORCEMENT_NOTICE_PATH: markerPath },
+  });
+
+  check("both calls complete without hanging", result.stdout.includes("CALL_TWO_DONE"));
+  const noticeCount = (result.stderr.match(/enforcement boundary available/g) || []).length;
+  check("notice printed on the first call", noticeCount >= 1);
+  check("notice not printed again on the second call (marker already exists)", noticeCount === 1);
+  check("marker file was written", existsSync(markerPath));
+
+  rmSync(scriptPath, { force: true });
+  rmSync(root, { recursive: true, force: true });
+}
+
+console.log("19. offerEnforcementSetupOnce: PATTERN_NO_ENFORCEMENT_NOTICE skips entirely");
+{
+  const root = mkdtempSync(join(tmpdir(), "pattern-check-gate-test-"));
+  const markerPath = join(root, "enforcement_notice_marker");
+  const scriptPath = join(tmpdir(), "pattern-notice-skip-test.mjs");
+  const modulePath = fileURLToPath(new URL("../dist/init-enforcement.js", import.meta.url));
+  writeFileSync(
+    scriptPath,
+    [
+      'process.env.PATTERN_NO_AUTOSTART = "1";',
+      "process.stdin.isTTY = false;",
+      `const { offerEnforcementSetupOnce } = await import(${JSON.stringify(modulePath)});`,
+      `await offerEnforcementSetupOnce(${JSON.stringify(root)});`,
+      'console.log("DONE");',
+    ].join("\n"),
+    "utf8",
+  );
+
+  const result = spawnSync("node", [scriptPath], {
+    encoding: "utf8",
+    timeout: 5000,
+    env: { ...process.env, PATTERN_ENFORCEMENT_NOTICE_PATH: markerPath, PATTERN_NO_ENFORCEMENT_NOTICE: "1" },
+  });
+
+  check("completes without hanging", result.stdout.includes("DONE"));
+  check("no notice printed when PATTERN_NO_ENFORCEMENT_NOTICE is set", !result.stderr.includes("enforcement boundary available"));
+  check("no marker file written either", !existsSync(markerPath));
+
+  rmSync(scriptPath, { force: true });
+  rmSync(root, { recursive: true, force: true });
+}
+
+// 20. offerEnforcementSetupOnce: the TTY-gated interactive branch
+// (process.stdin.isTTY === true) is deliberately NOT covered by an
+// automated test here. Tried it: forcing process.stdin.isTTY = true and
+// manually .push()-ing answers onto process.stdin in a plain Node script
+// is not a faithful simulation of a real terminal in this environment --
+// the real fd behind process.stdin isn't actually a TTY, so overriding
+// just the .isTTY property produces non-deterministic results (passed
+// once, then failed, then hung past a 15s timeout on later reruns of the
+// literal same script). That's a property of the test technique, not
+// evidence of a bug: the interactive branch calls the exact same
+// confirm()/runInit() functions already exercised deterministically by
+// tests 11-17 above, via genuine piped stdin (spawnSync's real `input`
+// option, not a manual .push() simulation) -- multi-line sequential
+// prompting through those same functions is already proven reliable
+// there. The only new, untested logic Option B adds is the boolean TTY
+// gate and the call wiring around it, which was verified manually
+// (both accepted and declined, full trace inspected) before being left
+// out of the permanent suite rather than shipping a flaky test.
+
 function runInit(root, extraArgs, stdin) {
   const cliPath = fileURLToPath(new URL("../dist/check-gate.js", import.meta.url));
   return spawnSync("node", [cliPath, "init", "--project-root", root, ...extraArgs], {

@@ -50,6 +50,7 @@ import {
   shutdownTelemetry,
   TELEMETRY_ENABLED,
 } from "./telemetry.js";
+import { offerEnforcementSetupOnce } from "./init-enforcement.js";
 
 export const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 // Only required for org-scoped keys (not tied to one workspace); unset for
@@ -4623,6 +4624,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
 async function main() {
   printTelemetryNoticeOnce();
+  // Piggybacks on this same first-run moment (Option B, see
+  // init-enforcement.ts) -- always prints a one-time, non-blocking mention;
+  // only prompts interactively when stdin is a real TTY, never when a real
+  // MCP client has piped stdio into this process for JSON-RPC. Always
+  // returns before the transport below claims stdin.
+  await offerEnforcementSetupOnce(PROJECT_ROOT);
   const transport = new StdioServerTransport();
   await server.connect(transport);
   // Best-effort telemetry drain on clean shutdown -- no-op when telemetry
