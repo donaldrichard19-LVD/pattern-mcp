@@ -58,6 +58,27 @@ export function ReferralBanner({ code, onDismiss }) {
 
 const TRIVIAL_SOURCE = `export const Spacer = () => <div className="h-4" />;\n`;
 
+// Regression fixture: the exact real component (14 non-blank lines) that
+// slipped through ungated during end-to-end testing on coop-commerce on
+// 2026-09-11, when MIN_NON_BLANK_LINES was 15. Locks in the fix that
+// removed the line-count floor's role as a "trivial" exemption -- see
+// component-gate.ts's comment on MIN_NON_BLANK_LINES.
+const REGRESSION_SLIPPED_THROUGH_SOURCE = `export default function UngatedWidget({ label, count }) {
+  return (
+    <div className="flex items-center justify-between rounded-lg border p-3">
+      <span className="text-sm font-medium">{label}</span>
+      <span className="text-sm text-[var(--color-text-muted)]">{count}</span>
+      <div className="mt-1 h-1 w-full rounded bg-[var(--color-border)]">
+        <div
+          className="h-1 rounded bg-[var(--color-tint)]"
+          style={{ width: \`\${Math.min(100, count)}%\` }}
+        />
+      </div>
+    </div>
+  )
+}
+`;
+
 console.log("1. isGatedComponentFile classifier");
 {
   check("gates a new, non-trivial .tsx component", isGatedComponentFile("src/ReferralBanner.tsx", GATED_COMPONENT_SOURCE, true));
@@ -65,6 +86,10 @@ console.log("1. isGatedComponentFile classifier");
   check("does not gate a trivial one-liner", !isGatedComponentFile("src/Spacer.tsx", TRIVIAL_SOURCE, true));
   check("does not gate a non-.tsx/.jsx file", !isGatedComponentFile("src/util.ts", GATED_COMPONENT_SOURCE, true));
   check("does not gate a file with no component export", !isGatedComponentFile("src/data.tsx", "export const items = [1,2,3];\n".repeat(20), true));
+  check(
+    "regression: the 14-line component that slipped through the old 15-line floor is now gated",
+    isGatedComponentFile("src/components/common/UngatedWidget.jsx", REGRESSION_SLIPPED_THROUGH_SOURCE, true),
+  );
 }
 
 console.log("2. parseManualOverride");

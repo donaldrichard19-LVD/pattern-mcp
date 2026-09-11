@@ -11,12 +11,20 @@
 
 const GATED_EXTENSIONS = new Set([".tsx", ".jsx"]);
 
-// Deliberately generous floor: this only needs to exclude obviously
-// trivial files (a one-line re-export, a tiny wrapper). The same "is this
-// non-trivial" judgment SKILL.md already leaves to the calling agent's
-// discretion isn't solvable more precisely here without re-implementing
-// Pattern's own requirement-extraction step.
-const MIN_NON_BLANK_LINES = 15;
+// Deliberately NOT a "non-trivial" threshold -- an earlier version used
+// 15 here specifically to auto-exempt "trivial" files, and a real,
+// 14-non-blank-line component (a labeled progress-bar widget) slipped
+// through ungated in end-to-end testing on 2026-09-11 as a direct result.
+// Any fixed line-count threshold used as an exemption has this problem by
+// construction: there's always a real component sitting just under
+// whatever number you pick, and tuning the number only moves the
+// boundary to a different real component, it doesn't close the class of
+// bug. This floor exists ONLY to exclude degenerate non-components (a
+// bare re-export line, an empty file) -- genuine trivial-but-real
+// components are meant to go through the manual override instead
+// (parseManualOverride below), which requires a reason and still leaves
+// a visible, logged receipt, rather than being silently auto-exempted.
+const MIN_NON_BLANK_LINES = 3;
 
 const COMPONENT_EXPORT_PATTERN =
   /^export\s+(default\s+)?(function|class)\s+[A-Z]|^export\s+(default\s+)?const\s+[A-Z]\w*\s*[:=]/m;
