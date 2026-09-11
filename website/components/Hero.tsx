@@ -206,9 +206,9 @@ export function Hero() {
           >
             <Info size={16} style={{ flexShrink: 0, marginTop: 2, color: "var(--blue-500)" }} />
             <p style={{ ...BODY, margin: 0, fontSize: "var(--text-body-sm)", color: "var(--text-primary)" }}>
-              Pattern requires your own Anthropic API key from the Console, not a Claude subscription. Every call is
-              billed directly to your Anthropic account. Real costs have ranged from about half a cent to just over
-              a dollar, depending on how much analysis is needed. Most calls cost well under $0.30.
+              Pattern uses your own Anthropic API key, not a Claude subscription. Calls are billed directly to your
+              Anthropic account. Depending on how much analysis is needed, a call can cost anywhere from about half
+              a cent to just over $1, but most calls cost well under $0.30.
             </p>
           </div>
         </Reveal>
