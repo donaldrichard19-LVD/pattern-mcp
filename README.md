@@ -1637,6 +1637,31 @@ Run non-interactively with `--yes` (accepts every safe default; branch
 protection is never auto-confirmed even then -- it's the one step that
 reaches outside your local filesystem into real, shared GitHub config).
 
+**You don't have to find this section to learn this exists.** Every
+`npx pattern-mcp` run surfaces it at the same first-run moment as the
+[telemetry notice](#telemetry):
+
+- **Always**, in every context, including when a real MCP client has
+  spawned this as a subprocess: a one-time, non-blocking stderr mention
+  that the enforcement boundary exists and the command above sets it up.
+  Same "prints once, gated by a marker file" discipline as the telemetry
+  notice -- tracked at `~/.pattern/enforcement_notice_shown`
+  (`PATTERN_ENFORCEMENT_NOTICE_PATH` to override), never repeats after
+  that regardless of whether you act on it.
+- **Only when stdin is a real terminal** (`process.stdin.isTTY`) --
+  meaning a human ran `npx pattern-mcp` bare in their own shell, never
+  true for a real MCP client's spawned subprocess -- it also offers a
+  genuine interactive prompt right there: *"Set it up now?"* A yes runs
+  the exact same `init` flow described above. The same JSON-RPC-channel
+  constraint that rules out an interactive telemetry prompt (see
+  [Telemetry](#telemetry)) applies here too, which is why this only ever
+  asks when nothing is piping protocol messages into stdin to begin
+  with.
+
+Set `PATTERN_NO_ENFORCEMENT_NOTICE` to suppress both halves. See
+`offerEnforcementSetupOnce` in `src/init-enforcement.ts` for the
+implementation.
+
 **Or set it up by hand**, two pieces, neither installed automatically:
 
 - **`.claude/settings.json`** wired to run `npx --yes
@@ -1773,7 +1798,9 @@ whether you act on it. There's no interactive y/n prompt: Pattern's stdin
 is the MCP JSON-RPC channel the client uses to talk to it, so blocking on
 stdin for a keypress would fight the protocol handshake instead of
 showing a dialog -- a stderr notice is the safe equivalent for a stdio
-MCP server.
+MCP server. The same first-run moment also surfaces the enforcement
+boundary, with the same constraint handled the same way -- see
+[Enforcement boundary: hook + CI gate](#enforcement-boundary-hook--ci-gate).
 
 **Why it exists.** Three things about real usage can't be answered from
 this repo alone: whether people actually come back and use Pattern on a
