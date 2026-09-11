@@ -11,6 +11,10 @@ const DO = [
     t: "A project with its own design system",
     d: "Register it once with register_design_system and every later call scores only against those components — not shadcn/ui, 21st.dev, or ReUI",
   },
+  {
+    t: "Make the check mandatory when you're ready",
+    d: "Once you trust recommend_component's judgment, pattern-check-gate init turns it from a suggestion into a required step: a hook that blocks the write, with a CI check as backup.",
+  },
 ];
 
 const AVOID = [
@@ -22,6 +26,10 @@ const AVOID = [
   {
     t: "Auto-running the returned install_command",
     d: "It's text a search result produced, not a verified package registry lookup. Always show it and get explicit confirmation before running it.",
+  },
+  {
+    t: "Turning on enforcement first",
+    d: "The enforcement boundary works best once you trust Pattern's judgment. Try recommend_component on its own first, then add enforcement when you're ready.",
   },
 ];
 

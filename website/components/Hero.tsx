@@ -34,6 +34,7 @@ const VERDICT_LINES = [
 ];
 
 const INSTALL_LINES = ["npx pattern-mcp"];
+const ENFORCEMENT_INIT_LINES = ["npx pattern-check-gate init"];
 
 const AGENT_PROMPT =
   "Use recommend_component before picking a UI component: pass the specific need, my domain, and framework, then act on the verdict. Install what it recommends, or build from the reference it returns";
@@ -115,10 +116,11 @@ export function Hero() {
         </Reveal>
         <Reveal delay={120}>
           <p style={{ ...BODY, maxWidth: 700, fontSize: "var(--text-body-lg)" }}>
-            Instead of relying on the agent to interpret and follow instructions, Pattern turns design guidance into
-            a checkable process. It evaluates UI components from external libraries or your own design system
-            against a requirements checklist, then tells the agent whether to use an existing component or build one
-            from scratch using a concrete design reference.
+            Pattern evaluates UI components from external libraries or your own design system against a
+            requirements checklist. It then tells the agent whether to use an existing component or build one from
+            a concrete design reference. An opt-in enforcement boundary can require that check before a new
+            component gets written, instead of leaving it up to the agent. Every decision also leaves a receipt
+            showing what was checked, how it scored, and what it cost.
           </p>
         </Reveal>
         <Reveal delay={160}>
@@ -173,7 +175,23 @@ export function Hero() {
             </div>
           </div>
         </Reveal>
-        <Reveal delay={300}>
+        <Reveal delay={280}>
+          <h2 style={H2}>Enforcement (optional)</h2>
+        </Reveal>
+        <Reveal delay={310}>
+          <div className="pt-cols-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, alignItems: "start" }}>
+            <CopyBlock label="enforcement setup" lines={ENFORCEMENT_INIT_LINES} />
+            <div style={{ ...PANEL, padding: 14 }}>
+              <p style={{ ...BODY, margin: 0, fontSize: "var(--text-body-sm)", color: "var(--text-secondary)" }}>
+                By default, the agent decides when to call Pattern. pattern-check-gate init removes that dependency
+                by setting up an enforcement boundary: a local hook blocks a new component from being written until
+                Pattern has judged it, and a CI check fails the pull request if that decision wasn&apos;t recorded.
+                It&apos;s opt-in, so nothing changes until you set it up.
+              </p>
+            </div>
+          </div>
+        </Reveal>
+        <Reveal delay={340}>
           <div
             style={{
               display: "flex",
@@ -187,8 +205,9 @@ export function Hero() {
           >
             <Info size={16} style={{ flexShrink: 0, marginTop: 2, color: "var(--blue-500)" }} />
             <p style={{ ...BODY, margin: 0, fontSize: "var(--text-body-sm)", color: "var(--text-primary)" }}>
-              Requires your own Anthropic API key from the Console, not a Claude subscription. Every call bills your account
-              directly, roughly $0.06 to $0.30 per call depending on whether the boundary-risk ensemble triggers.
+              Pattern requires your own Anthropic API key from the Console, not a Claude subscription. Every call is
+              billed directly to your Anthropic account. Real costs have ranged from about half a cent to just over
+              a dollar, depending on how much analysis is needed. Most calls cost well under $0.30.
             </p>
           </div>
         </Reveal>

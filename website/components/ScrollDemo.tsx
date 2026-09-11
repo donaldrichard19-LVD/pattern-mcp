@@ -54,6 +54,14 @@ const BEATS = [
     ],
     label: "record_component_decision",
   },
+  {
+    title: "The check can be required, not just suggested",
+    body: [
+      "By default, Pattern is something the agent chooses to use.",
+      "With the enforcement boundary turned on, a new component can't be written until Pattern has made a decision. A paired CI check provides a second layer of protection and fails the pull request if the decision receipt isn't there, even if the local hook was skipped.",
+    ],
+    label: "pattern-check-gate",
+  },
 ];
 
 function beatParagraphs(body: string | string[]): string[] {
@@ -110,6 +118,12 @@ function rowsForBeat(beat: number): Row[] {
     rows.push({ k: "call", text: 'record_component_decision({ project_id: "my-booking-app", action: "custom_built" })' });
     rows.push({ k: "ok", text: "past_decision_signal.considered: true" });
   }
+  if (beat === 6) {
+    rows.push({ k: "call", text: "Write(src/components/PriceBreakdown.tsx)" });
+    rows.push({ k: "warn", text: "blocked: no Pattern decision for this file" });
+    rows.push({ k: "call", text: 'recommend_component({ file_path: "src/components/PriceBreakdown.tsx", … })' });
+    rows.push({ k: "ok", text: "write allowed · receipt written to .pattern/receipts/" });
+  }
   return rows;
 }
 
@@ -161,6 +175,7 @@ function VerdictPanel({ beat, sub, compact }: { beat: number; sub: number; compa
       {beat === 3 && <Chip tone="warning">custom_build · high</Chip>}
       {beat === 4 && <Chip>skip_list · $0</Chip>}
       {beat === 5 && <Chip tone="accent">memory · signal only</Chip>}
+      {beat === 6 && <Chip tone="warning">blocked → allowed</Chip>}
       {beat < 2 && <Chip tone="accent">scoring</Chip>}
     </div>
   );
@@ -257,6 +272,20 @@ function VerdictPanel({ beat, sub, compact }: { beat: number; sub: number; compa
               <p style={{ ...BODY, fontSize: "var(--text-body-sm)" }}>
                 Local plaintext, capped at the 50 most recent entries per project. Only decisions you confirm land here. A verdict you ignored leaves no
                 trace.
+              </p>
+            )}
+          </div>
+        )}
+        {beat === 6 && (
+          <div style={{ display: "grid", gap: 10 }}>
+            <p style={{ ...BODY, fontSize: "var(--text-body-sm)" }}>
+              No matching decision found for this file, so the write is blocked until recommend_component records
+              one.
+            </p>
+            {!compact && (
+              <p style={{ ...BODY, fontSize: "var(--text-body-sm)" }}>
+                A paired GitHub Action provides the same protection in CI. If the receipt isn&apos;t committed, the
+                pull request fails, even if the local hook was skipped or disabled.
               </p>
             )}
           </div>

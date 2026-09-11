@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, CircleSlash, Link as LinkIcon, Receipt, Scale, ShieldCheck } from "lucide-react";
+import { Activity, CircleSlash, Link as LinkIcon, Lock, Receipt, Scale, ShieldCheck } from "lucide-react";
 import type { ReactNode } from "react";
 import { BODY, H2, SECTION } from "./tokens";
 import { Reveal } from "./ui";
@@ -53,6 +53,14 @@ const CAPS: { icon: ReactNode; h: string; p: [string, string] | [string, string,
     p: [
       "When scoring against your own registered design system, a missed match is a reading mistake, not a search coming up empty.",
       "A free, automatic check compares the request against every registered candidate's real name, props, and description, and flags any it shares real overlap with — so a wrong \"build it from scratch\" doesn't pass by silently.",
+    ],
+  },
+  {
+    icon: <Lock size={18} />,
+    h: "The check can't be skipped",
+    p: [
+      "Pattern's safeguards only work when the agent calls Pattern first. Without enforcement, the agent can simply skip that step.",
+      "The enforcement boundary changes that. A local hook can block a new component from being written until a matching decision exists, while a paired CI check catches anything that gets through. The decision becomes required, not just documented.",
     ],
   },
 ];

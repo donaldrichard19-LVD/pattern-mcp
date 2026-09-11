@@ -165,6 +165,15 @@ const CONFIG_ROWS: Row[] = [
   ["GITHUB_TOKEN", "required for post_ledger_provenance_to_github", "Personal access token, repo scope. Not needed for any other tool"],
   ["PATTERN_SNAPSHOT_BACKFILL_PATH", "~/.pattern/snapshot_backfill.jsonl", "Every backfill_ledger_snapshot_ref attempt, including failures"],
   ["PATTERN_DESIGN_SYSTEMS_PATH", "~/.pattern/design_systems.json", "Registered design systems, one per project_id, local only"],
+  ["PATTERN_PROJECT_ID", "auto-derived", "Overrides the enforcement hook's project ID. If you don't set it, Pattern derives one from your package.json, Git remote, or directory name."],
+  ["PATTERN_NO_ENFORCEMENT_HOOK", "unset", "Turns off the local enforcement hook without affecting the CI check."],
+];
+
+const ENFORCEMENT_CLI_ROWS: [string, string][] = [
+  ["pattern-check-gate write", "Run by the local hook. Blocks a new component from being written until a matching Pattern decision exists."],
+  ["pattern-check-gate verify", "Run in CI. Fails the check if a committed receipt is missing for a new component."],
+  ["pattern-check-gate init", "Sets up the enforcement boundary by configuring the local hook and CI workflow. It can also configure GitHub branch protection."],
+  ["pattern-check-gate-hook", "The Claude Code PreToolUse adapter that connects the local hook to Pattern. init sets it up automatically."],
 ];
 
 type Group = "Make the judgment call" | "Track cost and outcome" | "Verify and export later";
@@ -418,6 +427,65 @@ function ConfigTable() {
   );
 }
 
+function EnforcementCliTable() {
+  return (
+    <div className="pt-scroll-x" style={{ border: "1px solid var(--border-subtle)", borderRadius: 12, background: "#fff", overflow: "auto" }}>
+      <table className="pt-table" style={{ borderCollapse: "collapse", width: "100%", minWidth: 560, fontSize: "var(--text-body-sm)" }}>
+        <thead>
+          <tr>
+            {["Command", "What it does"].map((h) => (
+              <th
+                key={h}
+                style={{
+                  ...LABEL,
+                  textAlign: "left",
+                  padding: "10px 14px",
+                  borderBottom: "1px solid var(--border-subtle)",
+                  background: "var(--surface-sunken)",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {h}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {ENFORCEMENT_CLI_ROWS.map(([command, description], ri) => (
+            <tr key={command}>
+              <td
+                style={{
+                  padding: "11px 14px",
+                  verticalAlign: "top",
+                  lineHeight: "var(--leading-body)",
+                  borderTop: ri === 0 ? "none" : "1px solid var(--border-subtle)",
+                  color: "var(--text-primary)",
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 11.5,
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {command}
+              </td>
+              <td
+                style={{
+                  padding: "11px 14px",
+                  verticalAlign: "top",
+                  lineHeight: "var(--leading-body)",
+                  borderTop: ri === 0 ? "none" : "1px solid var(--border-subtle)",
+                  color: "var(--text-secondary)",
+                }}
+              >
+                {description}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export function Reference() {
   const [filter, setFilter] = useState("");
   const [activeGroups, setActiveGroups] = useState<Set<Group>>(new Set());
@@ -456,8 +524,9 @@ export function Reference() {
             <h2 style={{ ...H2, margin: 0 }}>Reference</h2>
           </div>
           <p style={{ margin: "0 0 24px", fontSize: "var(--text-body-md)", lineHeight: "var(--leading-body)", color: "var(--text-secondary)", maxWidth: "70ch" }}>
-            Twelve tools in three groups: the judgment call itself, tracking what it cost and what happened, and
-            verifying or exporting old decisions later.
+            Twelve MCP tools in three groups: making the judgment call, tracking what it cost and what happened, and
+            verifying or exporting past decisions. A separate CLI, pattern-check-gate, turns the judgment call into
+            an enforcement boundary.
           </p>
         </Reveal>
 
@@ -553,6 +622,13 @@ export function Reference() {
           <div style={{ display: "grid", gap: 12, marginTop: 40 }}>
             <div style={LABEL}>Configuration</div>
             <ConfigTable />
+          </div>
+        </Reveal>
+
+        <Reveal delay={120}>
+          <div style={{ display: "grid", gap: 12, marginTop: 40 }}>
+            <div style={LABEL}>Enforcement CLI</div>
+            <EnforcementCliTable />
           </div>
         </Reveal>
       </div>
