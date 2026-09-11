@@ -1604,19 +1604,54 @@ Claude-Code-specific for the hook half; a consuming repo that never wires
 either piece up gets Pattern exactly as it worked before, and any other
 MCP host (Cursor, Codex, etc.) is entirely unaffected either way.
 
-Two pieces, both templates under `templates/` -- pattern-mcp never
-installs either into your repo on its own:
+**Set it up with one command:**
 
-- **`templates/hooks/check-gate-hook.mjs`** + **`templates/claude-settings/settings.json`**
-  -- a Claude Code `PreToolUse` hook that runs on `Write`/`Edit` calls. For
-  a genuinely new `.tsx`/`.jsx` file that exports a non-trivial component,
-  it looks up a ledger entry (via `~/.pattern/ledger.jsonl`, same as
-  everywhere else in Pattern) whose `file_path` matches the file being
-  written. A match writes a receipt and allows the write; no match blocks
-  it with a reason fed back to the model as retryable guidance, not a hard
-  failure. **This is the one new exception where Pattern writes into your
-  repo** (`.pattern/receipts/<feature_id>.json`) -- everything else
-  described in this README is read-only.
+```bash
+npx pattern-check-gate init
+```
+
+Confirms each step independently rather than one blanket "proceed?", and
+never auto-commits -- review with `git status`/`git diff` and commit
+yourself when ready:
+
+1. Confirms a project id (pre-filled from `package.json`'s `name`, or
+   your git remote/directory name -- accept it or type your own).
+2. Writes or merges `.claude/settings.json` -- if one already exists, it
+   parses it, leaves any unrelated hooks untouched, and only appends the
+   `PreToolUse` entry if it isn't already there (safe to rerun).
+3. Writes `.github/workflows/pattern-gate.yml`, if a GitHub remote is
+   detected and the file doesn't already exist with different content
+   (never silently overwritten).
+4. Asks, as its own explicit yes/no: **mark the check required in branch
+   protection?** Needs `gh` installed and authenticated with admin rights
+   on the repo; skips with clear next steps otherwise. Deliberately only
+   offered when no branch protection exists yet on the default branch --
+   GitHub's branch-protection API replaces the *entire* configuration on
+   write, not just the required-checks list, so this refuses to guess at
+   merging into whatever you already have rather than risk silently
+   dropping an unrelated setting (e.g. required PR reviews). If
+   protection already exists, add `pattern-gate` to it by hand instead.
+
+Run non-interactively with `--yes` (accepts every safe default; branch
+protection is never auto-confirmed even then -- it's the one step that
+reaches outside your local filesystem into real, shared GitHub config).
+
+**Or set it up by hand**, two pieces, neither installed automatically:
+
+- **`.claude/settings.json`** wired to run `npx --yes
+  pattern-check-gate-hook` on `PreToolUse` (see
+  `templates/claude-settings/settings.json` for the exact shape) -- a
+  Claude Code hook that runs on `Write`/`Edit` calls. For a genuinely new
+  `.tsx`/`.jsx` file that exports a non-trivial component, it looks up a
+  ledger entry (via `~/.pattern/ledger.jsonl`, same as everywhere else in
+  Pattern) whose `file_path` matches the file being written. A match
+  writes a receipt and allows the write; no match blocks it with a reason
+  fed back to the model as retryable guidance, not a hard failure.
+  **This is the one new exception where Pattern writes into your repo**
+  (`.pattern/receipts/<feature_id>.json`) -- everything else described in
+  this README is read-only. `project_id` no longer needs to be set by
+  hand either -- it's derived the same way `init` pre-fills it (see
+  `src/project-id.ts`); set `PATTERN_PROJECT_ID` only to override that.
 - **`templates/github-workflows/pattern-gate.yml`** -- a required PR
   check that reads the same receipt files back out of the diff. It never
   touches `~/.pattern/` (not reachable from a CI runner) and needs no
@@ -1633,11 +1668,11 @@ An escape hatch exists for both a whole-hook kill switch
 check) and a per-file override (a `// pattern-mcp:override reason="..."`
 comment) -- the override still writes a receipt recording
 `manual_override: true` and the reason, so it stays visible rather than
-silent. See `src/component-gate.ts`, `src/gate-receipt.ts`, and
-`src/check-gate.ts` (the new `pattern-check-gate` CLI, this project's
-first entry point separate from the stdio MCP server) for the
-implementation, and BACKLOG.md's "Enforcement boundary: hook + CI gate"
-entry for the fuller design writeup.
+silent. See `src/component-gate.ts`, `src/gate-receipt.ts`,
+`src/check-gate.ts` (the `pattern-check-gate` CLI, this project's first
+entry point separate from the stdio MCP server), `src/check-gate-hook.ts`,
+and `src/init-enforcement.ts` for the implementation, and BACKLOG.md's
+"Enforcement boundary" entries for the fuller design writeup.
 
 ## Per-project decision memory
 

@@ -6,7 +6,8 @@
   "main": "dist/index.js",
   "bin": {
     "pattern-mcp": "dist/index.js",
-    "pattern-check-gate": "dist/check-gate.js"
+    "pattern-check-gate": "dist/check-gate.js",
+    "pattern-check-gate-hook": "dist/check-gate-hook.js"
   },
   "author": "Don Richard",
   "license": "MIT",

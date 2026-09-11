@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "env PATTERN_PROJECT_ID=your-project-id node ./node_modules/pattern-mcp/templates/hooks/check-gate-hook.mjs",
+            "command": "npx --yes pattern-check-gate-hook",
             "timeout": 60
           }
         ]

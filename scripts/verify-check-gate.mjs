@@ -23,6 +23,7 @@ const { isGatedComponentFile, parseManualOverride } = await import("../dist/comp
 const { assertGateReceiptShape, writeGateReceipt, readAllGateReceipts, deriveOverrideFeatureId } = await import(
   "../dist/gate-receipt.js"
 );
+const { deriveProjectId } = await import("../dist/project-id.js");
 
 let failures = 0;
 function check(label, condition) {
@@ -282,6 +283,192 @@ console.log("8. check-gate CLI: verify mode against a committed receipt");
   check("ungated_files lists the file", (failParsed.ungated_files ?? []).includes("src/ReferralBanner.tsx"));
 
   rmSync(root, { recursive: true, force: true });
+}
+
+console.log("9. deriveProjectId (Option A)");
+{
+  const root = mkdtempSync(join(tmpdir(), "pattern-check-gate-test-"));
+  writeFileSync(join(root, "package.json"), JSON.stringify({ name: "my-pkg-name" }), "utf8");
+  check("uses package.json's name when present", deriveProjectId(root) === "my-pkg-name");
+  rmSync(root, { recursive: true, force: true });
+}
+{
+  const root = mkdtempSync(join(tmpdir(), "pattern-check-gate-test-"));
+  spawnSync("git", ["init", "-q"], { cwd: root });
+  spawnSync("git", ["remote", "add", "origin", "https://github.com/some-owner/some-repo.git"], { cwd: root });
+  check("falls back to the git remote's repo name when no package.json", deriveProjectId(root) === "some-repo");
+  rmSync(root, { recursive: true, force: true });
+}
+{
+  const root = mkdtempSync(join(tmpdir(), "pattern-check-gate-test-"));
+  check("falls back to the directory name when neither exists", deriveProjectId(root) === root.split("/").pop());
+  rmSync(root, { recursive: true, force: true });
+}
+
+console.log("10. check-gate CLI: write mode without --project-id auto-derives it");
+{
+  const root = mkdtempSync(join(tmpdir(), "pattern-check-gate-test-"));
+  const ledgerPath = join(root, "test-ledger.jsonl");
+  writeFileSync(join(root, "package.json"), JSON.stringify({ name: "auto-derived-project" }), "utf8");
+  writeFileSync(
+    ledgerPath,
+    JSON.stringify({
+      id: "entry-auto",
+      timestamp: new Date().toISOString(),
+      project_id: "auto-derived-project",
+      feature_id: "feat-auto",
+      component_need: "referral banner",
+      domain: "web",
+      framework: "react",
+      checklist: [],
+      checklist_source: "extracted",
+      candidates_evaluated: [],
+      verdict: "use_existing",
+      chosen_candidate: "shadcn/ui alert",
+      confidence: "high",
+      reason: "scored",
+      coverage: "8/8",
+      cost_usd: 0.02,
+      cache_hit: false,
+      project_conventions_snapshot: null,
+      file_path: "src/ReferralBanner.tsx",
+      snapshot_ref: null,
+      last_verified_live: null,
+      live_status: "unknown",
+      reconstructed_snapshot_ref: null,
+    }) + "\n",
+    "utf8",
+  );
+  const result = runCheckGate(
+    ["write", "--file", "src/ReferralBanner.tsx", "--is-new", "--project-root", root],
+    GATED_COMPONENT_SOURCE,
+    { PATTERN_LEDGER_PATH: ledgerPath },
+  );
+  check("exits 0 when the derived project_id matches the ledger entry, with no --project-id passed", result.status === 0);
+  rmSync(root, { recursive: true, force: true });
+}
+
+console.log("11. pattern-check-gate init: fresh repo, no git, no existing settings");
+{
+  const root = mkdtempSync(join(tmpdir(), "pattern-check-gate-test-"));
+  const result = runInit(root, ["--yes"]);
+  check("init exits 0", result.status === 0);
+  const settingsPath = join(root, ".claude", "settings.json");
+  check("settings.json was created", existsSync(settingsPath));
+  const settings = JSON.parse(readFileSync(settingsPath, "utf8"));
+  const command = settings.hooks?.PreToolUse?.[0]?.hooks?.[0]?.command ?? "";
+  check("hook command references pattern-check-gate-hook", command.includes("pattern-check-gate-hook"));
+  check("no PATTERN_PROJECT_ID override when the derived id was accepted", !command.includes("PATTERN_PROJECT_ID"));
+  check("no workflow file written (no git remote to detect GitHub from)", !existsSync(join(root, ".github/workflows/pattern-gate.yml")));
+  rmSync(root, { recursive: true, force: true });
+}
+
+console.log("12. pattern-check-gate init: preserves unrelated existing hooks");
+{
+  const root = mkdtempSync(join(tmpdir(), "pattern-check-gate-test-"));
+  mkdirSync(join(root, ".claude"), { recursive: true });
+  const existing = { hooks: { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "echo unrelated" }] }] } };
+  writeFileSync(join(root, ".claude", "settings.json"), JSON.stringify(existing, null, 2), "utf8");
+
+  const result = runInit(root, ["--yes"]);
+  check("init exits 0", result.status === 0);
+  const settings = JSON.parse(readFileSync(join(root, ".claude", "settings.json"), "utf8"));
+  check("still has 2 PreToolUse entries (unrelated + ours)", settings.hooks.PreToolUse.length === 2);
+  check("unrelated hook entry untouched", settings.hooks.PreToolUse[0].hooks[0].command === "echo unrelated");
+  check("our hook entry appended", settings.hooks.PreToolUse[1].hooks[0].command.includes("pattern-check-gate-hook"));
+  rmSync(root, { recursive: true, force: true });
+}
+
+console.log("13. pattern-check-gate init: idempotent on rerun");
+{
+  const root = mkdtempSync(join(tmpdir(), "pattern-check-gate-test-"));
+  runInit(root, ["--yes"]);
+  runInit(root, ["--yes"]);
+  const settings = JSON.parse(readFileSync(join(root, ".claude", "settings.json"), "utf8"));
+  check("no duplicate hook entry after running init twice", settings.hooks.PreToolUse.length === 1);
+  rmSync(root, { recursive: true, force: true });
+}
+
+console.log("14. pattern-check-gate init: writes the workflow file for a GitHub-remote repo");
+{
+  const root = mkdtempSync(join(tmpdir(), "pattern-check-gate-test-"));
+  spawnSync("git", ["init", "-q"], { cwd: root });
+  spawnSync("git", ["remote", "add", "origin", "https://github.com/some-owner/some-repo.git"], { cwd: root });
+
+  const result = runInit(root, ["--yes"]);
+  check("init exits 0", result.status === 0);
+  const workflowPath = join(root, ".github", "workflows", "pattern-gate.yml");
+  check("workflow file was written", existsSync(workflowPath));
+  const templatePath = fileURLToPath(new URL("../templates/github-workflows/pattern-gate.yml", import.meta.url));
+  check("workflow file matches the template exactly", readFileSync(workflowPath, "utf8") === readFileSync(templatePath, "utf8"));
+  rmSync(root, { recursive: true, force: true });
+}
+
+console.log("15. pattern-check-gate init: never overwrites a conflicting workflow file, even with --yes");
+{
+  const root = mkdtempSync(join(tmpdir(), "pattern-check-gate-test-"));
+  spawnSync("git", ["init", "-q"], { cwd: root });
+  spawnSync("git", ["remote", "add", "origin", "https://github.com/some-owner/some-repo.git"], { cwd: root });
+  mkdirSync(join(root, ".github", "workflows"), { recursive: true });
+  writeFileSync(join(root, ".github", "workflows", "pattern-gate.yml"), "# a customized workflow, not ours\n", "utf8");
+
+  runInit(root, ["--yes"]);
+  const content = readFileSync(join(root, ".github", "workflows", "pattern-gate.yml"), "utf8");
+  check("conflicting workflow file left untouched under --yes (safe default is 'no')", content === "# a customized workflow, not ours\n");
+  rmSync(root, { recursive: true, force: true });
+}
+
+console.log("16. pattern-check-gate init: branch protection is never touched under --yes");
+{
+  const root = mkdtempSync(join(tmpdir(), "pattern-check-gate-test-"));
+  spawnSync("git", ["init", "-q"], { cwd: root });
+  spawnSync("git", ["remote", "add", "origin", "https://github.com/some-owner/some-repo.git"], { cwd: root });
+
+  const result = runInit(root, ["--yes"]);
+  check("init still exits 0 (branch protection step is a no-op under --yes, not a failure)", result.status === 0);
+  check(
+    "output does not claim branch protection was configured",
+    !/Required "pattern-gate" check added/.test(result.stdout),
+  );
+  rmSync(root, { recursive: true, force: true });
+}
+
+console.log("17. pattern-check-gate init: interactive (non---yes) prompt sequence, multiple piped answers");
+{
+  // Regression test for a real bug found in manual testing: readline's
+  // question()-per-prompt pattern loses piped stdin after the first
+  // question (Node logs "Detected unsettled top-level await" in
+  // isolation). init-enforcement.ts's askLine queue is the fix -- this
+  // locks it in so a future refactor can't silently reintroduce it. All
+  // 4 answers are piped up front in one write, exactly the shape that
+  // exposed the original bug (a real interactive TTY doesn't hit this,
+  // since each answer only arrives after its prompt is shown).
+  const root = mkdtempSync(join(tmpdir(), "pattern-check-gate-test-"));
+  spawnSync("git", ["init", "-q"], { cwd: root });
+  spawnSync("git", ["remote", "add", "origin", "https://github.com/some-owner/some-repo.git"], { cwd: root });
+
+  const result = runInit(root, [], "my-custom-id\ny\ny\nn\n");
+  check("init exits 0 after all 4 prompts are answered", result.status === 0);
+  check("prompted for project id", result.stdout.includes("Project id [some-repo]:"));
+  check("prompted to write settings.json", result.stdout.includes("Write this?"));
+  check("prompted for branch protection", result.stdout.includes("Mark the pattern-gate check as required"));
+  check("reached the final Done message (i.e. didn't hang on question 2+)", result.stdout.includes("\nDone."));
+
+  const settings = JSON.parse(readFileSync(join(root, ".claude", "settings.json"), "utf8"));
+  const command = settings.hooks.PreToolUse[0].hooks[0].command;
+  check("captured the typed project-id override, not the derived default", command.includes("PATTERN_PROJECT_ID='my-custom-id'"));
+  check("workflow file was written (second 'y' answer reached and processed)", existsSync(join(root, ".github/workflows/pattern-gate.yml")));
+  rmSync(root, { recursive: true, force: true });
+}
+
+function runInit(root, extraArgs, stdin) {
+  const cliPath = fileURLToPath(new URL("../dist/check-gate.js", import.meta.url));
+  return spawnSync("node", [cliPath, "init", "--project-root", root, ...extraArgs], {
+    input: stdin,
+    encoding: "utf8",
+    timeout: 10000,
+    env: { ...process.env, PATTERN_NO_AUTOSTART: "1" },
+  });
 }
 
 function runCheckGate(args, stdin, extraEnv = {}) {

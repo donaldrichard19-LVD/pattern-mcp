@@ -2,20 +2,27 @@
 // pattern-check-gate -- the enforcement-boundary CLI (see
 // BACKLOG.md's "Enforcement boundary: hook + CI gate" entry).
 //
-// Two modes, one shared classifier (component-gate.ts) so the local hook
-// and the CI check can never silently drift on what counts as "gated":
+// Three modes. write/verify share one classifier (component-gate.ts) so
+// the local hook and the CI check can never silently drift on what
+// counts as "gated":
 //
-//   write  -- run locally (by the PreToolUse hook template) where
+//   write  -- run locally (by check-gate-hook.ts) where
 //             ~/.pattern/ledger.jsonl is reachable. Looks up a ledger
 //             entry whose file_path matches the file being written; on a
 //             match (or a manual override), writes a receipt into the
 //             CONSUMING repo at .pattern/receipts/<feature_id>.json and
 //             exits 0. No match, no override -> exits 1 and blocks.
+//             --project-id is optional -- see project-id.ts (Option A).
 //
 //   verify -- run in CI, where ~/.pattern/ is never reachable. Trusts the
 //             committed receipt as the artifact of record instead of
 //             re-deriving anything from the ledger -- fails if a gated
 //             file in the diff has no matching receipt.
+//
+//   init   -- Option C: a guided setup that writes/merges
+//             .claude/settings.json and the workflow file, and can
+//             optionally configure branch protection via `gh`. See
+//             init-enforcement.ts; this file only dispatches to it.
 //
 // No CLI-parsing or git-wrapper dependency, matching this project's
 // existing minimal-dependency posture (index.ts shells out to fixed git
@@ -31,6 +38,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, relative, resolve as resolvePath } from "node:path";
 import { isGatedComponentFile, parseManualOverride } from "./component-gate.js";
 import { deriveOverrideFeatureId, GateReceipt, readAllGateReceipts, writeGateReceipt } from "./gate-receipt.js";
+import { deriveProjectId } from "./project-id.js";
+import { runInit } from "./init-enforcement.js";
 
 function normalize(p: string): string {
   return p.replace(/\\/g, "/").replace(/^\.\//, "");
@@ -90,10 +99,14 @@ function emit(result: Record<string, unknown>, ok: boolean): never {
 
 async function runWrite(root: string, flags: Record<string, string | true>): Promise<void> {
   const fileArg = flags.file;
-  const projectId = flags["project-id"];
-  if (typeof fileArg !== "string" || typeof projectId !== "string") {
-    emit({ ok: false, reason: "write mode requires --file <path> and --project-id <id>" }, false);
+  if (typeof fileArg !== "string") {
+    emit({ ok: false, reason: "write mode requires --file <path>" }, false);
   }
+  // Option A: --project-id is now optional -- derive it (package.json
+  // name, then git remote, then the directory name) rather than require
+  // every caller to know and pass it. An explicit --project-id always
+  // wins over the derivation.
+  const projectId = typeof flags["project-id"] === "string" ? (flags["project-id"] as string) : deriveProjectId(root);
   const relPath = toRepoRelative(root, fileArg as string);
   if (relPath === null) {
     emit({ ok: false, reason: `--file resolves outside project root: ${fileArg}` }, false);
@@ -119,7 +132,7 @@ async function runWrite(root: string, flags: Record<string, string | true>): Pro
   if (override.overridden) {
     const receipt: GateReceipt = {
       schema_version: 1,
-      feature_id: deriveOverrideFeatureId(projectId as string, relPath as string),
+      feature_id: deriveOverrideFeatureId(projectId, relPath as string),
       file_path: relPath as string,
       ledger_entry_id: null,
       verdict: null,
@@ -133,7 +146,7 @@ async function runWrite(root: string, flags: Record<string, string | true>): Pro
     emit({ ok: true, gated: true, manual_override: true, feature_id: receipt.feature_id }, true);
   }
 
-  const entries = readLedgerEntries(projectId as string);
+  const entries = readLedgerEntries(projectId);
   const match = entries.find((e) => e.file_path && normalize(e.file_path) === relPath);
 
   if (!match) {
@@ -208,9 +221,12 @@ async function main(): Promise<void> {
     await runWrite(root, flags);
   } else if (mode === "verify") {
     await runVerify(root, files);
+  } else if (mode === "init") {
+    await runInit(root, { yes: flags.yes === true });
   } else {
-    process.stderr.write("Usage: pattern-check-gate write --file <path> [--is-new] --project-id <id> [--project-root <root>] (content on stdin)\n");
+    process.stderr.write("Usage: pattern-check-gate write --file <path> [--is-new] [--project-id <id>] [--project-root <root>] (content on stdin)\n");
     process.stderr.write("       pattern-check-gate verify --files <path...> [--project-root <root>]\n");
+    process.stderr.write("       pattern-check-gate init [--project-root <root>] [--yes]\n");
     process.exit(2);
   }
 }
