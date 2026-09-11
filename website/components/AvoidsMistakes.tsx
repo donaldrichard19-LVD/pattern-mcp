@@ -86,7 +86,7 @@ export function AvoidsMistakes() {
             <h2 style={{ ...H2, maxWidth: 680, margin: 0 }}>How Pattern helps avoid costly mistakes</h2>
           </div>
         </Reveal>
-        <div className="pt-cols-3" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 28 }}>
+        <div className="pt-cols-3" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 28 }}>
           {CAPS.map((c, i) => (
             <Reveal key={c.h} delay={i * 70}>
               <div style={{ display: "grid", gap: 8, alignContent: "start" }}>
