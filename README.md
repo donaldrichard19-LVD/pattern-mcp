@@ -15,10 +15,11 @@ design reference.
 
 [Website](https://usepattern.sh) · [npm](https://www.npmjs.com/package/pattern-mcp) · [Report an issue](https://github.com/donaldrichard19-LVD/pattern-mcp/issues/new/choose)
 
-**Current release: v0.11.0** — adds `pattern-check-gate init`, a guided
-setup for the opt-in enforcement boundary (a `PreToolUse` hook plus a
-paired CI check) so a new component decision can be required, not just
-logged. See [Enforcement boundary: hook + CI
+**Current release: v0.12.0** — `npx pattern-mcp` now surfaces the opt-in
+enforcement boundary (a `PreToolUse` hook plus a paired CI check) at its
+own first run, the same moment as the telemetry notice, so a new
+component decision can be required, not just logged, without having to
+find this section first. See [Enforcement boundary: hook + CI
 gate](#enforcement-boundary-hook--ci-gate).
 
 <details>
