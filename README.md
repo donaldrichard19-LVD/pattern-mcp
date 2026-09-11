@@ -1483,14 +1483,21 @@ Two gaps in the ledger, surfaced from user feedback: it tracks that a
 decision was made, but not whether the thing it decided about is still
 live in your codebase, and it stores the checklist/verdict but not a
 version pin or an exportable artifact you can attach to a PR or issue.
-Both are now fully addressed, across five tools:
-[`check_ledger_liveness`](#tool-check_ledger_liveness) and
-[`sweep_ledger_liveness`](#tool-sweep_ledger_liveness) close the first gap;
-[`export_ledger_provenance`](#tool-export_ledger_provenance),
-[`backfill_ledger_snapshot_ref`](#tool-backfill_ledger_snapshot_ref), and
+Both are now fully addressed, across five tools -- **old decisions can be
+checked, not just logged**: [`check_ledger_liveness`](#tool-check_ledger_liveness)
+verifies that the file where a decision was implemented still exists and
+still uses the recommended component, marking it an orphaned entry if it
+doesn't ([`sweep_ledger_liveness`](#tool-sweep_ledger_liveness) is the
+batch/scheduled version of the same check); **decisions can become
+shareable records**: [`export_ledger_provenance`](#tool-export_ledger_provenance)
+turns a decision into a self-contained Markdown record, and
 [`post_ledger_provenance_to_github`](#tool-post_ledger_provenance_to_github)
-close the second. See `pattern-ledger-integrity-and-provenance-spec.md`
-for the original phased plan this was built against.
+can attach it directly to the relevant PR or issue; and **older decisions
+aren't left behind**: [`backfill_ledger_snapshot_ref`](#tool-backfill_ledger_snapshot_ref)
+adds a `snapshot_ref` to decisions created before this feature existed, so
+the liveness check above works retroactively. See
+`pattern-ledger-integrity-and-provenance-spec.md` for the original phased
+plan this was built against.
 
 **This required the one deliberate exception** to Pattern otherwise having
 [no filesystem/git access to your repo](#per-project-judgment-ledger) at
@@ -1583,6 +1590,11 @@ layered onto `ledger.jsonl`'s own entries at read time -- the ledger line
 itself is never rewritten.
 
 ## Enforcement boundary: hook + CI gate
+
+**Decisions can be enforced, not just tracked.** An opt-in `PreToolUse`
+hook can block a new component from being written until a matching
+ledger entry exists; a paired GitHub Action can also fail the PR if that
+decision record isn't committed alongside the code.
 
 **The gap this closes:** SKILL.md instructs the calling agent to call
 `recommend_component` before scaffolding a new, non-trivial UI component,

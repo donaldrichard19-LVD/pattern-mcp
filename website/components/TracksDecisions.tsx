@@ -230,24 +230,24 @@ function LedgerCardView({
 
 const GRID: { h: string; p: string }[] = [
   {
-    h: "Every decision tracks whether it was actually worth it",
-    p: "report_build_cost attaches the real build cost after the fact, and report_outcome_proxy adds a value signal (reworked, time to merge, kept or replaced) computed from your own repo, deliberately independent of Pattern's own verdict.",
+    h: "Every decision tracks whether it was worth it",
+    p: "report_build_cost records the actual cost of building the component after the decision. report_outcome_proxy adds an outcome signal from your repo, such as whether the component was reworked, how long it took to merge, or whether it was kept or replaced. These signals come from your codebase, not from Pattern's own judgment.",
   },
   {
-    h: "Old decisions get checked, not just logged",
-    p: "check_ledger_liveness can confirm the file a decision was implemented in still exists and still uses what was recommended — that's the orphaned row above.",
+    h: "Old decisions can be checked, not just logged",
+    p: "check_ledger_liveness verifies that the file where a decision was implemented still exists and still uses the recommended component. If it doesn't, the decision is marked as an orphaned entry.",
   },
   {
-    h: "Any decision can become a record you hand someone",
-    p: "export_ledger_provenance turns one decision into a single markdown block. post_ledger_provenance_to_github can attach it straight to the PR or issue it belongs to.",
+    h: "Decisions can become shareable records",
+    p: "export_ledger_provenance turns a decision into a self-contained Markdown record. post_ledger_provenance_to_github can attach it directly to the relevant PR or issue.",
   },
   {
-    h: "Older entries aren't left behind",
-    p: "backfill_ledger_snapshot_ref reconstructs a snapshot_ref for entries written before this feature shipped, so liveness checks work retroactively, not just on decisions made from today forward.",
+    h: "Older decisions aren't left behind",
+    p: "backfill_ledger_snapshot_ref adds a snapshot_ref to decisions created before this feature existed, allowing liveness checks to work retroactively.",
   },
   {
-    h: "The decision can be required, not just logged",
-    p: "An opt-in PreToolUse hook blocks a new component from being written until a matching entry exists in this ledger, and a paired GitHub Action fails the PR if the receipt isn't committed alongside it.",
+    h: "Decisions can be enforced",
+    p: "An opt-in PreToolUse hook can block a new component from being written until a matching ledger entry exists. A paired GitHub Action can also fail the PR if that decision record isn't committed alongside the code.",
   },
 ];
 
