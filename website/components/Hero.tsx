@@ -128,7 +128,7 @@ export function Hero() {
         </Reveal>
         <Reveal delay={190}>
           <h2 id="install" style={H2}>
-            1. Install
+            Install
           </h2>
         </Reveal>
         <Reveal delay={220}>
@@ -143,7 +143,7 @@ export function Hero() {
           </div>
         </Reveal>
         <Reveal delay={250}>
-          <h2 style={H2}>2. Recommend</h2>
+          <h2 style={H2}>Recommend</h2>
         </Reveal>
         <Reveal delay={280}>
           <div style={{ ...PANEL, background: "#fff", overflow: "hidden" }}>
@@ -178,7 +178,7 @@ export function Hero() {
         </Reveal>
         <Reveal delay={310}>
           <h2 id="enforce" style={H2}>
-            3. Enforce (optional)
+            Enforce (optional)
           </h2>
         </Reveal>
         <Reveal delay={340}>

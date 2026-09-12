@@ -292,18 +292,6 @@ export function TracksDecisions() {
           <ThreeBarMark />
           <div
             style={{
-              fontSize: "var(--text-micro)",
-              fontWeight: 600,
-              letterSpacing: "var(--tracking-caps)",
-              textTransform: "uppercase",
-              color: "rgba(255,255,255,.5)",
-              marginBottom: 10,
-            }}
-          >
-            5. Verify
-          </div>
-          <div
-            style={{
               display: "flex",
               alignItems: isMobile ? "flex-start" : "flex-end",
               flexDirection: isMobile ? "column" : "row",
