@@ -1,6 +1,7 @@
 "use client";
 
 import { Info, Terminal } from "lucide-react";
+import { StepStrip } from "./StepStrip";
 import { BODY, H2, LABEL, MONO, PANEL, SECTION } from "./tokens";
 import { CopyBlock, Reveal } from "./ui";
 
@@ -116,19 +117,35 @@ export function Hero() {
         </Reveal>
         <Reveal delay={120}>
           <p style={{ ...BODY, maxWidth: 700, fontSize: "var(--text-body-lg)" }}>
-            Pattern evaluates UI components from external libraries or your own design system against a
-            requirements checklist. It then tells the agent whether to use an existing component or build one from
-            a concrete design reference. An opt-in enforcement boundary can require that check before a new
-            component gets written, instead of leaving it up to the agent. Every decision also leaves a receipt
-            showing what was checked, how it scored, and what it cost.
+            Install Pattern, and your agent calls it to recommend a component before it builds. An opt-in
+            enforcement boundary can require that call instead of leaving it up to the agent. Every decision it
+            leads to gets built against a concrete reference, and lands in a ledger you can verify afterward — what
+            was checked, how it scored, and whether the file it produced still holds up.
           </p>
         </Reveal>
-        <Reveal delay={160}>
-          <div style={{ maxWidth: 520 }}>
+        <Reveal delay={150}>
+          <StepStrip />
+        </Reveal>
+        <Reveal delay={190}>
+          <h2 id="install" style={H2}>
+            1. Install
+          </h2>
+        </Reveal>
+        <Reveal delay={220}>
+          <div className="pt-cols-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, alignItems: "start" }}>
             <CopyBlock label="install command" lines={INSTALL_LINES} />
+            <div style={{ ...PANEL, padding: 14, display: "grid", gap: 8 }}>
+              <span style={{ display: "flex", alignItems: "center", gap: 7, fontSize: "var(--text-body-sm)", color: "var(--text-primary)" }}>
+                <Terminal size={16} /> Tell your coding agent
+              </span>
+              <p style={{ ...MONO, margin: 0, fontSize: 12, lineHeight: 1.6, color: "var(--text-secondary)" }}>{AGENT_PROMPT}</p>
+            </div>
           </div>
         </Reveal>
-        <Reveal delay={200}>
+        <Reveal delay={250}>
+          <h2 style={H2}>2. Recommend</h2>
+        </Reveal>
+        <Reveal delay={280}>
           <div style={{ ...PANEL, background: "#fff", overflow: "hidden" }}>
             <div
               style={{
@@ -159,26 +176,12 @@ export function Hero() {
             </div>
           </div>
         </Reveal>
-        <Reveal delay={220}>
-          <h2 id="install" style={H2}>
-            Installation
+        <Reveal delay={310}>
+          <h2 id="enforce" style={H2}>
+            3. Enforce (optional)
           </h2>
         </Reveal>
-        <Reveal delay={260}>
-          <div className="pt-cols-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, alignItems: "start" }}>
-            <CopyBlock label="install command" lines={INSTALL_LINES} />
-            <div style={{ ...PANEL, padding: 14, display: "grid", gap: 8 }}>
-              <span style={{ display: "flex", alignItems: "center", gap: 7, fontSize: "var(--text-body-sm)", color: "var(--text-primary)" }}>
-                <Terminal size={16} /> Tell your coding agent
-              </span>
-              <p style={{ ...MONO, margin: 0, fontSize: 12, lineHeight: 1.6, color: "var(--text-secondary)" }}>{AGENT_PROMPT}</p>
-            </div>
-          </div>
-        </Reveal>
-        <Reveal delay={280}>
-          <h2 style={H2}>Enforcement (optional)</h2>
-        </Reveal>
-        <Reveal delay={310}>
+        <Reveal delay={340}>
           <div className="pt-cols-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, alignItems: "start" }}>
             <CopyBlock label="enforcement setup" lines={ENFORCEMENT_INIT_LINES} />
             <div style={{ ...PANEL, padding: 14 }}>
@@ -192,7 +195,7 @@ export function Hero() {
             </div>
           </div>
         </Reveal>
-        <Reveal delay={340}>
+        <Reveal delay={370}>
           <div
             style={{
               display: "flex",

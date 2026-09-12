@@ -286,10 +286,22 @@ export function TracksDecisions() {
   };
 
   return (
-    <section className="pt-pad-y" style={{ padding: "64px 0", background: "#0b0f16", color: "#fff" }}>
+    <section id="verify" className="pt-pad-y" style={{ padding: "64px 0", background: "#0b0f16", color: "#fff" }}>
       <div className="pt-sec" style={{ ...SECTION, display: "grid", gap: 28 }}>
         <Reveal>
           <ThreeBarMark />
+          <div
+            style={{
+              fontSize: "var(--text-micro)",
+              fontWeight: 600,
+              letterSpacing: "var(--tracking-caps)",
+              textTransform: "uppercase",
+              color: "rgba(255,255,255,.5)",
+              marginBottom: 10,
+            }}
+          >
+            5. Verify
+          </div>
           <div
             style={{
               display: "flex",

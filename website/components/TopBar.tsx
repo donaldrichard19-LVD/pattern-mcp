@@ -8,10 +8,11 @@ import { SECTION } from "./tokens";
 import { Mark, Wordmark } from "./ui";
 
 const NAV: [string, string][] = [
-  ["Installation", "#install"],
-  ["How it works", "#demo"],
-  ["Outcomes", "#outcomes"],
-  ["Reference", "#reference"],
+  ["Install", "#install"],
+  ["Recommend", "#demo"],
+  ["Enforce", "#enforce"],
+  ["Build", "#build"],
+  ["Verify", "#verify"],
   ["Docs", REPO],
 ];
 

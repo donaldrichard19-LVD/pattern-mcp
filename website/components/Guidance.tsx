@@ -27,10 +27,6 @@ const AVOID = [
     t: "Auto-running the returned install_command",
     d: "It's text a search result produced, not a verified package registry lookup. Always show it and get explicit confirmation before running it.",
   },
-  {
-    t: "Turning on enforcement first",
-    d: "The enforcement boundary works best once you trust Pattern's judgment. Try recommend_component on its own first, then add enforcement when you're ready.",
-  },
 ];
 
 function GuidanceCard({ on, t, d, delay }: { on: boolean; t: string; d: string; delay: number }) {

@@ -3,7 +3,7 @@
 import { AlertTriangle, Check, CircleSlash, Code, Loader, Minus, MessageSquare, type LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { useIsMobile, useScrollProgress } from "./hooks";
-import { BODY, H2, MONO, PANEL, SECTION } from "./tokens";
+import { BODY, H2, LABEL, MONO, PANEL, SECTION } from "./tokens";
 import { Chip } from "./ui";
 
 const BEATS = [
@@ -352,6 +352,7 @@ function DesktopDemo() {
           <span style={{ width: 34, height: 8, borderRadius: 6, background: "var(--blue-500)" }} />
           <span style={{ width: 18, height: 8, borderRadius: 6, background: "var(--blue-500)", opacity: 0.45 }} />
         </div>
+        <div style={{ ...LABEL, marginBottom: 10 }}>2. Recommend</div>
         <h2 style={H2}>How it works</h2>
       </div>
       <div className="pt-sec" style={{ ...SECTION, padding: "24px 32px 96px", display: "grid", gridTemplateColumns: "1fr 1.05fr", gap: 64, alignItems: "start" }}>
@@ -419,6 +420,7 @@ function MobileDemo() {
           <span style={{ width: 34, height: 8, borderRadius: 6, background: "var(--blue-500)" }} />
           <span style={{ width: 18, height: 8, borderRadius: 6, background: "var(--blue-500)", opacity: 0.45 }} />
         </div>
+        <div style={{ ...LABEL, marginBottom: 10 }}>2. Recommend</div>
         <h2 style={H2}>How it works</h2>
       </div>
       <div className="pt-mstage" style={stageStyle}>

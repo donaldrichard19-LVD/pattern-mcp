@@ -2,7 +2,7 @@
 
 import { Activity, CircleSlash, Link as LinkIcon, Lock, Receipt, Scale, ShieldCheck } from "lucide-react";
 import type { ReactNode } from "react";
-import { BODY, H2, SECTION } from "./tokens";
+import { BODY, H2, LABEL, SECTION } from "./tokens";
 import { Reveal } from "./ui";
 
 const CAPS: { icon: ReactNode; h: string; p: [string, string] | [string, string, string] }[] = [
@@ -68,6 +68,7 @@ const CAPS: { icon: ReactNode; h: string; p: [string, string] | [string, string,
 export function AvoidsMistakes() {
   return (
     <section
+      id="build"
       className="pt-pad-y"
       style={{
         padding: "80px 0",
@@ -83,6 +84,7 @@ export function AvoidsMistakes() {
               <span style={{ width: 34, height: 8, borderRadius: 6, background: "var(--amber-500)" }} />
               <span style={{ width: 18, height: 8, borderRadius: 6, background: "var(--amber-500)", opacity: 0.45 }} />
             </div>
+            <div style={LABEL}>4. Build</div>
             <h2 style={{ ...H2, maxWidth: 680, margin: 0 }}>How Pattern helps avoid costly mistakes</h2>
           </div>
         </Reveal>
