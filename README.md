@@ -27,10 +27,9 @@ for more details.
 <summary><strong>Contents</strong> (click to expand)</summary>
 
 - [Install](#install) · [What Pattern Does](#what-pattern-does) · [How it works](#how-it-works) · [Quick Start](#quick-start) · [Try it](#try-it) · [Validation examples](#validation-examples)
-- **Make the judgment call:** [`recommend_component`](#tool-recommend_component) · [`extract_requirements`](#tool-extract_requirements)
-- **Track cost and outcome:** [`record_component_decision`](#tool-record_component_decision) · [`read_ledger`](#tool-read_ledger) · [`report_build_cost`](#tool-report_build_cost) · [`report_outcome_proxy`](#tool-report_outcome_proxy) · [Feature cost attribution](#feature-cost-attribution) · [Outcome proxies](#outcome-proxies) · [Per-project judgment ledger](#per-project-judgment-ledger)
-- **Verify and export old decisions:** [`check_ledger_liveness`](#tool-check_ledger_liveness) · [`sweep_ledger_liveness`](#tool-sweep_ledger_liveness) · [`export_ledger_provenance`](#tool-export_ledger_provenance) · [`backfill_ledger_snapshot_ref`](#tool-backfill_ledger_snapshot_ref) · [`post_ledger_provenance_to_github`](#tool-post_ledger_provenance_to_github) · [Ledger integrity and decision provenance](#ledger-integrity-and-decision-provenance) (design overview — start here for how the five fit together)
-- [Enforcement boundary: hook + CI gate](#enforcement-boundary-hook--ci-gate) (new in v0.10.0 — require the call, don't just log it)
+- [Enforcement boundary: hook + CI gate](#enforcement-boundary-hook--ci-gate) (require the call, don't just log it)
+- **Core tools** (on by default -- see [Tool tiers](#tool-tiers)): [`recommend_component`](#tool-recommend_component) · [`extract_requirements`](#tool-extract_requirements) · [`record_component_decision`](#tool-record_component_decision)
+- **[Advanced tools](#advanced-tools)** (`PATTERN_TOOLS=full`): [`register_design_system`](#tool-register_design_system) · [`read_ledger`](#tool-read_ledger) · [`report_build_cost`](#tool-report_build_cost) · [`report_outcome_proxy`](#tool-report_outcome_proxy) · [Feature cost attribution](#feature-cost-attribution) · [Outcome proxies](#outcome-proxies) · [Per-project judgment ledger](#per-project-judgment-ledger) · [`check_ledger_liveness`](#tool-check_ledger_liveness) · [`sweep_ledger_liveness`](#tool-sweep_ledger_liveness) · [`export_ledger_provenance`](#tool-export_ledger_provenance) · [`backfill_ledger_snapshot_ref`](#tool-backfill_ledger_snapshot_ref) · [`post_ledger_provenance_to_github`](#tool-post_ledger_provenance_to_github) · [Ledger integrity and decision provenance](#ledger-integrity-and-decision-provenance)
 - [Per-project decision memory](#per-project-decision-memory) · [Security and privacy](#security-and-privacy) · [Telemetry](#telemetry)
 - **Cost:** [The `_meta` field](#the-_meta-field) · [Prompt caching](#prompt-caching) · [Measured cache and fetch behavior](#measured-cache-and-fetch-behavior) · [Search limits](#search-limits) · [Ensemble cost](#ensemble-cost-boundary-risk-cases-only) · [Session call cap](#session-call-cap)
 - [Local call log](#local-call-log) · [Known limitations](#known-limitations)
@@ -58,54 +57,38 @@ whether to:
 
 Pattern is designed for agents to use **while they are building**.
 
-It exposes eleven tools, in three groups:
+It exposes twelve tools. Three are on by default -- the ones the
+install → recommend → enforce → build path actually needs -- and the
+rest reveal themselves once you need them. See [Tool
+tiers](#tool-tiers).
 
-**Make the judgment call.**
+**Core, on by default.**
 
 - `recommend_component` — evaluates a UI component need and returns a
   structured recommendation.
 - `extract_requirements` — runs just the requirement-extraction step on
   its own, so you can inspect or hand-edit the checklist before
   `recommend_component` spends its search+score budget on it.
-
-**Track what it cost and what actually happened.**
-
 - `record_component_decision` — records what the agent actually did so
   future recommendations in the same project can take that decision into
   account.
-- `read_ledger` — lists past `recommend_component` judgments for a
-  `project_id`, including any that were served from the ledger cache (see
-  [Per-project judgment ledger](#per-project-judgment-ledger)); pass
-  `feature_id` instead of browsing by keyword to get a full cost rollup for
-  one feature (see [Tool: `report_build_cost`](#tool-report_build_cost)).
-- `report_build_cost` — self-reports the end-to-end build cost for one
-  feature, so cost incurred after Pattern's own verdict (the actual
-  scaffold/install/build) is still attributable back to it.
-- `report_outcome_proxy` — self-reports a value signal (rework, time to
-  merge, kept-vs-replaced) for one feature, deliberately independent of
-  Pattern's own verdict -- see [Outcome
-  proxies](#outcome-proxies).
 
-**Verify old decisions still hold up, and export a record of them.** See
-[Ledger integrity and decision
-provenance](#ledger-integrity-and-decision-provenance) for how these five
-fit together.
+**[Advanced](#advanced-tools), behind `PATTERN_TOOLS=full`.** Pointing
+Pattern at your own design system, cost/outcome tracking, and ledger
+provenance/liveness. See [Advanced tools](#advanced-tools) for the full
+list.
 
-- `check_ledger_liveness` — checks whether a ledger entry's recorded
-  `file_path` still exists and still references its `chosen_candidate`.
-- `sweep_ledger_liveness` — batch version of `check_ledger_liveness`
-  across a whole project (or every project in the ledger), plus
-  dangling-cluster detection. Meant to be invoked by your own cron/CI, not
-  something Pattern schedules itself.
-- `export_ledger_provenance` — formats one ledger entry as a stable
-  markdown block (checklist, candidates, verdict, `snapshot_ref`) you can
-  paste into a PR or issue by hand.
-- `backfill_ledger_snapshot_ref` — best-effort `snapshot_ref`
-  reconstruction for entries written before that field existed.
-- `post_ledger_provenance_to_github` — posts an `export_ledger_provenance`
-  artifact as a real comment on a GitHub PR/issue, idempotently. The one
-  tool here with a real, visible side effect outside your own machine;
-  confirm with the user before calling it.
+### Tool tiers
+
+By default Pattern's `tools/list` response advertises only the three
+core tools above, so a first-time agent sees a small, obvious surface
+instead of all twelve at once. Every tool still works when called
+directly, tiering only changes what gets *advertised* -- so a script or
+an agent that already knows a tool's name (e.g. from this README) can
+still call `register_design_system` or `read_ledger` without setting
+anything. Set `PATTERN_TOOLS=full` in the server's environment to
+advertise all twelve tools immediately, e.g. for the "verify and export
+old decisions" or cost-tracking workflows described below.
 
 ## How it works
 
@@ -411,6 +394,117 @@ Together, these cover different outcomes, including clear matches,
 false-positive-prone searches, no candidates, and decisions close to the
 threshold.
 
+## Enforcement boundary: hook + CI gate
+
+**Decisions can be enforced, not just tracked.** An opt-in `PreToolUse`
+hook can block a new component from being written until a matching
+ledger entry exists; a paired GitHub Action can also fail the PR if that
+decision record isn't committed alongside the code.
+
+**The gap this closes:** SKILL.md instructs the calling agent to call
+`recommend_component` before scaffolding a new, non-trivial UI component,
+but nothing before this feature *enforced* that -- an agent could simply
+skip the call, and nothing server-side would know. This is opt-in and
+Claude-Code-specific for the hook half; a consuming repo that never wires
+either piece up gets Pattern exactly as it worked before, and any other
+MCP host (Cursor, Codex, etc.) is entirely unaffected either way.
+
+**Set it up with one command:**
+
+```bash
+npx pattern-check-gate init
+```
+
+Confirms each step independently rather than one blanket "proceed?", and
+never auto-commits -- review with `git status`/`git diff` and commit
+yourself when ready:
+
+1. Confirms a project id (pre-filled from `package.json`'s `name`, or
+   your git remote/directory name -- accept it or type your own).
+2. Writes or merges `.claude/settings.json` -- if one already exists, it
+   parses it, leaves any unrelated hooks untouched, and only appends the
+   `PreToolUse` entry if it isn't already there (safe to rerun).
+3. Writes `.github/workflows/pattern-gate.yml`, if a GitHub remote is
+   detected and the file doesn't already exist with different content
+   (never silently overwritten).
+4. Asks, as its own explicit yes/no: **mark the check required in branch
+   protection?** Needs `gh` installed and authenticated with admin rights
+   on the repo; skips with clear next steps otherwise. Deliberately only
+   offered when no branch protection exists yet on the default branch --
+   GitHub's branch-protection API replaces the *entire* configuration on
+   write, not just the required-checks list, so this refuses to guess at
+   merging into whatever you already have rather than risk silently
+   dropping an unrelated setting (e.g. required PR reviews). If
+   protection already exists, add `pattern-gate` to it by hand instead.
+
+Run non-interactively with `--yes` (accepts every safe default; branch
+protection is never auto-confirmed even then -- it's the one step that
+reaches outside your local filesystem into real, shared GitHub config).
+
+**You don't have to find this section to learn this exists.** Every
+`npx pattern-mcp` run surfaces it at the same first-run moment as the
+[telemetry notice](#telemetry):
+
+- **Always**, in every context, including when a real MCP client has
+  spawned this as a subprocess: a one-time, non-blocking stderr mention
+  that the enforcement boundary exists and the command above sets it up.
+  Same "prints once, gated by a marker file" discipline as the telemetry
+  notice -- tracked at `~/.pattern/enforcement_notice_shown`
+  (`PATTERN_ENFORCEMENT_NOTICE_PATH` to override), never repeats after
+  that regardless of whether you act on it.
+- **Only when stdin is a real terminal** (`process.stdin.isTTY`) --
+  meaning a human ran `npx pattern-mcp` bare in their own shell, never
+  true for a real MCP client's spawned subprocess -- it also offers a
+  genuine interactive prompt right there: *"Set it up now?"* A yes runs
+  the exact same `init` flow described above. The same JSON-RPC-channel
+  constraint that rules out an interactive telemetry prompt (see
+  [Telemetry](#telemetry)) applies here too, which is why this only ever
+  asks when nothing is piping protocol messages into stdin to begin
+  with.
+
+Set `PATTERN_NO_ENFORCEMENT_NOTICE` to suppress both halves. See
+`offerEnforcementSetupOnce` in `src/init-enforcement.ts` for the
+implementation.
+
+**Or set it up by hand**, two pieces, neither installed automatically:
+
+- **`.claude/settings.json`** wired to run `npx --yes
+  pattern-check-gate-hook` on `PreToolUse` (see
+  `templates/claude-settings/settings.json` for the exact shape) -- a
+  Claude Code hook that runs on `Write`/`Edit` calls. For a genuinely new
+  `.tsx`/`.jsx` file that exports a non-trivial component, it looks up a
+  ledger entry (via `~/.pattern/ledger.jsonl`, same as everywhere else in
+  Pattern) whose `file_path` matches the file being written. A match
+  writes a receipt and allows the write; no match blocks it with a reason
+  fed back to the model as retryable guidance, not a hard failure.
+  **This is the one new exception where Pattern writes into your repo**
+  (`.pattern/receipts/<feature_id>.json`) -- everything else described in
+  this README is read-only. `project_id` no longer needs to be set by
+  hand either -- it's derived the same way `init` pre-fills it (see
+  `src/project-id.ts`); set `PATTERN_PROJECT_ID` only to override that.
+- **`templates/github-workflows/pattern-gate.yml`** -- a required PR
+  check that reads the same receipt files back out of the diff. It never
+  touches `~/.pattern/` (not reachable from a CI runner) and needs no
+  `GITHUB_TOKEN` -- it trusts the committed receipt as the artifact of
+  record, the same way it would trust a committed test fixture.
+
+The join between the two depends on `file_path` being passed to
+`recommend_component`/`record_component_decision` -- if it's omitted, the
+gate has nothing to match against and fails closed (blocks) rather than
+guessing. Pass `file_path` whenever you know it.
+
+An escape hatch exists for both a whole-hook kill switch
+(`PATTERN_NO_ENFORCEMENT_HOOK`, local only -- does not affect the CI
+check) and a per-file override (a `// pattern-mcp:override reason="..."`
+comment) -- the override still writes a receipt recording
+`manual_override: true` and the reason, so it stays visible rather than
+silent. See `src/component-gate.ts`, `src/gate-receipt.ts`,
+`src/check-gate.ts` (the `pattern-check-gate` CLI, this project's first
+entry point separate from the stdio MCP server), `src/check-gate-hook.ts`,
+and `src/init-enforcement.ts` for the implementation, and BACKLOG.md's
+"Enforcement boundary" entries for the fuller design writeup.
+
+
 ## Tool: `recommend_component`
 
 ### Input
@@ -609,114 +703,6 @@ The calling agent should:
 
 See [SECURITY.md](./SECURITY.md) for more details.
 
-## Tool: `register_design_system`
-
-Points `recommend_component` at *this project's own* design system instead
-of shadcn/ui, 21st.dev, and ReUI -- for a solo dev with their own component
-library or design spec who wants Pattern's coverage scoring against
-candidates they'll actually use, not external libraries they won't. This is
-the Solo Dev architecture from `pattern-solo-design-system-architecture.md`:
-local, per-project, one-or-the-other -- registering a design system for a
-`project_id` **replaces** external-library scoring for that project
-entirely, it does not add to it. There's no shared/remote ledger, no
-multi-user attribution, and no team auth in this scope -- those are
-deliberately deferred to a team phase, only if this use case proves out.
-
-### Input
-
-Exactly one of `manifest_path` or `directory_path` is required, both
-relative to the project root (`PATTERN_PROJECT_ROOT`, defaults to this
-server's working directory) -- never an absolute path.
-
-```json
-{
-  "project_id": "my-booking-app",
-  "directory_path": "src/components"
-}
-```
-
-- **`manifest_path`** -- a components manifest. Two recognized shapes:
-  - A hand-authored JSON array of `{name, props, description,
-    usage_example}` objects, optionally wrapped in `{"components": [...]}`.
-  - A Storybook-exported `stories.json`/`index.json` file (an object with a
-    top-level `entries` or `stories` map). Component names only in this
-    case -- Storybook's basic export doesn't carry prop data, so candidates
-    from this path start with an empty `props` list.
-- **`directory_path`** -- a directory of real component source files,
-  scanned recursively for `.jsx`/`.tsx`/`.js`/`.ts` files (excluding
-  `node_modules`/`dist`/`build`/`.git` and `.test.`/`.spec.`/`.stories.`
-  files). Each exported, uppercase-named function or const component found
-  becomes a candidate, with props read in priority order from a
-  `<Name>Props` interface/type, a `.propTypes` block, or (last resort) the
-  component's own destructured parameters. This is a heuristic scan, not a
-  full parser -- a sparse or partial props list for some components is
-  expected, not a bug, especially on plain JS with no prop typing at all.
-
-### Output
-
-```json
-{
-  "status": "registered",
-  "registration": {
-    "project_id": "my-booking-app",
-    "source_kind": "directory_scan",
-    "source_path": "src/components",
-    "registered_at": "2026-09-03T18:04:11.201Z",
-    "candidate_count": 29,
-    "candidates": [
-      { "name": "ReferralBanner", "props": ["code", "bonusAmount"], "description": null, "usage_example": null, "file_path": "rewards/ReferralBanner.jsx" }
-    ]
-  }
-}
-```
-
-Registering overwrites (does not merge with) any prior registration for the
-same `project_id`. Once registered, `recommend_component` scores ONLY
-against these candidates for calls with this `project_id` -- no separate
-flag needed, it's automatic based on `project_id` alone, and step 3's live
-web search is skipped entirely (`web_search` is still available, but
-reserved for a `custom_build` verdict's Mobbin/Figma Community reference
-grounding, same as the external-library path). A `use_existing` verdict
-scored this way always carries `"source": "design_system"` on the
-resulting ledger entry, set server-side regardless of what the model wrote,
-so `read_ledger` and `export_ledger_provenance` can match on it reliably.
-
-This only writes local config to `~/.pattern/design_systems.json` (override
-with `PATTERN_DESIGN_SYSTEMS_PATH`) -- it never calls the Anthropic API.
-Registration is a point-in-time snapshot, not a live link: re-run this
-whenever the design system's own components change meaningfully.
-
-### A safety net for a missed match
-
-The model can occasionally say `custom_build`/`no_candidates_found`
-against a registered design system even when a real match is sitting
-right there in its own prompt -- a reading-comprehension miss over its own
-known-complete candidate list, not evidence the list was actually empty.
-When this happens, `recommend_component`'s response may carry a
-`design_system_recall_check` field: a deterministic, zero-cost, local
-keyword-overlap check (component name, props, description/usage_example
-vs. `component_need`/`domain`) run automatically whenever reason is
-`no_candidates_found` in this mode.
-
-```json
-{
-  "verdict": "custom_build",
-  "reason": "no_candidates_found",
-  "design_system_recall_check": {
-    "possible_missed_candidates": [
-      { "name": "ReferralBanner", "shared_keywords": ["referral", "bonus"] }
-    ],
-    "note": "These registered design-system candidates share keywords with this component_need but were not selected as a match -- the verdict may have missed a real one. This is a weak, keyword-only signal, not proof of an actual match: double-check these candidates yourself (or re-run this call) before trusting custom_build here."
-  }
-}
-```
-
-This never overrides the verdict -- a shared keyword is weak evidence, not
-proof of a real match -- it only surfaces the risk so you (or the calling
-agent) know to double-check before accepting a `custom_build` verdict at
-face value. Absent entirely when there's no overlap, or outside
-design-system mode.
-
 ## Tool: `extract_requirements`
 
 Runs only the requirement-extraction step `recommend_component` normally
@@ -833,6 +819,118 @@ Anthropic API call.
   "entry": { "..." }
 }
 ```
+
+## Advanced tools
+
+Not advertised by default -- set `PATTERN_TOOLS=full` to see these in `tools/list`, or call them directly by name at any time (see [Tool tiers](#tool-tiers)).
+
+## Tool: `register_design_system`
+
+Points `recommend_component` at *this project's own* design system instead
+of shadcn/ui, 21st.dev, and ReUI -- for a solo dev with their own component
+library or design spec who wants Pattern's coverage scoring against
+candidates they'll actually use, not external libraries they won't. This is
+the Solo Dev architecture from `pattern-solo-design-system-architecture.md`:
+local, per-project, one-or-the-other -- registering a design system for a
+`project_id` **replaces** external-library scoring for that project
+entirely, it does not add to it. There's no shared/remote ledger, no
+multi-user attribution, and no team auth in this scope -- those are
+deliberately deferred to a team phase, only if this use case proves out.
+
+### Input
+
+Exactly one of `manifest_path` or `directory_path` is required, both
+relative to the project root (`PATTERN_PROJECT_ROOT`, defaults to this
+server's working directory) -- never an absolute path.
+
+```json
+{
+  "project_id": "my-booking-app",
+  "directory_path": "src/components"
+}
+```
+
+- **`manifest_path`** -- a components manifest. Two recognized shapes:
+  - A hand-authored JSON array of `{name, props, description,
+    usage_example}` objects, optionally wrapped in `{"components": [...]}`.
+  - A Storybook-exported `stories.json`/`index.json` file (an object with a
+    top-level `entries` or `stories` map). Component names only in this
+    case -- Storybook's basic export doesn't carry prop data, so candidates
+    from this path start with an empty `props` list.
+- **`directory_path`** -- a directory of real component source files,
+  scanned recursively for `.jsx`/`.tsx`/`.js`/`.ts` files (excluding
+  `node_modules`/`dist`/`build`/`.git` and `.test.`/`.spec.`/`.stories.`
+  files). Each exported, uppercase-named function or const component found
+  becomes a candidate, with props read in priority order from a
+  `<Name>Props` interface/type, a `.propTypes` block, or (last resort) the
+  component's own destructured parameters. This is a heuristic scan, not a
+  full parser -- a sparse or partial props list for some components is
+  expected, not a bug, especially on plain JS with no prop typing at all.
+
+### Output
+
+```json
+{
+  "status": "registered",
+  "registration": {
+    "project_id": "my-booking-app",
+    "source_kind": "directory_scan",
+    "source_path": "src/components",
+    "registered_at": "2026-09-03T18:04:11.201Z",
+    "candidate_count": 29,
+    "candidates": [
+      { "name": "ReferralBanner", "props": ["code", "bonusAmount"], "description": null, "usage_example": null, "file_path": "rewards/ReferralBanner.jsx" }
+    ]
+  }
+}
+```
+
+Registering overwrites (does not merge with) any prior registration for the
+same `project_id`. Once registered, `recommend_component` scores ONLY
+against these candidates for calls with this `project_id` -- no separate
+flag needed, it's automatic based on `project_id` alone, and step 3's live
+web search is skipped entirely (`web_search` is still available, but
+reserved for a `custom_build` verdict's Mobbin/Figma Community reference
+grounding, same as the external-library path). A `use_existing` verdict
+scored this way always carries `"source": "design_system"` on the
+resulting ledger entry, set server-side regardless of what the model wrote,
+so `read_ledger` and `export_ledger_provenance` can match on it reliably.
+
+This only writes local config to `~/.pattern/design_systems.json` (override
+with `PATTERN_DESIGN_SYSTEMS_PATH`) -- it never calls the Anthropic API.
+Registration is a point-in-time snapshot, not a live link: re-run this
+whenever the design system's own components change meaningfully.
+
+### A safety net for a missed match
+
+The model can occasionally say `custom_build`/`no_candidates_found`
+against a registered design system even when a real match is sitting
+right there in its own prompt -- a reading-comprehension miss over its own
+known-complete candidate list, not evidence the list was actually empty.
+When this happens, `recommend_component`'s response may carry a
+`design_system_recall_check` field: a deterministic, zero-cost, local
+keyword-overlap check (component name, props, description/usage_example
+vs. `component_need`/`domain`) run automatically whenever reason is
+`no_candidates_found` in this mode.
+
+```json
+{
+  "verdict": "custom_build",
+  "reason": "no_candidates_found",
+  "design_system_recall_check": {
+    "possible_missed_candidates": [
+      { "name": "ReferralBanner", "shared_keywords": ["referral", "bonus"] }
+    ],
+    "note": "These registered design-system candidates share keywords with this component_need but were not selected as a match -- the verdict may have missed a real one. This is a weak, keyword-only signal, not proof of an actual match: double-check these candidates yourself (or re-run this call) before trusting custom_build here."
+  }
+}
+```
+
+This never overrides the verdict -- a shared keyword is weak evidence, not
+proof of a real match -- it only surfaces the risk so you (or the calling
+agent) know to double-check before accepting a `custom_build` verdict at
+face value. Absent entirely when there's no overlap, or outside
+design-system mode.
 
 ## Tool: `read_ledger`
 
@@ -1591,116 +1689,6 @@ the source line, most recent record wins at read time" convention as
 `outcome_proxies.jsonl`, see [Outcome proxies](#outcome-proxies)) and
 layered onto `ledger.jsonl`'s own entries at read time -- the ledger line
 itself is never rewritten.
-
-## Enforcement boundary: hook + CI gate
-
-**Decisions can be enforced, not just tracked.** An opt-in `PreToolUse`
-hook can block a new component from being written until a matching
-ledger entry exists; a paired GitHub Action can also fail the PR if that
-decision record isn't committed alongside the code.
-
-**The gap this closes:** SKILL.md instructs the calling agent to call
-`recommend_component` before scaffolding a new, non-trivial UI component,
-but nothing before this feature *enforced* that -- an agent could simply
-skip the call, and nothing server-side would know. This is opt-in and
-Claude-Code-specific for the hook half; a consuming repo that never wires
-either piece up gets Pattern exactly as it worked before, and any other
-MCP host (Cursor, Codex, etc.) is entirely unaffected either way.
-
-**Set it up with one command:**
-
-```bash
-npx pattern-check-gate init
-```
-
-Confirms each step independently rather than one blanket "proceed?", and
-never auto-commits -- review with `git status`/`git diff` and commit
-yourself when ready:
-
-1. Confirms a project id (pre-filled from `package.json`'s `name`, or
-   your git remote/directory name -- accept it or type your own).
-2. Writes or merges `.claude/settings.json` -- if one already exists, it
-   parses it, leaves any unrelated hooks untouched, and only appends the
-   `PreToolUse` entry if it isn't already there (safe to rerun).
-3. Writes `.github/workflows/pattern-gate.yml`, if a GitHub remote is
-   detected and the file doesn't already exist with different content
-   (never silently overwritten).
-4. Asks, as its own explicit yes/no: **mark the check required in branch
-   protection?** Needs `gh` installed and authenticated with admin rights
-   on the repo; skips with clear next steps otherwise. Deliberately only
-   offered when no branch protection exists yet on the default branch --
-   GitHub's branch-protection API replaces the *entire* configuration on
-   write, not just the required-checks list, so this refuses to guess at
-   merging into whatever you already have rather than risk silently
-   dropping an unrelated setting (e.g. required PR reviews). If
-   protection already exists, add `pattern-gate` to it by hand instead.
-
-Run non-interactively with `--yes` (accepts every safe default; branch
-protection is never auto-confirmed even then -- it's the one step that
-reaches outside your local filesystem into real, shared GitHub config).
-
-**You don't have to find this section to learn this exists.** Every
-`npx pattern-mcp` run surfaces it at the same first-run moment as the
-[telemetry notice](#telemetry):
-
-- **Always**, in every context, including when a real MCP client has
-  spawned this as a subprocess: a one-time, non-blocking stderr mention
-  that the enforcement boundary exists and the command above sets it up.
-  Same "prints once, gated by a marker file" discipline as the telemetry
-  notice -- tracked at `~/.pattern/enforcement_notice_shown`
-  (`PATTERN_ENFORCEMENT_NOTICE_PATH` to override), never repeats after
-  that regardless of whether you act on it.
-- **Only when stdin is a real terminal** (`process.stdin.isTTY`) --
-  meaning a human ran `npx pattern-mcp` bare in their own shell, never
-  true for a real MCP client's spawned subprocess -- it also offers a
-  genuine interactive prompt right there: *"Set it up now?"* A yes runs
-  the exact same `init` flow described above. The same JSON-RPC-channel
-  constraint that rules out an interactive telemetry prompt (see
-  [Telemetry](#telemetry)) applies here too, which is why this only ever
-  asks when nothing is piping protocol messages into stdin to begin
-  with.
-
-Set `PATTERN_NO_ENFORCEMENT_NOTICE` to suppress both halves. See
-`offerEnforcementSetupOnce` in `src/init-enforcement.ts` for the
-implementation.
-
-**Or set it up by hand**, two pieces, neither installed automatically:
-
-- **`.claude/settings.json`** wired to run `npx --yes
-  pattern-check-gate-hook` on `PreToolUse` (see
-  `templates/claude-settings/settings.json` for the exact shape) -- a
-  Claude Code hook that runs on `Write`/`Edit` calls. For a genuinely new
-  `.tsx`/`.jsx` file that exports a non-trivial component, it looks up a
-  ledger entry (via `~/.pattern/ledger.jsonl`, same as everywhere else in
-  Pattern) whose `file_path` matches the file being written. A match
-  writes a receipt and allows the write; no match blocks it with a reason
-  fed back to the model as retryable guidance, not a hard failure.
-  **This is the one new exception where Pattern writes into your repo**
-  (`.pattern/receipts/<feature_id>.json`) -- everything else described in
-  this README is read-only. `project_id` no longer needs to be set by
-  hand either -- it's derived the same way `init` pre-fills it (see
-  `src/project-id.ts`); set `PATTERN_PROJECT_ID` only to override that.
-- **`templates/github-workflows/pattern-gate.yml`** -- a required PR
-  check that reads the same receipt files back out of the diff. It never
-  touches `~/.pattern/` (not reachable from a CI runner) and needs no
-  `GITHUB_TOKEN` -- it trusts the committed receipt as the artifact of
-  record, the same way it would trust a committed test fixture.
-
-The join between the two depends on `file_path` being passed to
-`recommend_component`/`record_component_decision` -- if it's omitted, the
-gate has nothing to match against and fails closed (blocks) rather than
-guessing. Pass `file_path` whenever you know it.
-
-An escape hatch exists for both a whole-hook kill switch
-(`PATTERN_NO_ENFORCEMENT_HOOK`, local only -- does not affect the CI
-check) and a per-file override (a `// pattern-mcp:override reason="..."`
-comment) -- the override still writes a receipt recording
-`manual_override: true` and the reason, so it stays visible rather than
-silent. See `src/component-gate.ts`, `src/gate-receipt.ts`,
-`src/check-gate.ts` (the `pattern-check-gate` CLI, this project's first
-entry point separate from the stdio MCP server), `src/check-gate-hook.ts`,
-and `src/init-enforcement.ts` for the implementation, and BACKLOG.md's
-"Enforcement boundary" entries for the fuller design writeup.
 
 ## Per-project decision memory
 

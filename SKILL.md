@@ -14,6 +14,13 @@ scratch, or when a user references a specific app's pattern to match.
 Full behavior, output schemas, and cost details are in
 [README.md](./README.md). This file is a quick tool-list orientation.
 
+Only `recommend_component`, `extract_requirements`, and
+`record_component_decision` are advertised in `tools/list` by default.
+`read_ledger`, `report_build_cost`, and `report_outcome_proxy` below are
+real and callable by name at any time, but stay out of the default list
+until the server is started with `PATTERN_TOOLS=full` -- see the
+README's [Tool tiers](./README.md#tool-tiers).
+
 ## Tools
 
 ### `recommend_component` (primary tool -- start here)

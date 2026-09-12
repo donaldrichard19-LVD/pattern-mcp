@@ -304,6 +304,16 @@ function reconstructSnapshotRef(root: string, atISOTimestamp: string): string | 
 // ledger code -- flip it back off (unset the var) to re-enable.
 const LEDGER_CACHE_HIT_ENABLED = !process.env.PATTERN_NO_LEDGER_CACHE_HIT;
 
+// Tool surface tier. Default "core" advertises only the tools a first-time
+// caller needs for the install -> recommend -> enforce -> build path:
+// recommend_component, extract_requirements, record_component_decision.
+// Everything else (design-system registration, ledger provenance/liveness,
+// cost/outcome tracking) is real but stays out of the default tool list so
+// it can reveal itself once a caller actually needs it, rather than
+// front-loading all eleven -- er, twelve -- tools on day one. Set
+// PATTERN_TOOLS=full to advertise every tool immediately.
+const TOOL_TIER = process.env.PATTERN_TOOLS === "full" ? "full" : "core";
+
 // $/1M tokens, checked against the Anthropic pricing page rather than
 // recalled from training data (rates drift). Both current and legacy
 // Haiku 4.5 model-id spellings are listed since PATTERN_MODEL is
@@ -473,7 +483,11 @@ async function streamAnthropicMessage(body: Record<string, unknown>): Promise<St
 
   if (!response.ok) {
     const errText = await response.text();
-    throw new Error(`Anthropic API error ${response.status}: ${errText}`);
+    const hint =
+      response.status === 401
+        ? " -- check that ANTHROPIC_API_KEY is set to a valid, active key in the environment running this MCP server."
+        : "";
+    throw new Error(`Anthropic API error ${response.status}: ${errText}${hint}`);
   }
   if (!response.body) {
     throw new Error("Anthropic API streaming response had no body to read.");
@@ -595,6 +609,15 @@ const POST_LEDGER_PROVENANCE_TOOL_NAME = "post_ledger_provenance_to_github";
 const SWEEP_LEDGER_LIVENESS_TOOL_NAME = "sweep_ledger_liveness";
 const BACKFILL_LEDGER_SNAPSHOT_REF_TOOL_NAME = "backfill_ledger_snapshot_ref";
 const REGISTER_DESIGN_SYSTEM_TOOL_NAME = "register_design_system";
+
+// See TOOL_TIER above. These three cover the install -> recommend ->
+// enforce -> build happy path; everything else is "advanced" and only
+// listed when PATTERN_TOOLS=full.
+const CORE_TOOL_NAMES = new Set([
+  TOOL_NAME,
+  EXTRACT_REQUIREMENTS_TOOL_NAME,
+  RECORD_DECISION_TOOL_NAME,
+]);
 
 const INPUT_SCHEMA = {
   type: "object",
@@ -4077,8 +4100,7 @@ if (TELEMETRY_ENABLED) {
   }
 }
 
-server.setRequestHandler(ListToolsRequestSchema, async () => ({
-  tools: [
+const ALL_TOOLS = [
     {
       name: TOOL_NAME,
       description:
@@ -4326,7 +4348,13 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         "registration is a point-in-time snapshot, not a live link.",
       inputSchema: REGISTER_DESIGN_SYSTEM_INPUT_SCHEMA,
     },
-  ],
+];
+
+server.setRequestHandler(ListToolsRequestSchema, async () => ({
+  tools:
+    TOOL_TIER === "full"
+      ? ALL_TOOLS
+      : ALL_TOOLS.filter((tool) => CORE_TOOL_NAMES.has(tool.name)),
 }));
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
