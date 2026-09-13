@@ -43,6 +43,7 @@ import { dirname, extname, isAbsolute, join, relative, resolve } from "node:path
 import { fileURLToPath } from "node:url";
 import {
   captureApiError,
+  captureCliStarted,
   captureRecommendation,
   getClient as getPostHogClient,
   installId,
@@ -51,6 +52,7 @@ import {
   TELEMETRY_ENABLED,
 } from "./telemetry.js";
 import { offerEnforcementSetupOnce } from "./init-enforcement.js";
+import { connectInstructionsText, offerClientConnectSetupOnce, runConnect } from "./client-connect.js";
 
 export const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 // Only required for org-scoped keys (not tied to one workspace); unset for
@@ -4650,20 +4652,71 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   throw new Error(`Unknown tool: ${request.params.name}`);
 });
 
+// How long to wait, when running bare in a human's own terminal (never
+// true for a real MCP client's spawned subprocess), before nudging that
+// no client has connected yet. Long enough that someone reading the
+// startup notices and typing a response to offerClientConnectSetupOnce's
+// prompt doesn't get nagged mid-read; short enough to still land while
+// they're still looking at the terminal, not five minutes after they
+// alt-tabbed away.
+const IDLE_CONNECT_NUDGE_MS = 20_000;
+
 async function main() {
+  // `npx pattern-mcp init` -- the connect wizard -- exits without ever
+  // starting the server. Checked before anything else so it can't be
+  // shadowed by a tool name collision later.
+  const argv = process.argv.slice(2);
+  if (argv[0] === "init") {
+    captureCliStarted("init");
+    await runConnect(PROJECT_ROOT, { yes: argv.includes("--yes") });
+    await shutdownTelemetry();
+    // Explicit exit, not a bare return -- shutdownTelemetry races a
+    // bounded timeout (see telemetry.ts) so this always reaches here
+    // promptly, but an explicit exit is the same defense-in-depth the
+    // SIGINT/SIGTERM handlers below already use rather than trusting the
+    // event loop to drain on its own if some other handle is lingering.
+    process.exit(0);
+  }
+
+  captureCliStarted("server");
   printTelemetryNoticeOnce();
   // Piggybacks on this same first-run moment (Option B, see
   // init-enforcement.ts) -- always prints a one-time, non-blocking mention;
   // only prompts interactively when stdin is a real TTY, never when a real
   // MCP client has piped stdio into this process for JSON-RPC. Always
-  // returns before the transport below claims stdin.
+  // returns before the transport below claims stdin. Connect-wizard notice
+  // goes first -- it's the step that unblocks everything else -- then the
+  // (secondary, opt-in) enforcement-boundary notice.
+  await offerClientConnectSetupOnce(PROJECT_ROOT);
   await offerEnforcementSetupOnce(PROJECT_ROOT);
   const transport = new StdioServerTransport();
+
+  // Idle nudge: only meaningful when a human ran this bare in a terminal.
+  // server.oninitialized fires on the client's real notifications/
+  // initialized message -- the standard handshake-complete signal -- and
+  // is untouched by @posthog/mcp's instrument() above, which hooks
+  // setRequestHandler instead of this callback, so claiming it here can't
+  // clobber that tool's own $mcp_initialize tracking (verified against
+  // node_modules/@posthog/mcp's source, not assumed).
+  let idleNudgeTimer: NodeJS.Timeout | undefined;
+  if (process.stdin.isTTY) {
+    idleNudgeTimer = setTimeout(() => {
+      console.error(
+        ["", "Still there? Pattern is running but no MCP client has connected yet.", connectInstructionsText(), ""].join(
+          "\n",
+        ),
+      );
+    }, IDLE_CONNECT_NUDGE_MS);
+    idleNudgeTimer.unref();
+    server.oninitialized = () => clearTimeout(idleNudgeTimer);
+  }
+
   await server.connect(transport);
   // Best-effort telemetry drain on clean shutdown -- no-op when telemetry
   // was never enabled (see src/telemetry.ts).
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
     process.on(signal, async () => {
+      if (idleNudgeTimer) clearTimeout(idleNudgeTimer);
       await shutdownTelemetry();
       process.exit(0);
     });

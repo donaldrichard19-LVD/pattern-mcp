@@ -15,12 +15,13 @@ design reference.
 
 [Website](https://usepattern.sh) · [npm](https://www.npmjs.com/package/pattern-mcp) · [Report an issue](https://github.com/donaldrichard19-LVD/pattern-mcp/issues/new/choose)
 
-**Current release: v0.12.0** — When you run `npx pattern-mcp` for the
-first time, Pattern now shows the optional enforcement boundary
-alongside the telemetry notice. This boundary includes a `PreToolUse`
-hook and a matching CI check. Together, they can require a decision for
-each new component instead of only recording it. See
-[Enforcement boundary: hook + CI gate](#enforcement-boundary-hook--ci-gate)
+**Current release: v0.13.0** — `npx pattern-mcp init` now sets up the
+connection to your MCP client for you (Claude Code, Claude Desktop,
+Cursor detected and configured automatically; Codex CLI gets manual
+instructions). Running `npx pattern-mcp` bare in your own terminal also
+now tells you it needs a client connected, instead of silently sitting
+there. See
+[Connect Pattern to your MCP client](#connect-pattern-to-your-mcp-client)
 for more details.
 
 <details>
@@ -262,6 +263,32 @@ The server command is:
 ```
 npx pattern-mcp
 ```
+
+#### Automatic setup
+
+```bash
+npx pattern-mcp init
+```
+
+Detects which clients are installed and offers to connect each one:
+
+- **Claude Code** -- runs `claude mcp add` for you (asks whether to make
+  Pattern available in every project or just this one); skips if already
+  connected (`claude mcp list` already shows it).
+- **Claude Desktop** and **Cursor** -- merges a `pattern` entry into the
+  client's own config file, showing the exact change before writing it
+  and never touching any other server already configured there.
+- **Codex CLI** -- prints the config snippet to add by hand (Codex's
+  config is TOML; this doesn't auto-edit it).
+
+Optionally pastes your `ANTHROPIC_API_KEY` into whichever configs you set
+up (visible in plain text as you type it, and in the files it writes) --
+press Enter to skip and add it yourself later instead. Run
+non-interactively with `--yes` (skips the API key prompt entirely,
+accepts every detected client).
+
+If you'd rather do it by hand, or `init` didn't detect your client, the
+per-client instructions below cover the same configs manually.
 
 #### Claude Code
 
@@ -1823,6 +1850,15 @@ are a biased, tiny sample of everyone who installs.
    - On a failed Anthropic API call specifically: the HTTP status code and a
      coarse classification (`rate_limit`, `insufficient_credit`, or `other`)
      -- never the request or response body.
+   - On every invocation of the `pattern-mcp` binary, immediately at
+     startup: a single `pattern_cli_started` event carrying only which
+     mode it ran in (`server` -- the normal MCP-server start, or `init` --
+     the [connect wizard](#connect-pattern-to-your-mcp-client)). This
+     exists to separate real executions from npm registry traffic that
+     never runs the code at all (security scanners, mirrors) -- something
+     neither `recommend_component` counts nor `@posthog/mcp`'s handshake
+     event below can answer, since both require getting further than a
+     bare `npx pattern-mcp` run.
 2. Standard MCP tool-call analytics, via
    [`@posthog/mcp`](https://posthog.com/docs/mcp-analytics): which tool
    was called, call duration, and success/failure, so unique installs and

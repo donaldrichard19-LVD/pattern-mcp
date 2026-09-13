@@ -18,10 +18,12 @@
  *     install ID (see installId() below); a one-way SHA-256 hash of
  *     project_id, truncated to 16 hex chars -- never the raw project_id
  *     string; the verdict shape already written to the local call log
- *     (verdict, confidence, ensemble_triggered, estimated cost); and, on a
+ *     (verdict, confidence, ensemble_triggered, estimated cost); on a
  *     failed Anthropic API call, only the HTTP status and a coarse error
  *     classification (rate_limit / insufficient_credit / other) -- never
- *     the request or response body.
+ *     the request or response body; and, on every invocation of the
+ *     binary, a single `pattern_cli_started` event carrying only which
+ *     mode it ran in (`server` or `init`) -- see captureCliStarted below.
  *  2. `@posthog/mcp`'s standard MCP instrumentation, wired up in index.ts:
  *     tool name, call duration, error/success, and the same anonymous
  *     install ID as the distinct_id (via its `identify` option), so both
@@ -88,10 +90,12 @@ export function printTelemetryNoticeOnce(): void {
       "When on, Pattern sends an anonymous per-install ID, a one-way hash",
       "of project_id (never the raw string), the same verdict summary",
       "already written to ~/.pattern/calls.log (verdict, confidence,",
-      "reason, estimated cost), and standard MCP tool-call analytics (tool",
-      "name, duration, success/failure) via PostHog's MCP SDK. Tool call",
-      "arguments and responses are stripped before sending -- component_need,",
-      "domain, framework, existing_stack, and your API key are never sent.",
+      "reason, estimated cost), a single startup event noting whether this",
+      "run is the server or the `init` wizard, and standard MCP tool-call",
+      "analytics (tool name, duration, success/failure) via PostHog's MCP",
+      "SDK. Tool call arguments and responses are stripped before sending",
+      "-- component_need, domain, framework, existing_stack, and your API",
+      "key are never sent.",
       "Full field list: https://github.com/donaldrichard19-LVD/pattern-mcp#telemetry",
       "",
       "To opt out: PATTERN_TELEMETRY=0",
@@ -240,6 +244,22 @@ export function captureRecommendation(args: {
   });
 }
 
+// Fires once per process invocation, immediately at startup, before the
+// stdio transport connects and before either first-run notice prints.
+// Distinct from @posthog/mcp's $mcp_initialize (which only fires once a
+// real MCP client completes the JSON-RPC handshake): this fires for
+// every real execution of the binary, including a bare `npx pattern-mcp`
+// run in a terminal that never gets wired into a client, and the `init`
+// subcommand. Exists to measure the gap between "npm registered a
+// download" (includes scanner/mirror traffic that never runs the code at
+// all) and "someone actually ran this" -- see
+// project_pattern_reddit_launch_spike memory for why that gap mattered:
+// a 2026-09-11 download spike showed almost no matching $mcp_initialize
+// growth, and there was no signal at all for the step in between.
+export function captureCliStarted(mode: "server" | "init"): void {
+  capture("pattern_cli_started", { mode });
+}
+
 export function captureApiError(args: { tool: string; message: string; projectId?: string }): void {
   const { type, status } = classifyApiError(args.message);
   capture("pattern_cli_api_error", {
@@ -250,12 +270,27 @@ export function captureApiError(args: { tool: string; message: string; projectId
   });
 }
 
+// How long shutdown will wait for a final flush before giving up.
+// Verified directly (not assumed): with an unreachable PostHog host,
+// posthog-node's client.shutdown() does not reject or time out on its
+// own -- it hung well past 8s in a real test (an unroutable/blocked port
+// looks like a stalled TCP connect, not an instant refusal). Without this
+// race, every caller of shutdownTelemetry -- the SIGINT/SIGTERM handlers
+// below AND the `init` wizard's normal exit path -- would hang
+// indefinitely on a restricted network instead of exiting, directly
+// contradicting this function's own "best-effort, never blocks" purpose.
+const SHUTDOWN_TIMEOUT_MS = 2000;
+
 // Best-effort drain on clean shutdown so the last event(s) of a session
 // aren't dropped. Safe to call even when telemetry was never enabled.
+// Always resolves within SHUTDOWN_TIMEOUT_MS regardless of network state.
 export async function shutdownTelemetry(): Promise<void> {
   if (!client) return;
   try {
-    await client.shutdown();
+    await Promise.race([
+      client.shutdown(),
+      new Promise<void>((resolve) => setTimeout(resolve, SHUTDOWN_TIMEOUT_MS).unref()),
+    ]);
   } catch {
     // Ignore -- process is exiting either way.
   }
