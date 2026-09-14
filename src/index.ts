@@ -55,6 +55,55 @@ import {
 import { offerEnforcementSetupOnce } from "./init-enforcement.js";
 import { connectInstructionsText, offerClientConnectSetupOnce, runConnect } from "./client-connect.js";
 
+// Read as early as possible in this file's own module-level code, wrapped
+// so a missing/corrupt package.json can't itself become a new, unguarded
+// crash source -- this is read before the crash handlers below exist to
+// catch anything. Moved up from where it used to live (just above the
+// `server` construction, far later in this file) after a 2026-09-14
+// incident where a caller crashed on every single launch, ~29 times in 4
+// minutes, immediately after a version bump published -- telemetry had no
+// way to say whether the crashing process was the old or new version (see
+// project_pattern_activation_funnel memory). Every pattern_cli_started/
+// pattern_cli_exited event now carries this, closing that gap for next
+// time.
+const PACKAGE_VERSION: string = (() => {
+  try {
+    return JSON.parse(
+      readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "package.json"), "utf8")
+    ).version;
+  } catch {
+    return "unknown";
+  }
+})();
+
+// Registered before anything else in this file runs (all the way up here,
+// not down by main() where it used to be) so a throw anywhere in this
+// file's own module-level code -- not just inside main() -- is captured
+// instead of dying silently before these handlers would otherwise have
+// existed. Can't cover a throw during the import statements above this
+// line (nothing can run before those resolve), but this closes the much
+// larger window between "imports finished" and "main() starts," which is
+// most of this file's ~4700 lines of function/constant definitions and
+// tool registrations.
+let exitTelemetryCaptured = false;
+function captureExitOnce(reason: Parameters<typeof captureCliExited>[0], err?: unknown): void {
+  if (exitTelemetryCaptured) return;
+  exitTelemetryCaptured = true;
+  captureCliExited(reason, err, PACKAGE_VERSION);
+}
+process.on("uncaughtException", async (err) => {
+  console.error("Pattern: uncaught exception, exiting.", err);
+  captureExitOnce("uncaught_exception", err);
+  await shutdownTelemetry();
+  process.exit(1);
+});
+process.on("unhandledRejection", async (reason) => {
+  console.error("Pattern: unhandled rejection, exiting.", reason);
+  captureExitOnce("unhandled_rejection", reason);
+  await shutdownTelemetry();
+  process.exit(1);
+});
+
 export const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 // Only required for org-scoped keys (not tied to one workspace); unset for
 // legacy workspace-scoped keys, which don't need it.
@@ -4104,14 +4153,8 @@ export function extractJson(text: string): string {
   return text.slice(start, end + 1);
 }
 
-// Read from package.json rather than hardcoding, so $mcp_server_version in
-// PostHog's MCP tool-call analytics (and any client that reads the MCP
-// initialize response) reflects the version actually installed instead of
-// staying frozen at whatever it was when this line was first written.
-const PACKAGE_VERSION: string = JSON.parse(
-  readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "package.json"), "utf8")
-).version;
-
+// PACKAGE_VERSION is defined near the top of this file now (read as early
+// as possible, before the crash handlers -- see the comment there).
 const server = new Server(
   { name: "pattern-mcp", version: PACKAGE_VERSION },
   { capabilities: { tools: {} } }
@@ -4716,33 +4759,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 // alt-tabbed away.
 const IDLE_CONNECT_NUDGE_MS = 20_000;
 
-// Registered once, at module load, so it covers the entire process
-// lifetime -- including a throw during main() itself, before the server
-// ever connects. Without this, a crash-on-start left no telemetry trace at
-// all: captureCliStarted fires, the process dies, and nothing explains why
-// (see project_pattern_activation_funnel memory -- the incident this
-// exists to make diagnosable next time). Both handlers exit(1) after
-// capturing: Node considers the process's state undefined past an uncaught
-// exception, so continuing to run is the wrong default regardless of
-// telemetry.
-let exitTelemetryCaptured = false;
-function captureExitOnce(reason: Parameters<typeof captureCliExited>[0], err?: unknown): void {
-  if (exitTelemetryCaptured) return;
-  exitTelemetryCaptured = true;
-  captureCliExited(reason, err);
-}
-process.on("uncaughtException", async (err) => {
-  console.error("Pattern: uncaught exception, exiting.", err);
-  captureExitOnce("uncaught_exception", err);
-  await shutdownTelemetry();
-  process.exit(1);
-});
-process.on("unhandledRejection", async (reason) => {
-  console.error("Pattern: unhandled rejection, exiting.", reason);
-  captureExitOnce("unhandled_rejection", reason);
-  await shutdownTelemetry();
-  process.exit(1);
-});
+// captureExitOnce and the uncaughtException/unhandledRejection handlers
+// are registered near the top of this file now, before PACKAGE_VERSION's
+// definition -- see the comment there for why.
 
 async function main() {
   // `npx pattern-mcp init` -- the connect wizard -- exits without ever
@@ -4750,7 +4769,7 @@ async function main() {
   // shadowed by a tool name collision later.
   const argv = process.argv.slice(2);
   if (argv[0] === "init") {
-    captureCliStarted("init");
+    captureCliStarted("init", PACKAGE_VERSION);
     await runConnect(PROJECT_ROOT, { yes: argv.includes("--yes") });
     await shutdownTelemetry();
     // Explicit exit, not a bare return -- shutdownTelemetry races a
@@ -4761,7 +4780,7 @@ async function main() {
     process.exit(0);
   }
 
-  captureCliStarted("server");
+  captureCliStarted("server", PACKAGE_VERSION);
   warnIfAnthropicKeyLooksWrong();
   printTelemetryNoticeOnce();
   // Piggybacks on this same first-run moment (Option B, see

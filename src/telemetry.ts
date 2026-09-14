@@ -265,8 +265,15 @@ export function captureRecommendation(args: {
 // project_pattern_reddit_launch_spike memory for why that gap mattered:
 // a 2026-09-11 download spike showed almost no matching $mcp_initialize
 // growth, and there was no signal at all for the step in between.
-export function captureCliStarted(mode: "server" | "init"): void {
-  capture("pattern_cli_started", { mode });
+// `version` is the running package.json version (see index.ts's
+// PACKAGE_VERSION) -- added 2026-09-14 after an incident where a caller
+// crashed on every launch attempt (~29 times in 4 minutes) in the few
+// minutes right after a version bump published, and telemetry had no way
+// to say whether the crashing process was the old or new version. Without
+// it, "did the fix actually ship before this happened" is unanswerable
+// from telemetry alone.
+export function captureCliStarted(mode: "server" | "init", version: string): void {
+  capture("pattern_cli_started", { mode, version });
 }
 
 export type CliExitReason =
@@ -280,14 +287,16 @@ export type CliExitReason =
 // diagnosable instead of silent -- added after a 2026-09-13 incident where
 // 33 starts in one hour produced exactly 1 successful handshake, and
 // telemetry had no way to say why the other 32 processes ended (see
-// project_pattern_activation_funnel memory). Only a coarse reason and the
-// thrown value's constructor name travel -- never the error message or
-// stack, which could contain a file path, a stray argument value, or other
-// local detail never sent by design (see this file's header).
-export function captureCliExited(reason: CliExitReason, err?: unknown): void {
+// project_pattern_activation_funnel memory). Only a coarse reason, the
+// thrown value's constructor name, and the running version travel --
+// never the error message or stack, which could contain a file path, a
+// stray argument value, or other local detail never sent by design (see
+// this file's header).
+export function captureCliExited(reason: CliExitReason, err: unknown, version: string): void {
   capture("pattern_cli_exited", {
     exit_reason: reason,
     error_name: err instanceof Error ? err.name : null,
+    version,
   });
 }
 
