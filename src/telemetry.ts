@@ -270,7 +270,6 @@ export function captureCliStarted(mode: "server" | "init"): void {
 }
 
 export type CliExitReason =
-  | "clean"
   | "sigint"
   | "sigterm"
   | "uncaught_exception"

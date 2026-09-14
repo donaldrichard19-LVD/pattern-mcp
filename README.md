@@ -15,12 +15,17 @@ design reference.
 
 [Website](https://usepattern.sh) · [npm](https://www.npmjs.com/package/pattern-mcp) · [Report an issue](https://github.com/donaldrichard19-LVD/pattern-mcp/issues/new/choose)
 
-**Current release: v0.13.0** — `npx pattern-mcp init` now sets up the
-connection to your MCP client for you (Claude Code, Claude Desktop,
-Cursor detected and configured automatically; Codex CLI gets manual
-instructions). Running `npx pattern-mcp` bare in your own terminal also
-now tells you it needs a client connected, instead of silently sitting
-there. See
+**Current release: v0.14.0** — a crash on startup is now diagnosable
+instead of silent (a new, coarse `pattern_cli_exited` telemetry event),
+Pattern warns at startup if `ANTHROPIC_API_KEY` is missing or clearly
+malformed instead of only surfacing a raw 401 mid-call, and a 429 from
+the Anthropic API now gets one respectful retry (honoring `Retry-After`)
+before it's raised. Previously: v0.13.0 added `npx pattern-mcp init`,
+which sets up the connection to your MCP client for you (Claude Code,
+Claude Desktop, Cursor detected and configured automatically; Codex CLI
+gets manual instructions). Running `npx pattern-mcp` bare in your own
+terminal also tells you it needs a client connected, instead of silently
+sitting there. See
 [Connect Pattern to your MCP client](#connect-pattern-to-your-mcp-client)
 for more details.
 
@@ -1859,6 +1864,14 @@ are a biased, tiny sample of everyone who installs.
      neither `recommend_component` counts nor `@posthog/mcp`'s handshake
      event below can answer, since both require getting further than a
      bare `npx pattern-mcp` run.
+   - On process exit, as of v0.14.0: a single `pattern_cli_exited` event
+     carrying only a coarse reason (`sigint`, `sigterm`,
+     `uncaught_exception`, `unhandled_rejection`, or
+     `fatal_startup_error`) and, for the two exception cases, the thrown
+     value's constructor name (e.g. `TypeError`) -- never the error
+     message or stack trace. Paired with `pattern_cli_started` so a start
+     with no matching MCP handshake is diagnosable as a crash instead of
+     silent.
 2. Standard MCP tool-call analytics, via
    [`@posthog/mcp`](https://posthog.com/docs/mcp-analytics): which tool
    was called, call duration, and success/failure, so unique installs and
