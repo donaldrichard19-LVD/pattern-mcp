@@ -36,6 +36,15 @@
  * itself are never sent, by either half. See SECURITY.md and README.md for
  * the full disclosure and how to opt out.
  *
+ * Manual/ad-hoc test sessions (a one-off MCP client run by hand while
+ * debugging, not a checked-in script) should set PATTERN_TELEMETRY=0 before
+ * connecting -- there's no way for this file to distinguish that from real
+ * usage on its own, and self-testing was previously showing up as if it
+ * were adoption (see project_pattern_activation_funnel memory: roughly half
+ * of all recorded handshakes turned out to be internal test/smoke-test
+ * clients). Checked-in test scripts (e.g. scripts/test-client.mjs) default
+ * this off already.
+ *
  * Reuses Pattern's existing PostHog project (the same one the marketing
  * site sends browser events to) with its public, write-only project key --
  * safe to embed in a distributed package the same way that key is already
@@ -258,6 +267,29 @@ export function captureRecommendation(args: {
 // growth, and there was no signal at all for the step in between.
 export function captureCliStarted(mode: "server" | "init"): void {
   capture("pattern_cli_started", { mode });
+}
+
+export type CliExitReason =
+  | "clean"
+  | "sigint"
+  | "sigterm"
+  | "uncaught_exception"
+  | "unhandled_rejection"
+  | "fatal_startup_error";
+
+// Paired with captureCliStarted so a start with no matching handshake is
+// diagnosable instead of silent -- added after a 2026-09-13 incident where
+// 33 starts in one hour produced exactly 1 successful handshake, and
+// telemetry had no way to say why the other 32 processes ended (see
+// project_pattern_activation_funnel memory). Only a coarse reason and the
+// thrown value's constructor name travel -- never the error message or
+// stack, which could contain a file path, a stray argument value, or other
+// local detail never sent by design (see this file's header).
+export function captureCliExited(reason: CliExitReason, err?: unknown): void {
+  capture("pattern_cli_exited", {
+    exit_reason: reason,
+    error_name: err instanceof Error ? err.name : null,
+  });
 }
 
 export function captureApiError(args: { tool: string; message: string; projectId?: string }): void {

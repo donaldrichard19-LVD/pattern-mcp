@@ -43,6 +43,7 @@ import { dirname, extname, isAbsolute, join, relative, resolve } from "node:path
 import { fileURLToPath } from "node:url";
 import {
   captureApiError,
+  captureCliExited,
   captureCliStarted,
   captureRecommendation,
   getClient as getPostHogClient,
@@ -58,6 +59,31 @@ export const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 // Only required for org-scoped keys (not tied to one workspace); unset for
 // legacy workspace-scoped keys, which don't need it.
 export const ANTHROPIC_WORKSPACE_ID = process.env.ANTHROPIC_WORKSPACE_ID;
+
+// Cheap, no-network sanity check on the key's shape, run once at startup.
+// Deliberately NOT a real auth ping against the Anthropic API -- that would
+// spend a real request on every single server boot (every MCP client
+// launch), which is exactly the kind of always-pay-the-API cost this
+// project avoids elsewhere (see the skip-list and ledger-cache-hit designs).
+// This only catches the cheap, common misconfigurations -- unset, empty, or
+// a value that's obviously not an Anthropic key (wrong var pasted, stray
+// quotes) -- surfaced at startup instead of only on the first real tool
+// call's 401. Never blocks startup; recommend_component/extract_requirements
+// still fail with their own clear message if this warning goes unheeded.
+function warnIfAnthropicKeyLooksWrong(): void {
+  if (!ANTHROPIC_API_KEY) {
+    console.error(
+      "Pattern: ANTHROPIC_API_KEY is not set. recommend_component and extract_requirements will fail until it is."
+    );
+    return;
+  }
+  if (!/^sk-ant-/.test(ANTHROPIC_API_KEY)) {
+    console.error(
+      "Pattern: ANTHROPIC_API_KEY is set but doesn't look like a real Anthropic key (expected it to start with " +
+        "\"sk-ant-\"). If a tool call fails with a 401, check this value first."
+    );
+  }
+}
 // Configurable so Sonnet vs. Haiku can be A/B tested without a code change.
 // Defaults to Sonnet 5. Try MODEL=claude-haiku-4-5-20251001 to test the
 // cheaper tier -- re-run the 5 validated test cases from the product brief
@@ -470,9 +496,17 @@ interface StreamedMessage {
 // in a new dependency for what's a small, stable, well-documented event
 // shape (message_start/content_block_start/_delta/_stop/message_delta/
 // message_stop).
-async function streamAnthropicMessage(body: Record<string, unknown>): Promise<StreamedMessage> {
-  const requestStartMs = Date.now();
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
+
+// One retry, not a real backoff loop -- deliberately cost-conscious (see
+// this project's skip-list/ledger-cache-hit reasoning): a 429 that's still
+// rate-limited after respecting the API's own Retry-After is treated as a
+// real failure to surface, not something worth spending a second wait on.
+const RATE_LIMIT_MAX_RETRIES = 1;
+// Fallback only for the rare case the API doesn't send Retry-After at all.
+const RATE_LIMIT_DEFAULT_BACKOFF_MS = 3000;
+
+function postAnthropicMessages(body: Record<string, unknown>): Promise<Response> {
+  return fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -482,13 +516,34 @@ async function streamAnthropicMessage(body: Record<string, unknown>): Promise<St
     },
     body: JSON.stringify({ ...body, stream: true }),
   });
+}
+
+async function streamAnthropicMessage(body: Record<string, unknown>): Promise<StreamedMessage> {
+  const requestStartMs = Date.now();
+  let response = await postAnthropicMessages(body);
+
+  for (let attempt = 0; response.status === 429 && attempt < RATE_LIMIT_MAX_RETRIES; attempt++) {
+    const retryAfterHeader = response.headers.get("retry-after");
+    const retryAfterSeconds = retryAfterHeader ? Number.parseFloat(retryAfterHeader) : NaN;
+    const waitMs = Number.isFinite(retryAfterSeconds)
+      ? Math.max(0, retryAfterSeconds * 1000)
+      : RATE_LIMIT_DEFAULT_BACKOFF_MS;
+    console.error(
+      `Pattern: rate limited by the Anthropic API, retrying in ${(waitMs / 1000).toFixed(1)}s ` +
+        `(${retryAfterHeader ? "per Retry-After" : "default backoff, no Retry-After header"})...`
+    );
+    await new Promise((resolve) => setTimeout(resolve, waitMs));
+    response = await postAnthropicMessages(body);
+  }
 
   if (!response.ok) {
     const errText = await response.text();
     const hint =
       response.status === 401
         ? " -- check that ANTHROPIC_API_KEY is set to a valid, active key in the environment running this MCP server."
-        : "";
+        : response.status === 429
+          ? " -- still rate limited after retrying once; the caller should wait longer before trying this request again."
+          : "";
     throw new Error(`Anthropic API error ${response.status}: ${errText}${hint}`);
   }
   if (!response.body) {
@@ -4661,6 +4716,34 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 // alt-tabbed away.
 const IDLE_CONNECT_NUDGE_MS = 20_000;
 
+// Registered once, at module load, so it covers the entire process
+// lifetime -- including a throw during main() itself, before the server
+// ever connects. Without this, a crash-on-start left no telemetry trace at
+// all: captureCliStarted fires, the process dies, and nothing explains why
+// (see project_pattern_activation_funnel memory -- the incident this
+// exists to make diagnosable next time). Both handlers exit(1) after
+// capturing: Node considers the process's state undefined past an uncaught
+// exception, so continuing to run is the wrong default regardless of
+// telemetry.
+let exitTelemetryCaptured = false;
+function captureExitOnce(reason: Parameters<typeof captureCliExited>[0], err?: unknown): void {
+  if (exitTelemetryCaptured) return;
+  exitTelemetryCaptured = true;
+  captureCliExited(reason, err);
+}
+process.on("uncaughtException", async (err) => {
+  console.error("Pattern: uncaught exception, exiting.", err);
+  captureExitOnce("uncaught_exception", err);
+  await shutdownTelemetry();
+  process.exit(1);
+});
+process.on("unhandledRejection", async (reason) => {
+  console.error("Pattern: unhandled rejection, exiting.", reason);
+  captureExitOnce("unhandled_rejection", reason);
+  await shutdownTelemetry();
+  process.exit(1);
+});
+
 async function main() {
   // `npx pattern-mcp init` -- the connect wizard -- exits without ever
   // starting the server. Checked before anything else so it can't be
@@ -4679,6 +4762,7 @@ async function main() {
   }
 
   captureCliStarted("server");
+  warnIfAnthropicKeyLooksWrong();
   printTelemetryNoticeOnce();
   // Piggybacks on this same first-run moment (Option B, see
   // init-enforcement.ts) -- always prints a one-time, non-blocking mention;
@@ -4713,10 +4797,14 @@ async function main() {
 
   await server.connect(transport);
   // Best-effort telemetry drain on clean shutdown -- no-op when telemetry
-  // was never enabled (see src/telemetry.ts).
+  // was never enabled (see src/telemetry.ts). Also captures which signal
+  // ended the process: a real client's normal disconnect looks the same as
+  // a supervisor repeatedly killing-and-restarting a failing process, and
+  // this is what tells the two apart in the starts-vs-exits comparison.
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
     process.on(signal, async () => {
       if (idleNudgeTimer) clearTimeout(idleNudgeTimer);
+      captureExitOnce(signal === "SIGINT" ? "sigint" : "sigterm");
       await shutdownTelemetry();
       process.exit(0);
     });
@@ -4730,8 +4818,10 @@ async function main() {
 // entry point, `npx pattern-mcp`) never sets this, so autostart is
 // unaffected.
 if (!process.env.PATTERN_NO_AUTOSTART) {
-  main().catch((err) => {
+  main().catch(async (err) => {
     console.error("Fatal error starting pattern-mcp:", err);
+    captureExitOnce("fatal_startup_error", err);
+    await shutdownTelemetry();
     process.exit(1);
   });
 }

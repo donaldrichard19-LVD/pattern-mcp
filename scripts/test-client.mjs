@@ -78,7 +78,13 @@ async function main() {
   const transport = new StdioClientTransport({
     command: "node",
     args: [resolve(projectRoot, "dist/index.js")],
-    env: { ...process.env },
+    // Defaults telemetry off for the spawned server -- this script is our
+    // own internal test harness, not a real user, and its runs were
+    // showing up in production usage numbers under client name
+    // "pattern-test-client" (see project_pattern_activation_funnel memory).
+    // Still overridable (e.g. a deliberate telemetry-pipeline test) by
+    // setting PATTERN_TELEMETRY before invoking this script.
+    env: { ...process.env, PATTERN_TELEMETRY: process.env.PATTERN_TELEMETRY ?? "0" },
   });
 
   const client = new Client(
