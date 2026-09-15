@@ -15,12 +15,17 @@ design reference.
 
 [Website](https://usepattern.sh) · [npm](https://www.npmjs.com/package/pattern-mcp) · [Report an issue](https://github.com/donaldrichard19-LVD/pattern-mcp/issues/new/choose)
 
-**Current release: v0.14.0** — a crash on startup is now diagnosable
-instead of silent (a new, coarse `pattern_cli_exited` telemetry event),
-Pattern warns at startup if `ANTHROPIC_API_KEY` is missing or clearly
-malformed instead of only surfacing a raw 401 mid-call, and a 429 from
-the Anthropic API now gets one respectful retry (honoring `Retry-After`)
-before it's raised. Previously: v0.13.0 added `npx pattern-mcp init`,
+**Current release: v0.14.1** — the crash/exit telemetry added in
+v0.14.0 (`pattern_cli_exited`) is now registered before any of this
+file's own module-level code runs, instead of near `main()`, so it
+catches more of what can go wrong on startup; both `pattern_cli_started`
+and `pattern_cli_exited` now also carry the running package version, so
+a crash right around a release can be tied to the old or new binary
+instead of staying ambiguous. Previously: v0.14.0 made a crash on
+startup diagnosable instead of silent, warned at startup if
+`ANTHROPIC_API_KEY` is missing or clearly malformed instead of only
+surfacing a raw 401 mid-call, and added one respectful retry on a 429
+(honoring `Retry-After`). Before that: v0.13.0 added `npx pattern-mcp init`,
 which sets up the connection to your MCP client for you (Claude Code,
 Claude Desktop, Cursor detected and configured automatically; Codex CLI
 gets manual instructions). Running `npx pattern-mcp` bare in your own
