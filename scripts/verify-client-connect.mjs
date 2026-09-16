@@ -191,6 +191,76 @@ console.log("3. offerClientConnectSetupOnce: PATTERN_NO_CONNECT_NOTICE skips ent
   cleanup(root, home);
 }
 
+console.log("3b. offerClientConnectSetupOnce: keeps offering the wizard on later bare TTY runs, not just once");
+{
+  const { root, home } = scratch();
+  const markerPath = join(root, "connect_notice_marker");
+  const scriptPath = join(tmpdir(), "pattern-connect-repeat-offer-test.mjs");
+  writeFileSync(
+    scriptPath,
+    [
+      'process.stdin.isTTY = true;',
+      `const { offerClientConnectSetupOnce } = await import(${JSON.stringify(clientConnectPath)});`,
+      `await offerClientConnectSetupOnce(${JSON.stringify(root)});`,
+      'console.log("CALL_ONE_DONE");',
+      `await offerClientConnectSetupOnce(${JSON.stringify(root)});`,
+      'console.log("CALL_TWO_DONE");',
+    ].join("\n"),
+    "utf8",
+  );
+  // Two piped answers, one per call: decline the wizard both times ("n").
+  const result = spawnSync("node", [scriptPath], {
+    input: "n\nn\n",
+    encoding: "utf8",
+    timeout: 5000,
+    env: { ...process.env, PATTERN_CONNECT_NOTICE_PATH: markerPath, PATTERN_PROJECT_ROOT: root, PATH: ISOLATED_PATH },
+  });
+  check("both calls complete without hanging", result.stdout.includes("CALL_TWO_DONE"));
+  const promptCount = (result.stdout.match(/[Rr]un the connect wizard now\?/g) || []).length;
+  check("prompted on the first call", promptCount >= 1);
+  check("prompted again on the second call (this is the fix -- it used to go silent after one)", promptCount === 2);
+  check("second prompt uses the 'no client connected yet' wording", result.stdout.includes("No MCP client is connected to Pattern yet"));
+  rmSync(scriptPath, { force: true });
+  cleanup(root, home);
+}
+
+console.log("3c. offerClientConnectSetupOnce: stops offering once a client is actually connected");
+{
+  const { root, home } = scratch();
+  const markerPath = join(root, "connect_notice_marker");
+  // Simulate a prior successful Cursor setup -- isAnyClientConnected()
+  // should detect this and skip the prompt entirely, with no answer
+  // needed on stdin at all (if it prompted anyway, this would hang and
+  // the timeout below would fail the test).
+  mkdirSync(join(root, ".cursor"), { recursive: true });
+  writeFileSync(
+    join(root, ".cursor", "mcp.json"),
+    JSON.stringify({ mcpServers: { pattern: { command: "npx", args: ["pattern-mcp"] } } }, null, 2),
+    "utf8",
+  );
+  const scriptPath = join(tmpdir(), "pattern-connect-already-done-test.mjs");
+  writeFileSync(
+    scriptPath,
+    [
+      'process.stdin.isTTY = true;',
+      `const { offerClientConnectSetupOnce } = await import(${JSON.stringify(clientConnectPath)});`,
+      `await offerClientConnectSetupOnce(${JSON.stringify(root)});`,
+      'console.log("DONE");',
+    ].join("\n"),
+    "utf8",
+  );
+  const result = spawnSync("node", [scriptPath], {
+    input: "",
+    encoding: "utf8",
+    timeout: 5000,
+    env: { ...process.env, PATTERN_CONNECT_NOTICE_PATH: markerPath, PATTERN_PROJECT_ROOT: root, PATH: ISOLATED_PATH },
+  });
+  check("completes without hanging (no prompt was waiting on stdin)", result.stdout.includes("DONE"));
+  check("did not prompt -- a real connection was already detected", !/[Rr]un the connect wizard now\?/.test(result.stdout));
+  rmSync(scriptPath, { force: true });
+  cleanup(root, home);
+}
+
 console.log("4. pattern-mcp init: no client detected -> fallback instructions, exits cleanly");
 {
   const { root, home } = scratch();

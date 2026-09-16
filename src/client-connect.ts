@@ -154,6 +154,31 @@ async function mergeServerConfig(
   console.log(`Written. Restart ${label} to pick it up.`);
 }
 
+function clientConfigHasPattern(path: string | null): boolean {
+  if (!path) return false;
+  const { config } = readJsonConfig(path);
+  return Boolean((config.mcpServers as Record<string, unknown> | undefined)?.pattern);
+}
+
+// Best-effort, read-only check across every client Pattern knows how to
+// detect a prior successful setup for -- used to decide whether to keep
+// offering the connect wizard on a later bare run (see
+// offerClientConnectSetupOnce below), instead of asking only once ever
+// regardless of outcome. Codex is deliberately excluded: its config is
+// TOML, which this project never parses or writes (see
+// offerCodexInstructions), so there's no way to confirm a Codex-only
+// setup from here. That means a Codex-only user keeps getting offered
+// the wizard -- a false negative, which is the safe failure mode (asks
+// again when already connected) rather than a false positive (goes quiet
+// when it isn't).
+export function isAnyClientConnected(root: string): boolean {
+  return (
+    claudeCodeAlreadyConnected() ||
+    clientConfigHasPattern(claudeDesktopConfigPath()) ||
+    clientConfigHasPattern(join(root, ".cursor", "mcp.json"))
+  );
+}
+
 // Claude Desktop isn't shipped on Linux -- there's no config path to
 // even guess at there, so this target is simply not offered on that
 // platform rather than writing a file no client will ever read.
@@ -262,39 +287,54 @@ export async function runConnect(root: string, options: ConnectOptions): Promise
 // Option 1/#1 from the activation-funnel discussion: piggybacks on the
 // same first-run moment as the telemetry and enforcement-boundary
 // notices (see telemetry.ts's printTelemetryNoticeOnce, which states the
-// stdin constraint first). Always prints a one-time, non-blocking
-// mention -- including when a real MCP client has spawned this as a
-// subprocess, where it's genuinely irrelevant but harmless, since the
-// notice is gated on a marker file the same as the others. Only offers
-// the actual interactive "set it up now?" prompt when stdin is a real
-// TTY, i.e. a human ran `npx pattern-mcp` bare in their own shell.
+// stdin constraint first). Always prints the full notice once, ever --
+// including when a real MCP client has spawned this as a subprocess,
+// where it's genuinely irrelevant but harmless, since the notice is
+// gated on a marker file the same as the others.
+//
+// The interactive "set it up now?" prompt is different: it used to be
+// gated on that same one-time marker, so a human who ignored or missed
+// it on the very first bare run never saw it again -- a permanent
+// drop-off with no second chance, found while mapping the new-install
+// journey (see project_pattern_activation_funnel memory). It now keeps
+// reappearing on every bare TTY run -- a human running `npx pattern-mcp`
+// in their own shell, never a real client's spawned subprocess -- for as
+// long as isAnyClientConnected() can't confirm a real connection exists
+// yet. This is the concrete fix for "don't rely on the user to figure
+// out how to connect": Pattern keeps offering, not just once, until it
+// can verify success, or until PATTERN_NO_CONNECT_NOTICE opts out.
 const CONNECT_NOTICE_PATH =
   process.env.PATTERN_CONNECT_NOTICE_PATH ?? join(homedir(), ".pattern", "connect_notice_shown");
 
 export async function offerClientConnectSetupOnce(root: string): Promise<void> {
   if (process.env.PATTERN_NO_CONNECT_NOTICE) return;
 
+  let noticeAlreadyShown = true;
   try {
     readFileSync(CONNECT_NOTICE_PATH, "utf8");
-    return;
   } catch {
-    // No marker yet -- fall through and show it.
+    noticeAlreadyShown = false;
   }
 
-  console.error(["", "Pattern -- one-time setup notice (this will not print again)", connectInstructionsText(), ""].join("\n"));
-
-  try {
-    mkdirSync(dirname(CONNECT_NOTICE_PATH), { recursive: true });
-    writeFileSync(CONNECT_NOTICE_PATH, new Date().toISOString(), "utf8");
-  } catch {
-    // Couldn't persist the marker -- worst case this prints again next
-    // run. Never blocks startup over it, same as the other notices.
+  if (!noticeAlreadyShown) {
+    console.error(["", "Pattern -- one-time setup notice (this will not print again)", connectInstructionsText(), ""].join("\n"));
+    try {
+      mkdirSync(dirname(CONNECT_NOTICE_PATH), { recursive: true });
+      writeFileSync(CONNECT_NOTICE_PATH, new Date().toISOString(), "utf8");
+    } catch {
+      // Couldn't persist the marker -- worst case this prints again next
+      // run. Never blocks startup over it, same as the other notices.
+    }
   }
 
   if (!process.stdin.isTTY) return;
+  if (isAnyClientConnected(root)) return;
 
   try {
-    const setUpNow = await confirm("Run the connect wizard now?", { yes: false }, true);
+    const question = noticeAlreadyShown
+      ? "No MCP client is connected to Pattern yet -- run the connect wizard now?"
+      : "Run the connect wizard now?";
+    const setUpNow = await confirm(question, { yes: false }, true);
     if (setUpNow) {
       await runConnect(root, { yes: false }); // closes the shared readline itself
     }
