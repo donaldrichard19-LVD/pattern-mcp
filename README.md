@@ -15,22 +15,22 @@ design reference.
 
 [Website](https://usepattern.sh) · [npm](https://www.npmjs.com/package/pattern-mcp) · [Report an issue](https://github.com/donaldrichard19-LVD/pattern-mcp/issues/new/choose)
 
-**Current release: v0.14.1** — the crash/exit telemetry added in
-v0.14.0 (`pattern_cli_exited`) is now registered before any of this
-file's own module-level code runs, instead of near `main()`, so it
-catches more of what can go wrong on startup; both `pattern_cli_started`
-and `pattern_cli_exited` now also carry the running package version, so
-a crash right around a release can be tied to the old or new binary
-instead of staying ambiguous. Previously: v0.14.0 made a crash on
-startup diagnosable instead of silent, warned at startup if
-`ANTHROPIC_API_KEY` is missing or clearly malformed instead of only
-surfacing a raw 401 mid-call, and added one respectful retry on a 429
-(honoring `Retry-After`). Before that: v0.13.0 added `npx pattern-mcp init`,
-which sets up the connection to your MCP client for you (Claude Code,
-Claude Desktop, Cursor detected and configured automatically; Codex CLI
-gets manual instructions). Running `npx pattern-mcp` bare in your own
-terminal also tells you it needs a client connected, instead of silently
-sitting there. See
+**Current release: v0.15.0** — `npx pattern-mcp init` is now the first
+and only command shown for getting started, everywhere (this README
+and the website); bare `npx pattern-mcp` is documented as the server
+command your client uses, not something to run yourself. The connect
+wizard also no longer asks just once: if you run Pattern bare in your
+own terminal and skip or miss it, it keeps offering on every later run
+until it can actually confirm a client is connected, instead of going
+silent forever after the first try. Previously: v0.14.1 made the
+crash/exit telemetry added in v0.14.0 (`pattern_cli_exited`) register
+before any of this file's own module-level code runs, and tagged both
+it and `pattern_cli_started` with the running package version, so a
+crash right around a release can be tied to the old or new binary. Before
+that: v0.14.0 made a crash on startup diagnosable instead of silent,
+warned at startup if `ANTHROPIC_API_KEY` is missing or clearly
+malformed instead of only surfacing a raw 401 mid-call, and added one
+respectful retry on a 429 (honoring `Retry-After`). See
 [Connect Pattern to your MCP client](#connect-pattern-to-your-mcp-client)
 for more details.
 
