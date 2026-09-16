@@ -222,19 +222,46 @@ async function setupCursor(root: string, apiKey: string | null, options: Connect
 // existing config is worse than just telling them what to add. Detected
 // the same way as the other targets (evidence it's actually used), but
 // only ever prints instructions.
-function offerCodexInstructions(): void {
+//
+// Deliberately does NOT print a per-server `env = {...}` TOML snippet for
+// the API key, unlike the command/args lines above -- checked directly
+// (openai/codex#7521, open as of 2026-09): Codex's own maintainers hadn't
+// settled which env-var syntax their TOML config actually supports at the
+// time this was written. Printing a guessed snippet risked giving
+// confidently wrong instructions, worse than the honest "it depends on
+// your version, here's what works regardless" below. A plain shell
+// export is the one method that works the same way across every Codex
+// version and every other client here, since it never depends on a
+// client-specific config format at all.
+function offerCodexInstructions(apiKey: string | null): void {
   if (!existsSync(join(homedir(), ".codex"))) return;
-  console.log(
-    [
-      "\nCodex CLI detected (~/.codex exists). Pattern doesn't auto-write Codex's",
-      "TOML config -- add this to ~/.codex/config.toml (or .codex/config.json for",
-      "this project only):",
+  const lines = [
+    "\nCodex CLI detected (~/.codex exists). Pattern doesn't auto-write Codex's",
+    "TOML config -- add this to ~/.codex/config.toml (or .codex/config.json for",
+    "this project only):",
+    "",
+    '  [mcp_servers.pattern]',
+    '  command = "npx"',
+    '  args = ["pattern-mcp"]',
+    "",
+  ];
+  if (apiKey) {
+    lines.push(
+      "You entered an API key above. Codex's own per-server TOML env syntax isn't",
+      "reliably documented across versions, so the safest way to get it to Codex",
+      "is exporting it in the shell you launch Codex from:",
       "",
-      '  [mcp_servers.pattern]',
-      '  command = "npx"',
-      '  args = ["pattern-mcp"]',
-    ].join("\n"),
-  );
+      `  export ANTHROPIC_API_KEY="${apiKey}"`,
+    );
+  } else {
+    lines.push(
+      "Codex also needs ANTHROPIC_API_KEY available in its own environment.",
+      "Export it in the shell you launch Codex from:",
+      "",
+      "  export ANTHROPIC_API_KEY=sk-ant-...",
+    );
+  }
+  console.log(lines.join("\n"));
 }
 
 async function promptApiKey(options: ConnectOptions): Promise<string | null> {
@@ -269,7 +296,7 @@ export async function runConnect(root: string, options: ConnectOptions): Promise
     }
     if (existsSync(join(homedir(), ".codex"))) {
       anyDetected = true;
-      offerCodexInstructions();
+      offerCodexInstructions(apiKey);
     }
 
     if (!anyDetected) {

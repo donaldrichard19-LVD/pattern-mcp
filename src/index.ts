@@ -133,6 +133,21 @@ function warnIfAnthropicKeyLooksWrong(): void {
     );
   }
 }
+
+// Thrown by recommend_component/extract_requirements when they actually
+// need the API and no key is present -- this is what the calling agent
+// sees as the tool's error result, so unlike warnIfAnthropicKeyLooksWrong's
+// stderr line (invisible in most real clients -- see
+// project_pattern_activation_funnel memory), this is the message a real
+// user is actually likely to see. Gives two concrete fixes rather than
+// just naming the problem: re-running `init` (which already offers to
+// write the key into every client it detects), or exporting it directly --
+// the one method that works the same way across every client, since it
+// doesn't depend on any client-specific config format.
+const MISSING_API_KEY_MESSAGE =
+  "Pattern: ANTHROPIC_API_KEY is not set, so this call can't reach the Anthropic API. Fix it one of two ways: " +
+  "re-run `npx pattern-mcp init` to add it to your MCP client's config, or export it directly -- " +
+  "`export ANTHROPIC_API_KEY=sk-ant-...` in the shell your client launches Pattern from, then restart the client.";
 // Configurable so Sonnet vs. Haiku can be A/B tested without a code change.
 // Defaults to Sonnet 5. Try MODEL=claude-haiku-4-5-20251001 to test the
 // cheaper tier -- re-run the 5 validated test cases from the product brief
@@ -1313,18 +1328,16 @@ async function runSinglePass(input: {
   project_id?: string;
   checklist?: string[];
 }): Promise<SinglePassResult> {
-  if (!ANTHROPIC_API_KEY) {
-    throw new Error(
-      "ANTHROPIC_API_KEY is not set. Export it in the environment running this MCP server."
-    );
-  }
-
   const passStartMs = Date.now();
   const checklistSource: "extracted" | "provided" = input.checklist && input.checklist.length > 0 ? "provided" : "extracted";
 
   // Fast path: skip-list check happens locally too, so trivial primitives
   // never spend a real API call. The system prompt also enforces this, but
-  // checking here avoids the round-trip entirely for the common case.
+  // checking here avoids the round-trip entirely for the common case. The
+  // ANTHROPIC_API_KEY check used to run before this, unconditionally --
+  // meaning a keyless install couldn't get even this free, local path.
+  // Moved below the skip-list return so a missing/invalid key only ever
+  // blocks the cases that actually need the API.
   if (isSkipListMatch(input.component_need)) {
     const skipListElapsedMs = Math.max(1, Date.now() - passStartMs);
     return {
@@ -1356,6 +1369,10 @@ async function runSinglePass(input: {
         },
       },
     };
+  }
+
+  if (!ANTHROPIC_API_KEY) {
+    throw new Error(MISSING_API_KEY_MESSAGE);
   }
 
   // Coverage still computes fresh below regardless of what this finds --
@@ -1723,12 +1740,6 @@ type ExtractionOutcome = { ok: true; result: ExtractionResult } | { ok: false; r
 // for the same reason (trivial primitives shouldn't cost an API call here
 // either).
 async function runExtraction(input: { component_need: string; domain: string }): Promise<ExtractionOutcome> {
-  if (!ANTHROPIC_API_KEY) {
-    throw new Error(
-      "ANTHROPIC_API_KEY is not set. Export it in the environment running this MCP server."
-    );
-  }
-
   const startMs = Date.now();
 
   if (isSkipListMatch(input.component_need)) {
@@ -1746,6 +1757,10 @@ async function runExtraction(input: { component_need: string; domain: string }):
         },
       },
     };
+  }
+
+  if (!ANTHROPIC_API_KEY) {
+    throw new Error(MISSING_API_KEY_MESSAGE);
   }
 
   const userMessage = `component_need: ${input.component_need}\ndomain: ${input.domain}`;

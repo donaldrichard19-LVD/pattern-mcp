@@ -12,6 +12,8 @@
  * Run: node scripts/verify-client-connect.mjs (after `npm run build`)
  * Exits non-zero on any failed assertion.
  */
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -324,6 +326,75 @@ console.log("7. pattern-mcp init: with API key provided, writes it into the conf
   check("exits 0", result.status === 0);
   const written = JSON.parse(readFileSync(join(root, ".cursor", "mcp.json"), "utf8"));
   check("API key written into env block", written.mcpServers?.pattern?.env?.ANTHROPIC_API_KEY === "sk-ant-test-key");
+  cleanup(root, home);
+}
+
+console.log("8. pattern-mcp init: Codex + no key -> generic export reminder, no key leaked");
+{
+  const { root, home } = scratch();
+  mkdirSync(join(home, ".codex"), { recursive: true });
+  const result = runInit(root, home, ["--yes"]);
+  check("exits 0", result.status === 0);
+  check("prints the generic export reminder", result.stdout.includes("export ANTHROPIC_API_KEY=sk-ant-..."));
+  check("does not claim a key was entered", !result.stdout.includes("You entered an API key above"));
+  cleanup(root, home);
+}
+
+console.log("9. pattern-mcp init: Codex + a provided key -> echoes a ready-to-run export line");
+{
+  const { root, home } = scratch();
+  mkdirSync(join(home, ".codex"), { recursive: true });
+  // Piped: the API key itself. No client that writes a config file is
+  // present, so there's no second "confirm write?" prompt to answer.
+  const result = runInit(root, home, [], "sk-ant-codex-test-key\n");
+  check("exits 0", result.status === 0);
+  check("acknowledges a key was entered", result.stdout.includes("You entered an API key above"));
+  check("echoes the real key in a copy-pasteable export line", result.stdout.includes('export ANTHROPIC_API_KEY="sk-ant-codex-test-key"'));
+  cleanup(root, home);
+}
+
+console.log("10. recommend_component: a skip-list primitive succeeds with no ANTHROPIC_API_KEY set at all");
+{
+  const { root, home } = scratch();
+  const transport = new StdioClientTransport({
+    command: "node",
+    args: [indexPath],
+    env: {
+      PATH: ISOLATED_PATH,
+      HOME: home,
+      PATTERN_PROJECT_ROOT: root,
+      PATTERN_TELEMETRY: "0",
+      // ANTHROPIC_API_KEY deliberately omitted -- this is the whole point.
+    },
+  });
+  const client = new Client({ name: "verify-client-connect", version: "0.0.0" }, { capabilities: {} });
+  await client.connect(transport);
+  try {
+    const skipListResult = await client.callTool({
+      name: "recommend_component",
+      arguments: { component_need: "button", domain: "test", framework: "React" },
+    });
+    check("skip-list call did not error", !skipListResult.isError);
+    let parsed = null;
+    try {
+      parsed = JSON.parse(skipListResult.content?.[0]?.text ?? "");
+    } catch {
+      // handled by the check below
+    }
+    check("verdict is use_existing", parsed?.verdict === "use_existing");
+    check("reason is skip_list -- confirms the free local path, not a lucky API success", parsed?.reason === "skip_list");
+
+    const realCallResult = await client.callTool({
+      name: "recommend_component",
+      arguments: { component_need: "host earnings dashboard with payout history", domain: "test", framework: "React" },
+    });
+    check(
+      "a real (non-skip-list) call still fails without a key, with the actionable message",
+      realCallResult.isError && (realCallResult.content?.[0]?.text ?? "").includes("re-run `npx pattern-mcp init`"),
+    );
+  } finally {
+    await client.close();
+  }
   cleanup(root, home);
 }
 
