@@ -34,7 +34,12 @@ const VERDICT_LINES = [
   "}",
 ];
 
-const INSTALL_LINES = ["npx pattern-mcp"];
+// `init --yes` (not the bare server command) so this is safe for a coding
+// agent to run non-interactively -- bare `npx pattern-mcp` starts a real
+// process that just sits on stdin waiting for a client, which would hang
+// an agent's shell tool call instead of completing. `init --yes` detects
+// and connects every supported client and exits, no prompts.
+const INSTALL_LINES = ["npx pattern-mcp init --yes"];
 const ENFORCEMENT_INIT_LINES = ["npx pattern-check-gate init"];
 
 const AGENT_PROMPT =

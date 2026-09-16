@@ -50,11 +50,22 @@ for more details.
 ## Install
 
 ```bash
-npx pattern-mcp
+npx pattern-mcp init
 ```
 
-See [Quick Start](#quick-start) below to add your Anthropic API key and connect
-Pattern to your MCP client.
+This is the only command you run yourself. It downloads Pattern,
+detects which MCP client(s) you have (Claude Code, Claude Desktop,
+Cursor, or Codex CLI), connects each one for you, and offers to add
+your Anthropic API key. See [Quick Start](#quick-start) below for what it
+does step by step, or
+[Connect Pattern to your MCP client](#connect-pattern-to-your-mcp-client)
+if you'd rather connect a client by hand.
+
+`npx pattern-mcp` on its own (no `init`) is the server command your MCP
+client will use once connected -- running it yourself in a bare
+terminal starts a real process that just sits there waiting for a
+client, since nothing has told it to connect to one yet. Prefer `init`
+above for getting started.
 
 ## What Pattern Does
 
@@ -224,14 +235,40 @@ threshold.
 
 ## Quick Start
 
-### 1. Install
+### 1. Install and connect
 
 ```bash
-npx pattern-mcp
+npx pattern-mcp init
 ```
 
-`npx` runs the `pattern-mcp` command on demand without a separate install
-step, used in the client configs below.
+This is the only command you need to run yourself -- `npx` downloads
+`pattern-mcp` on demand, then `init` detects which clients you have
+installed and offers to connect each one:
+
+- **Claude Code** -- runs `claude mcp add` for you (asks whether to make
+  Pattern available in every project or just this one); skips if already
+  connected (`claude mcp list` already shows it).
+- **Claude Desktop** and **Cursor** -- merges a `pattern` entry into the
+  client's own config file, showing the exact change before writing it
+  and never touching any other server already configured there.
+- **Codex CLI** -- prints the config snippet to add by hand (Codex's
+  config is TOML; this doesn't auto-edit it).
+
+Optionally pastes your `ANTHROPIC_API_KEY` into whichever configs you set
+up (visible in plain text as you type it, and in the files it writes) --
+press Enter to skip and add it yourself later, see
+[step 2](#2-add-your-anthropic-api-key) below. Run non-interactively with
+`--yes` (skips the API key prompt entirely, accepts every detected
+client).
+
+If `init` doesn't detect your client, or you'd rather set it up by
+hand, see [Connect Pattern to your MCP client](#connect-pattern-to-your-mcp-client)
+below for the same configs, per client, done manually. The server
+command either way is `npx pattern-mcp` -- this is what your client's
+config launches; you shouldn't need to run it yourself. If you do run
+it bare in your own terminal (e.g. to double check the install), it
+will just sit there waiting for a client and periodically remind you
+to run `init` -- that's expected, not a hang.
 
 <details>
 <summary>Build from source instead</summary>
@@ -243,14 +280,15 @@ npm install
 npm run build
 ```
 
-Use `node /absolute/path/to/pattern-mcp/dist/index.js` as the server
-command in place of `npx pattern-mcp` in the examples below.
+Use `node /absolute/path/to/pattern-mcp/dist/index.js` in place of
+`npx pattern-mcp` everywhere in this README, including inside `init`'s
+own generated client configs.
 
 </details>
 
 ### 2. Add your Anthropic API key
 
-Pattern requires:
+Skipped it above, or want to change it? Pattern requires:
 
 ```
 ANTHROPIC_API_KEY
@@ -265,40 +303,10 @@ Claude Pro or Max subscription does not include API usage.
 
 ### Connect Pattern to your MCP client
 
-Pattern is a standard MCP server, so it works with MCP-compatible
-clients.
-
-The server command is:
-
-```
-npx pattern-mcp
-```
-
-#### Automatic setup
-
-```bash
-npx pattern-mcp init
-```
-
-Detects which clients are installed and offers to connect each one:
-
-- **Claude Code** -- runs `claude mcp add` for you (asks whether to make
-  Pattern available in every project or just this one); skips if already
-  connected (`claude mcp list` already shows it).
-- **Claude Desktop** and **Cursor** -- merges a `pattern` entry into the
-  client's own config file, showing the exact change before writing it
-  and never touching any other server already configured there.
-- **Codex CLI** -- prints the config snippet to add by hand (Codex's
-  config is TOML; this doesn't auto-edit it).
-
-Optionally pastes your `ANTHROPIC_API_KEY` into whichever configs you set
-up (visible in plain text as you type it, and in the files it writes) --
-press Enter to skip and add it yourself later instead. Run
-non-interactively with `--yes` (skips the API key prompt entirely,
-accepts every detected client).
-
-If you'd rather do it by hand, or `init` didn't detect your client, the
-per-client instructions below cover the same configs manually.
+[Step 1](#1-install-and-connect) above (`npx pattern-mcp init`) does
+this automatically for every client it detects -- the sections below
+are the same configs done by hand, for a client `init` didn't detect,
+or if you'd simply rather edit the config yourself.
 
 #### Claude Code
 
