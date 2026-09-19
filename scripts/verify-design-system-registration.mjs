@@ -155,14 +155,17 @@ writeFileSync(
 writeFileSync(
   join(root, "components", "Tabs.tsx"),
   [
-    "/**",
-    " * Tabbed panel switcher.",
-    " * Renders a row of tab triggers above the active section.",
-    " */",
+    "/** Unrelated helper: formats a tab label. Must NOT become a description. */",
+    "function formatLabel(l: string) { return l; }",
+    "",
     "interface TabsProps {",
     "  value: string;",
     "  onValueChange?: () => void;",
     "}",
+    "/**",
+    " * Tabbed panel switcher.",
+    " * Renders a row of tab triggers above the active section.",
+    " */",
     "const Tabs = React.forwardRef(() => null);",
     "const TabsList = React.forwardRef(() => null);",
     "const tabsVariants = () => \"\";",
@@ -287,8 +290,9 @@ console.log("\n=== 7. Directory scan: parsing heuristics ===");
   check("generic component (List<T>) found", byName.List?.file_path === "List.tsx");
   check("lowercase export-list name (tabsVariants) excluded", byName.tabsVariants === undefined);
   check("barrel re-export (export { Tabs } from) does not add a second Tabs", (body?.registration?.candidates ?? []).filter((c) => c.name === "Tabs").length === 1);
-  check("leading doc comment captured as description", byName.Tabs?.description === "Tabbed panel switcher. Renders a row of tab triggers above the active section.");
+  check("doc comment directly above the component captured as its description", byName.Tabs?.description === "Tabbed panel switcher. Renders a row of tab triggers above the active section.");
   check("file with no doc comment keeps description null", byName.Spinner?.description === null);
+  check("component with no comment of its own gets null, not a sibling's/first-in-file comment", byName.TabsList?.description === null);
   check("exactly 7 real components found (Button, Card, Badge, Spinner, Tabs, TabsList, List)", Object.keys(byName).length === 7);
 }
 

@@ -910,9 +910,13 @@ server's working directory) -- never an absolute path.
   scanned recursively for `.jsx`/`.tsx`/`.js`/`.ts` files (excluding
   `node_modules`/`dist`/`build`/`.git` and `.test.`/`.spec.`/`.stories.`
   files). Each exported, uppercase-named function or const component found
-  becomes a candidate, with props read in priority order from a
-  `<Name>Props` interface/type, a `.propTypes` block, or (last resort) the
-  component's own destructured parameters. This is a heuristic scan, not a
+  becomes a candidate -- including names in `export { A, B }` lists and
+  generic components like `function List<T>(`; `export { X } from "./x"`
+  re-exports are skipped (X is scanned in its own file). Props are read in
+  priority order from a `<Name>Props` interface/type, a `.propTypes` block,
+  the component's own destructured parameters, or (last resort) the file's
+  other `*Props` types. A `/** ... */` comment directly above a component's
+  definition becomes its `description`; components without one get `null`. This is a heuristic scan, not a
   full parser -- a sparse or partial props list for some components is
   expected, not a bug, especially on plain JS with no prop typing at all.
 

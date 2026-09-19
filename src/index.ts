@@ -2174,12 +2174,19 @@ function extractFileWidePropNames(content: string): string[] {
   return [...props].slice(0, 25);
 }
 
-// The file's first /** ... */ block, whitespace-normalised and capped --
-// free descriptive text for the scorer, null when the file has none.
-function extractLeadingDocComment(content: string): string | null {
-  const m = content.match(/\/\*\*([\s\S]*?)\*\//);
-  if (!m) return null;
-  const text = m[1].replace(/^\s*\*\s?/gm, "").replace(/\s+/g, " ").trim();
+// The /** ... */ block sitting directly above a component's own definition
+// (only whitespace between them), whitespace-normalised and capped -- free
+// descriptive text for the scorer. Deliberately NOT "the file's first doc
+// comment": that can describe an unrelated inner helper (a real
+// markdown.tsx opens with a comment about an image-zoom embed) and mislead
+// the scorer worse than no description at all. Null when the component has
+// no comment of its own.
+function extractDocCommentBefore(content: string, index: number): string | null {
+  const before = content.slice(0, index).trimEnd();
+  if (!before.endsWith("*/")) return null;
+  const open = before.lastIndexOf("/**");
+  if (open === -1 || before.slice(open, -2).includes("*/")) return null;
+  const text = before.slice(open + 3, -2).replace(/^\s*\*\s?/gm, "").replace(/\s+/g, " ").trim();
   return text ? text.slice(0, 300) : null;
 }
 
@@ -2207,7 +2214,6 @@ function scanComponentFile(absPath: string, relPath: string): DesignSystemCandid
   while ((m = constRe.exec(content)) !== null) if (!names.has(m[1])) names.set(m[1], m.index);
   for (const n of extractExportListNames(content)) if (!names.has(n)) names.set(n, null);
 
-  const description = extractLeadingDocComment(content);
   const fileWideProps = extractFileWidePropNames(content);
   const candidates: DesignSystemCandidate[] = [];
   for (const [name, idx] of names) {
@@ -2232,6 +2238,15 @@ function scanComponentFile(absPath: string, relPath: string): DesignSystemCandid
     }
 
     if (props.length === 0) props = fileWideProps;
+
+    // Export-list names have no definition index yet -- find where the
+    // component is actually declared so its own comment can be read.
+    let declIdx = idx;
+    if (declIdx === null) {
+      const decl = new RegExp(`(?:^|\\n)[ \\t]*(?:const|let|function|class)\\s+${name}\\b`).exec(content);
+      declIdx = decl ? decl.index : null;
+    }
+    const description = declIdx === null ? null : extractDocCommentBefore(content, declIdx);
 
     candidates.push({ name, props, description, usage_example: null, file_path: relPath });
   }
