@@ -15,6 +15,9 @@
  *   R2  the same shipped-scanner output collapsed to ONE candidate per file
  *       (exports joined, props unioned, file name in evidence, like E1).
  *   R3  R2 + the cached Haiku capability summary (like E3, on shipped output).
+ *   R2A R2 + names from `export { X } from` re-exports added to the exports list
+ *   R2B R2 with prop names dropped
+ *   R2AB both of the above
  * Requires ANTHROPIC_API_KEY (.env ok) and TYPESAFE_API_KEY (env).
  * Usage: node scripts/design-system-jev-eval.mjs [--no-sonnet]
  */
@@ -128,7 +131,10 @@ async function shippedCandidates(sys) {
 // ---------- evidence variants ----------
 async function buildPool(sys, variant) {
   const out = [];
-  if (variant === "R2" || variant === "R3") {
+  const mR2 = variant.match(/^R2(A|B|AB)?$/);
+  if (mR2 || variant === "R3") {
+    const flags = mR2?.[1] ?? "";
+    const withReexports = flags.includes("A"), noProps = flags.includes("B");
     const byFile = new Map();
     for (const c of await shippedCandidates(sys)) {
       const f = c.file_path ?? c.name;
@@ -136,7 +142,14 @@ async function buildPool(sys, variant) {
       g.names.push(c.name); c.props.forEach((p) => g.props.add(p)); byFile.set(f, g);
     }
     for (const [file, g] of byFile) {
-      let ev = `file: ${file}; exports: ${g.names.join(", ")}; props: ${[...g.props].slice(0, 25).join(", ") || "none listed"}${g.description ? `; doc: ${g.description}` : ""}`;
+      const names = [...g.names];
+      if (withReexports) {
+        const src = readFileSync(join(home(REAL[sys].root), REAL[sys].rel, file), "utf8");
+        for (const m of src.matchAll(/export\s*\{([^}]*)\}\s*from/g))
+          for (const n of m[1].split(",")) { const nm = n.trim().split(/\s+as\s+/).pop().trim(); if (/^[A-Z]/.test(nm) && !names.includes(nm)) names.push(nm); }
+      }
+      const props = noProps ? "omitted" : [...g.props].slice(0, 25).join(", ") || "none listed";
+      let ev = `file: ${file}; exports: ${names.join(", ")}; props: ${props}${g.description ? `; doc: ${g.description}` : ""}`;
       if (variant === "R3") {
         const abs = join(home(REAL[sys].root), REAL[sys].rel, file);
         ev += `\nsummary: ${await summary(sys, { file, content: readFileSync(abs, "utf8") })}`;
