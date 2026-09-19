@@ -12,6 +12,8 @@
  *   R   the candidates the SHIPPED register_design_system tool actually
  *       produces (name-level, recursive, incl. sub-components), obtained by
  *       spawning dist/index.js. Requires `npm run build` first.
+ *   R2  the same shipped-scanner output collapsed to ONE candidate per file
+ *       (exports joined, props unioned, file name in evidence, like E1).
  * Requires ANTHROPIC_API_KEY (.env ok) and TYPESAFE_API_KEY (env).
  * Usage: node scripts/design-system-jev-eval.mjs [--no-sonnet]
  */
@@ -125,6 +127,17 @@ async function shippedCandidates(sys) {
 // ---------- evidence variants ----------
 async function buildPool(sys, variant) {
   const out = [];
+  if (variant === "R2") {
+    const byFile = new Map();
+    for (const c of await shippedCandidates(sys)) {
+      const f = c.file_path ?? c.name;
+      const g = byFile.get(f) ?? { names: [], props: new Set(), description: c.description };
+      g.names.push(c.name); c.props.forEach((p) => g.props.add(p)); byFile.set(f, g);
+    }
+    for (const [file, g] of byFile)
+      out.push({ file, evidence: `file: ${file}; exports: ${g.names.join(", ")}; props: ${[...g.props].slice(0, 25).join(", ") || "none listed"}${g.description ? `; doc: ${g.description}` : ""}` });
+    return out;
+  }
   if (variant === "R") {
     for (const c of await shippedCandidates(sys))
       out.push({ file: c.file_path ?? c.name, name: c.name, evidence: `${c.name}(props: ${c.props.join(", ") || "none listed"})${c.description ? `; ${c.description}` : ""}` });
@@ -163,7 +176,7 @@ async function scoreSonnet(need, pool) {
 }
 
 // ---------- run ----------
-const VARIANTS = ["E0", "E1", "E2", "E3", "R"], THRESH = 0.5;
+const VARIANTS = (process.env.VARIANTS ?? "E0,E1,E2,E3,R,R2").split(","), THRESH = 0.5;
 const runs = {}, poolSizes = {};
 for (const v of VARIANTS) {
   process.stdout.write(`\n[${v}] building pools... `);
@@ -176,7 +189,7 @@ for (const v of VARIANTS) {
     rows.push(...await Promise.all(batch.map(async (c) => {
       const p = pool[c.system]; const row = { id: c.id, gold: c.gold, goldInPool: c.gold.length === 0 || c.gold.some((g) => p.some((x) => x.file === g)) };
       try { const t0 = Date.now(); const j = await scoreJev(c.need, p); row.jev = { ...j, ms: Date.now() - t0 }; } catch (e) { row.jev = { error: e.message }; }
-      if (RUN_SONNET && (v === "E0" || v === "E3" || v === "R")) { try { row.sonnet = await scoreSonnet(c.need, p); } catch (e) { row.sonnet = { error: e.message }; } }
+      if (RUN_SONNET && (v === "E0" || v === "E3" || v === "R" || v === "R2")) { try { row.sonnet = await scoreSonnet(c.need, p); } catch (e) { row.sonnet = { error: e.message }; } }
       return row;
     })));
     process.stdout.write(".");
