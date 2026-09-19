@@ -18,6 +18,7 @@ import {
 import { extractRequirements } from "./extract.js";
 import { searchCandidates } from "./search.js";
 import { scoreCandidates } from "./score.js";
+import { scoreCandidatesJev } from "./score-jev.js";
 import { searchReference } from "./reference.js";
 import type { StagedInput, StagedJudgmentResult, StageLogEntry } from "./types.js";
 
@@ -52,7 +53,12 @@ async function runSingleStagedPass(input: StagedInput, log: StageLogEntry[]): Pr
   const search = await logged(log, "search", searchInput, () => searchCandidates(input, extraction.requirements));
 
   const scoreInput = { requirements: extraction.requirements, candidates: search.candidates };
-  const score = await logged(log, "score", scoreInput, () => scoreCandidates(input, extraction.requirements, search.candidates));
+  const score = await logged(log, "score", scoreInput, () =>
+    // Opt-in only: PATTERN_SCORER=jev sends candidate evidence to api.typesafe.ai. Anything else keeps the Sonnet scorer.
+    process.env.PATTERN_SCORER === "jev"
+      ? scoreCandidatesJev(input.component_need, input.domain, extraction.requirements, search.candidates)
+      : scoreCandidates(input, extraction.requirements, search.candidates)
+  );
 
   const result: StagedJudgmentResult = {
     verdict: score.reason === "no_candidates_found" ? "custom_build" : "use_existing", // placeholder; enforceVerdictThreshold corrects the "scored" case from coverage

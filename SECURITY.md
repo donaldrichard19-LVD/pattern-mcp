@@ -200,3 +200,13 @@ whatever the model's `web_search` tool reaches — there's no domain
 allowlist or sandboxing layer in front of it. Run it with the same trust
 level you'd give any local process that makes outbound API calls with
 your credentials attached.
+
+### Optional second endpoint: `PATTERN_SCORER=jev`
+
+By default, everything Pattern sends goes to `api.anthropic.com` and nothing
+else. If you set `PATTERN_SCORER=jev` (experimental, staged pipeline only,
+off by default), the scoring step instead sends candidate evidence — component
+names, descriptions and props, which may reflect real product or UI text —
+to `api.typesafe.ai`, authenticated with `TYPESAFE_API_KEY`. Extraction and
+search still go to Anthropic. Leave `PATTERN_SCORER` unset and no data goes to
+TypeSafe.

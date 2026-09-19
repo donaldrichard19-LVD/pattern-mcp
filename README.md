@@ -297,6 +297,10 @@ ANTHROPIC_API_KEY
 The API account associated with this key pays for the requests Pattern
 makes (see [Cost](#cost) below).
 
+`TYPESAFE_API_KEY` is only required if you set `PATTERN_SCORER=jev`
+(experimental, staged pipeline only, off by default). Leave both unset for
+normal use.
+
 You get the key from the Anthropic Console under Settings → API Keys.
 API billing is separate from Claude.ai or Claude Code subscriptions. A
 Claude Pro or Max subscription does not include API usage.
@@ -2413,6 +2417,11 @@ api.anthropic.com
 
 It also depends on whatever external sites the model's `web_search` tool
 can reach.
+
+If you opt in to `PATTERN_SCORER=jev`, candidate evidence (component
+names, descriptions and props, which may reflect real product or UI text) is
+also sent to `api.typesafe.ai`. This is off by default; with it unset,
+nothing goes to TypeSafe.
 
 It will not work in an environment that blocks general outbound internet
 access.
