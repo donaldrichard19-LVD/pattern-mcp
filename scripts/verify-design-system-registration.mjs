@@ -148,6 +148,32 @@ writeFileSync(
   join(root, "components", "Badge.jsx"),
   ["export function Badge({ text, color }) {", "  return null;", "}"].join("\n")
 );
+// shadcn-style: components declared as plain consts and exported through an
+// `export { ... }` list (invisible to the export function/const regexes),
+// with a leading doc comment, a lowercase variants helper, and an inline
+// `type` export -- plus a barrel file whose re-export must not add names.
+writeFileSync(
+  join(root, "components", "Tabs.tsx"),
+  [
+    "/**",
+    " * Tabbed panel switcher.",
+    " * Renders a row of tab triggers above the active section.",
+    " */",
+    "interface TabsProps {",
+    "  value: string;",
+    "  onValueChange?: () => void;",
+    "}",
+    "const Tabs = React.forwardRef(() => null);",
+    "const TabsList = React.forwardRef(() => null);",
+    "const tabsVariants = () => \"\";",
+    "export { Tabs, TabsList, tabsVariants, type TabsProps };",
+  ].join("\n")
+);
+writeFileSync(join(root, "components", "index.ts"), 'export { Tabs } from "./Tabs";\n');
+writeFileSync(
+  join(root, "components", "List.tsx"),
+  ["export function List<T>({ items }: { items: T[] }) {", "  return null;", "}"].join("\n")
+);
 writeFileSync(join(root, "components", "Spinner.jsx"), ["export function Spinner() {", "  return null;", "}"].join("\n"));
 writeFileSync(join(root, "components", "helpers.js"), ["export function formatDate(d) {", "  return String(d);", "}"].join("\n"));
 writeFileSync(join(root, "components", "Button.test.tsx"), ["export function Button() {", "  return null;", "}"].join("\n"));
@@ -256,7 +282,14 @@ console.log("\n=== 7. Directory scan: parsing heuristics ===");
   check("lowercase-named export (formatDate) excluded", byName.formatDate === undefined);
   check("Button.test.tsx excluded by filename fragment", byName.Button?.file_path === "Button.tsx");
   check("node_modules subfolder excluded (Fake not present)", byName.Fake === undefined);
-  check("exactly 4 real components found (Button, Card, Badge, Spinner)", Object.keys(byName).length === 4);
+  check("export-list component (Tabs) found with its own <Name>Props", JSON.stringify(byName.Tabs?.props?.sort()) === JSON.stringify(["onValueChange", "value"]));
+  check("export-list sub-component (TabsList) falls back to file-wide props", JSON.stringify(byName.TabsList?.props?.sort()) === JSON.stringify(["onValueChange", "value"]));
+  check("generic component (List<T>) found", byName.List?.file_path === "List.tsx");
+  check("lowercase export-list name (tabsVariants) excluded", byName.tabsVariants === undefined);
+  check("barrel re-export (export { Tabs } from) does not add a second Tabs", (body?.registration?.candidates ?? []).filter((c) => c.name === "Tabs").length === 1);
+  check("leading doc comment captured as description", byName.Tabs?.description === "Tabbed panel switcher. Renders a row of tab triggers above the active section.");
+  check("file with no doc comment keeps description null", byName.Spinner?.description === null);
+  check("exactly 7 real components found (Button, Card, Badge, Spinner, Tabs, TabsList, List)", Object.keys(byName).length === 7);
 }
 
 console.log("\n=== 8. Exactly one of manifest_path/directory_path is required ===");
@@ -303,7 +336,7 @@ console.log("\n=== 10. Re-registering the same project_id overwrites, doesn't me
   });
   const stored = JSON.parse(readFileSync(designSystemsPath, "utf8"));
   check("stored registration reflects only the second (directory_scan) call", stored["overwrite-project"]?.source_kind === "directory_scan");
-  check("stored registration has exactly one entry for this project_id (no merge/append)", stored["overwrite-project"]?.candidate_count === 4);
+  check("stored registration has exactly one entry for this project_id (no merge/append)", stored["overwrite-project"]?.candidate_count === 7);
 }
 
 console.log("\n=== 11. No registration for a project_id -> recommend_component's default dispatch is unaffected (free, skip-list) ===");

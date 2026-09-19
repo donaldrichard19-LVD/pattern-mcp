@@ -2139,6 +2139,50 @@ function walkComponentFiles(root: string): string[] {
   return files;
 }
 
+// Names from `export { A, B as C }` lists -- the shape shadcn-style
+// libraries use (`export { Button, buttonVariants }`), which the
+// `export function/const` regexes below never see. Re-exports from another
+// module (`export { X } from "./x"`) are skipped: the definition lives
+// elsewhere and gets scanned there. PascalCase only, so `buttonVariants`
+// and SCREAMING_CASE constants are not mistaken for components.
+function extractExportListNames(content: string): string[] {
+  const names: string[] = [];
+  const re = /export\s*\{([^}]*)\}(?!\s*from)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(content)) !== null) {
+    for (const part of m[1].split(",")) {
+      const spec = part.trim();
+      if (!spec || /^type\s/.test(spec)) continue;
+      const exported = spec.split(/\s+as\s+/).pop()!.trim();
+      if (/^[A-Z][A-Za-z0-9]*[a-z][A-Za-z0-9]*$/.test(exported)) names.push(exported);
+    }
+  }
+  return names;
+}
+
+// Every `<X>Props` interface/type body in the file, flattened and capped.
+// Fallback for names with no `<Name>Props` of their own (e.g. a
+// forwardRef sub-component sharing its file's props type).
+function extractFileWidePropNames(content: string): string[] {
+  const props = new Set<string>();
+  const re = /(?:interface|type)\s+[A-Za-z0-9_]*Props\b/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(content)) !== null) {
+    const body = extractBalancedBraceBody(content, m.index);
+    if (body) extractPropNamesFromBody(body).forEach((p) => props.add(p));
+  }
+  return [...props].slice(0, 25);
+}
+
+// The file's first /** ... */ block, whitespace-normalised and capped --
+// free descriptive text for the scorer, null when the file has none.
+function extractLeadingDocComment(content: string): string | null {
+  const m = content.match(/\/\*\*([\s\S]*?)\*\//);
+  if (!m) return null;
+  const text = m[1].replace(/^\s*\*\s?/gm, "").replace(/\s+/g, " ").trim();
+  return text ? text.slice(0, 300) : null;
+}
+
 // Component detection: an uppercase-leading exported function or const,
 // React's own naming convention for components -- deliberately excludes
 // lowercase exported helpers/hooks, which aren't components. Props are
@@ -2155,13 +2199,16 @@ function scanComponentFile(absPath: string, relPath: string): DesignSystemCandid
     return [];
   }
 
-  const names = new Map<string, number>();
-  const fnRe = /export\s+(?:default\s+)?function\s+([A-Z][A-Za-z0-9_]*)\s*\(/g;
+  const names = new Map<string, number | null>();
+  const fnRe = /export\s+(?:default\s+)?function\s+([A-Z][A-Za-z0-9_]*)\s*(?:<[^>(]*>\s*)?\(/g;
   const constRe = /export\s+(?:default\s+)?const\s+([A-Z][A-Za-z0-9_]*)\s*(?::[^=\n]+)?=/g;
   let m: RegExpExecArray | null;
   while ((m = fnRe.exec(content)) !== null) names.set(m[1], m.index);
   while ((m = constRe.exec(content)) !== null) if (!names.has(m[1])) names.set(m[1], m.index);
+  for (const n of extractExportListNames(content)) if (!names.has(n)) names.set(n, null);
 
+  const description = extractLeadingDocComment(content);
+  const fileWideProps = extractFileWidePropNames(content);
   const candidates: DesignSystemCandidate[] = [];
   for (const [name, idx] of names) {
     let props: string[] = [];
@@ -2180,11 +2227,13 @@ function scanComponentFile(absPath: string, relPath: string): DesignSystemCandid
       }
     }
 
-    if (props.length === 0) {
+    if (props.length === 0 && idx !== null) {
       props = extractDestructuredParamNames(content.slice(idx, Math.min(content.length, idx + 500)));
     }
 
-    candidates.push({ name, props, description: null, usage_example: null, file_path: relPath });
+    if (props.length === 0) props = fileWideProps;
+
+    candidates.push({ name, props, description, usage_example: null, file_path: relPath });
   }
   return candidates;
 }
