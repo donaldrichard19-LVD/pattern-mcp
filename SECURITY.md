@@ -204,9 +204,19 @@ your credentials attached.
 ### Optional second endpoint: `PATTERN_SCORER=jev`
 
 By default, everything Pattern sends goes to `api.anthropic.com` and nothing
-else. If you set `PATTERN_SCORER=jev` (experimental, staged pipeline only,
-off by default), the scoring step instead sends candidate evidence — component
-names, descriptions and props, which may reflect real product or UI text —
-to `api.typesafe.ai`, authenticated with `TYPESAFE_API_KEY`. Extraction and
-search still go to Anthropic. Leave `PATTERN_SCORER` unset and no data goes to
-TypeSafe.
+else. `PATTERN_SCORER=jev` (experimental, off by default) sends scoring data to
+`api.typesafe.ai` instead, authenticated with `TYPESAFE_API_KEY`. It applies in
+two places:
+
+- **Staged pipeline scoring:** candidate evidence — component names,
+  descriptions and props, which may reflect real product or UI text. Extraction
+  and search still go to Anthropic.
+- **Design-system mode** (`register_design_system` + `recommend_component`):
+  the `component_need` text, and for each registered file its name, exported
+  component names, re-exported names, doc comments and any stored summary.
+  Prop lists are not sent and source files are not sent whole, but doc comments
+  and summaries are text from your codebase. No Anthropic call is made on this
+  path. "Local-only" here means your files are read locally; the evidence text
+  above still leaves your machine.
+
+Leave `PATTERN_SCORER` unset and no data goes to TypeSafe.

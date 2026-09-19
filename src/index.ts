@@ -54,6 +54,7 @@ import {
 } from "./telemetry.js";
 import { offerEnforcementSetupOnce } from "./init-enforcement.js";
 import { connectInstructionsText, offerClientConnectSetupOnce, runConnect } from "./client-connect.js";
+import { collapseForJev, rankWithJev } from "./design-system-jev.js";
 
 // Read as early as possible in this file's own module-level code, wrapped
 // so a missing/corrupt package.json can't itself become a new, unguarded
@@ -161,6 +162,23 @@ export const MODEL = process.env.PATTERN_MODEL ?? "claude-sonnet-5";
 // entirely (enforced server-side via the web_search tool's max_uses --
 // not just prompt instruction, since models don't reliably self-limit
 // against a purely textual budget).
+// Design-system mode only: PATTERN_SCORER=jev scores a project's registered
+// design system with Jev (TypeSafe AI) instead of Anthropic -- no web search,
+// no Anthropic call, and a plain "nothing fits" result when nothing does.
+// Off by default; see src/design-system-jev.ts for what the eval showed.
+// Candidate names, file names, doc comments and summaries (never prop lists)
+// plus the component_need are sent to api.typesafe.ai when it is on.
+const DESIGN_SYSTEM_JEV_ENABLED = process.env.PATTERN_SCORER === "jev";
+// First guess from the eval: lowest correct top pick was 0.44 without
+// summaries (0.55 with) and highest "nothing fits" score was 0.27, so 0.4
+// separates them on that data. Jev's scores are not calibrated -- tune this
+// against your own evals rather than trusting it as a probability.
+const JEV_FOUND_THRESHOLD = Number(process.env.PATTERN_JEV_FOUND_THRESHOLD ?? 0.4);
+const JEV_BATCH_TOKENS = Number(process.env.PATTERN_JEV_BATCH_TOKENS ?? 18000);
+// Optional, for cost reporting only -- Jev pricing is not baked in.
+const JEV_USD_PER_MTOK_IN = process.env.PATTERN_JEV_USD_PER_MTOK_IN;
+const JEV_USD_PER_MTOK_OUT = process.env.PATTERN_JEV_USD_PER_MTOK_OUT;
+
 const SEARCH_BUDGET_RAW = process.env.PATTERN_SEARCH_BUDGET ?? "3";
 const SEARCH_BUDGET: number | null =
   SEARCH_BUDGET_RAW.trim().toLowerCase() === "unlimited"
@@ -1320,6 +1338,87 @@ export function estimateExtractionConfidence(componentNeed: string): "high" | "m
 
 type SinglePassResult = { ok: true; result: JudgmentResult } | { ok: false; raw: string };
 
+const DESIGN_SYSTEM_RECALL_NOTE =
+  "These registered design-system candidates share keywords with this component_need but were not selected as a match -- the verdict may have missed a real one. This is a weak, keyword-only signal, not proof of an actual match: double-check these candidates yourself (or re-run this call) before trusting custom_build here.";
+
+// Design-system mode scored by Jev (PATTERN_SCORER=jev): one Jev call (or a
+// few, for a big library) ranks the registered design system's files against
+// the need. No Anthropic call, no web search. A top score under
+// JEV_FOUND_THRESHOLD is reported as plain "nothing fits" -- there is
+// deliberately no external-library fallback in this mode.
+async function runDesignSystemJevPass(
+  input: { component_need: string; domain: string; project_id?: string },
+  designSystem: DesignSystemRegistration,
+  passStartMs: number
+): Promise<SinglePassResult> {
+  const pool = collapseForJev(designSystem.candidates);
+  const { ranked, usage } = await rankWithJev(input.component_need, pool, JEV_BATCH_TOKENS);
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+  const shape = (r: (typeof ranked)[number]) => ({ file: r.entry.file, components: r.entry.components, score: round2(r.score) });
+  const top = ranked[0];
+  const found = top !== undefined && top.score >= JEV_FOUND_THRESHOLD;
+  const elapsed = Math.max(1, Date.now() - passStartMs);
+
+  const rated = JEV_USD_PER_MTOK_IN !== undefined && JEV_USD_PER_MTOK_OUT !== undefined;
+  const cost = rated
+    ? (usage.input_tokens * Number(JEV_USD_PER_MTOK_IN) + usage.output_tokens * Number(JEV_USD_PER_MTOK_OUT)) / 1_000_000
+    : 0;
+  const meta: NonNullable<JudgmentResult["_meta"]> = {
+    total_ms: elapsed,
+    breakdown_ms: { extract: 0, search: 0, score: elapsed },
+    tokens_used: { input: usage.input_tokens, output: usage.output_tokens },
+    estimated_cost_usd: cost,
+    ...(rated ? {} : { cost_note: "Jev scorer: cost unknown (set PATTERN_JEV_USD_PER_MTOK_IN/OUT to estimate); 0 here does not mean free." }),
+  };
+
+  const base = {
+    scorer: "jev" as const,
+    computed_at: new Date().toISOString().slice(0, 10),
+    requirements_checked: null,
+    coverage: null,
+    checklist_source: "extracted" as const,
+    ensemble: { triggered: false },
+    _meta: meta,
+  };
+
+  if (found) {
+    const label = `${top.entry.components.join(", ")}${top.entry.file ? ` (${top.entry.file})` : ""}`;
+    return {
+      ok: true,
+      result: {
+        ...base,
+        verdict: "use_existing",
+        // Never "high": Jev's scores are unproven as calibrated probabilities,
+        // and "high" also unlocks the ledger cache-hit shortcut.
+        confidence: top.score >= 0.7 ? "medium" : "low",
+        reason: "scored",
+        recommendation: { source: "design_system", install_command: null, component_description: label, reference: null },
+        design_system_match: { ...shape(top), alternatives: ranked.slice(1, 4).map(shape), candidates_considered: pool.length },
+      },
+    };
+  }
+
+  const closest = top ? `${top.entry.components.join(", ")}${top.entry.file ? ` (${top.entry.file})` : ""}, score ${round2(top.score)}` : "none";
+  const result: JudgmentResult = {
+    ...base,
+    verdict: "custom_build",
+    confidence: top && top.score >= JEV_FOUND_THRESHOLD * 0.75 ? "low" : "medium",
+    reason: "no_candidates_found",
+    recommendation: null,
+    design_system_match: top ? { ...shape(top), alternatives: ranked.slice(1, 4).map(shape), candidates_considered: pool.length } : null,
+    not_found_message:
+      `Could not find a component in the registered design system that fits this need ` +
+      `(checked ${designSystem.candidate_count} components in ${pool.length} ${pool.length === 1 ? "entry" : "entries"}; closest: ${closest}). ` +
+      `Web search is not used in design-system mode with the Jev scorer, so no outside library was searched. ` +
+      `Build it custom, or add a suitable component to the design system and re-register it.`,
+  };
+  const overlap = findKeywordOverlapCandidates(input.component_need, input.domain, designSystem.candidates);
+  if (overlap.length > 0) {
+    result.design_system_recall_check = { possible_missed_candidates: overlap, note: DESIGN_SYSTEM_RECALL_NOTE };
+  }
+  return { ok: true, result };
+}
+
 async function runSinglePass(input: {
   component_need: string;
   domain: string;
@@ -1369,6 +1468,14 @@ async function runSinglePass(input: {
         },
       },
     };
+  }
+
+  // Jev design-system path: needs no Anthropic key. A caller-supplied
+  // checklist opts out (Jev scores whole files, not per-requirement items),
+  // falling through to the normal Anthropic path below.
+  if (DESIGN_SYSTEM_JEV_ENABLED && input.project_id && !(input.checklist && input.checklist.length > 0)) {
+    const jevDesignSystem = getRegisteredDesignSystem(input.project_id);
+    if (jevDesignSystem) return runDesignSystemJevPass(input, jevDesignSystem, passStartMs);
   }
 
   if (!ANTHROPIC_API_KEY) {
@@ -1690,8 +1797,7 @@ existing_stack: ${input.existing_stack ?? "(not specified)"}${checklistBlock}${p
     if (overlap.length > 0) {
       parsed.design_system_recall_check = {
         possible_missed_candidates: overlap,
-        note:
-          "These registered design-system candidates share keywords with this component_need but were not selected as a match -- the verdict may have missed a real one. This is a weak, keyword-only signal, not proof of an actual match: double-check these candidates yourself (or re-run this call) before trusting custom_build here.",
+        note: DESIGN_SYSTEM_RECALL_NOTE,
       };
     }
   }
@@ -1839,6 +1945,9 @@ export const BOUNDARY_RISK_MET_COUNTS_FOR_8_ITEMS = new Set([3, 4, 6, 7]);
 
 export function isBoundaryRisk(result: JudgmentResult): boolean {
   if (result.reason !== "scored") return false;
+  // The Jev design-system path has no 8-item checklist to be "malformed"
+  // about, and a re-run would only re-call Jev.
+  if (result.scorer === "jev") return false;
 
   const items = result.requirements_checked;
   if (!Array.isArray(items) || items.length === 0) return true; // malformed -- be conservative
@@ -2013,6 +2122,9 @@ export interface DesignSystemCandidate {
   // bundles/exposes (e.g. markdown.tsx re-exporting SyntaxHighlightedCode).
   // Omitted when there are none.
   reexports?: string[];
+  // Optional natural-language capability summary (see the Jev design-system
+  // path). Absent unless a registration was enriched with one.
+  summary?: string | null;
 }
 
 export interface DesignSystemRegistration {
@@ -3797,6 +3909,22 @@ export interface JudgmentResult {
   verdict: string;
   confidence: string;
   reason: string;
+  // Set to "jev" when the design-system Jev path produced this result
+  // (PATTERN_SCORER=jev). No requirements checklist exists on that path, so
+  // isBoundaryRisk never re-runs it.
+  scorer?: "jev";
+  // Jev path only: the best-ranked file and the runners-up. `score` is Jev's
+  // raw per-candidate probability -- a ranking signal, NOT calibrated.
+  design_system_match?: {
+    file: string | null;
+    components: string[];
+    score: number;
+    alternatives: Array<{ file: string | null; components: string[]; score: number }>;
+    candidates_considered: number;
+  } | null;
+  // Jev path, nothing fits: a plain-language "we can't find it" for the
+  // calling agent/user. No web search is attempted in this mode.
+  not_found_message?: string | null;
   coverage?: string | null;
   // Self-reported by the model per step 5's Oversized Match check -- a
   // candidate can satisfy every checklist item and still be an Oversized
@@ -3853,6 +3981,9 @@ export interface JudgmentResult {
     // API call (skip_list, ledger_cache_hit) since there's no split to report.
     tokens_used: { input: number; output: number; input_breakdown?: { fresh: number; cache_write: number; cache_read: number } };
     estimated_cost_usd: number;
+    // Jev path only, when no per-token rate is configured: cost is reported
+    // as 0 because it is unknown, not because the call was free.
+    cost_note?: string;
     // Diagnostic only, mirrors search_calls/fetch_calls stderr diagnostics
     // -- whether step 4's single candidate-verification fetch (see
     // buildSystemPrompt step 4) actually happened and succeeded. No

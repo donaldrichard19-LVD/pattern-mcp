@@ -47,7 +47,7 @@ export async function callJev(request: Omit<JevRequest, "model">): Promise<JevRe
   if (!TYPESAFE_API_KEY) {
     throw new Error("TYPESAFE_API_KEY is not set. Export it in the environment running the Jev scorer.");
   }
-  const response = await fetch("https://api.typesafe.ai/v1/systemone", {
+  const response = await fetch(process.env.TYPESAFE_API_URL ?? "https://api.typesafe.ai/v1/systemone", {
     method: "POST",
     headers: {
       "content-type": "application/json",

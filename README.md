@@ -986,6 +986,40 @@ agent) know to double-check before accepting a `custom_build` verdict at
 face value. Absent entirely when there's no overlap, or outside
 design-system mode.
 
+### Scoring your design system with Jev (experimental, opt-in)
+
+With `PATTERN_SCORER=jev` and a registered design system, `recommend_component`
+scores your components with [Jev](https://typesafe.ai) (TypeSafe AI) instead of
+Anthropic: no Anthropic call, no web search, sub-second. Needs
+`TYPESAFE_API_KEY`; `ANTHROPIC_API_KEY` is not required for these calls.
+
+- **Nothing fits -> it says so.** If no component scores at least
+  `PATTERN_JEV_FOUND_THRESHOLD` (default `0.4`), the result is
+  `verdict: "custom_build"`, `reason: "no_candidates_found"`, with a plain
+  `not_found_message`. There is deliberately **no web-search fallback** in this
+  mode.
+- **Found -> `use_existing`**, `recommendation.source: "design_system"`, plus
+  `design_system_match` (best file, runners-up, raw score). Confidence is
+  `low` or `medium`, never `high`: Jev's scores rank well but are **not
+  calibrated probabilities**, so treat the number as a ranking signal.
+- **What is scored:** one entry per source file (exports, re-exports, the
+  doc comment above each component, and a `summary` if the registration has
+  one). Prop lists are intentionally not sent -- in the eval they misled the
+  scorer. Large libraries are split into batches
+  (`PATTERN_JEV_BATCH_TOKENS`, default 18000).
+- **Not used when** you pass your own `checklist` (Jev scores whole files, not
+  checklist items) -- that call takes the normal Anthropic path.
+- **Cost:** reported as `0` with a `cost_note` unless you set
+  `PATTERN_JEV_USD_PER_MTOK_IN` / `PATTERN_JEV_USD_PER_MTOK_OUT`.
+- **Data boundary:** your `component_need` text and the evidence above go to
+  `api.typesafe.ai`. Your source files are read locally and never sent whole.
+  See [SECURITY.md](./SECURITY.md).
+
+The threshold and the collapse/no-props choices came from
+`scripts/design-system-jev-eval.mjs` on 38 needs over two libraries, so they
+are a first guess -- re-run the eval on your own design system before
+trusting them.
+
 ## Tool: `read_ledger`
 
 Lists past `recommend_component` judgments for a `project_id` -- every
