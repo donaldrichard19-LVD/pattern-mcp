@@ -2007,6 +2007,12 @@ export interface DesignSystemCandidate {
   // "directory_scan"; a manifest-sourced candidate has no single file of
   // its own to point at.
   file_path: string | null;
+  // PascalCase names the file re-exports from another module
+  // (`export { X } from "./x"`). Not candidates themselves -- X is scanned in
+  // its own file -- but they advertise what this file's component
+  // bundles/exposes (e.g. markdown.tsx re-exporting SyntaxHighlightedCode).
+  // Omitted when there are none.
+  reexports?: string[];
 }
 
 export interface DesignSystemRegistration {
@@ -2160,6 +2166,23 @@ function extractExportListNames(content: string): string[] {
   return names;
 }
 
+// Names from `export { A, B as C } from "./mod"` -- the complement of
+// extractExportListNames, which skips these.
+function extractReexportNames(content: string): string[] {
+  const names = new Set<string>();
+  const re = /export\s*\{([^}]*)\}\s*from\b/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(content)) !== null) {
+    for (const part of m[1].split(",")) {
+      const spec = part.trim();
+      if (!spec || /^type\s/.test(spec)) continue;
+      const exported = spec.split(/\s+as\s+/).pop()!.trim();
+      if (/^[A-Z][A-Za-z0-9]*[a-z][A-Za-z0-9]*$/.test(exported)) names.add(exported);
+    }
+  }
+  return [...names];
+}
+
 // Every `<X>Props` interface/type body in the file, flattened and capped.
 // Fallback for names with no `<Name>Props` of their own (e.g. a
 // forwardRef sub-component sharing its file's props type).
@@ -2215,6 +2238,7 @@ function scanComponentFile(absPath: string, relPath: string): DesignSystemCandid
   for (const n of extractExportListNames(content)) if (!names.has(n)) names.set(n, null);
 
   const fileWideProps = extractFileWidePropNames(content);
+  const reexports = extractReexportNames(content);
   const candidates: DesignSystemCandidate[] = [];
   for (const [name, idx] of names) {
     let props: string[] = [];
@@ -2248,7 +2272,14 @@ function scanComponentFile(absPath: string, relPath: string): DesignSystemCandid
     }
     const description = declIdx === null ? null : extractDocCommentBefore(content, declIdx);
 
-    candidates.push({ name, props, description, usage_example: null, file_path: relPath });
+    candidates.push({
+      name,
+      props,
+      description,
+      usage_example: null,
+      file_path: relPath,
+      ...(reexports.length > 0 ? { reexports } : {}),
+    });
   }
   return candidates;
 }

@@ -170,6 +170,7 @@ writeFileSync(
     "const TabsList = React.forwardRef(() => null);",
     "const tabsVariants = () => \"\";",
     "export { Tabs, TabsList, tabsVariants, type TabsProps };",
+    'export { TabsTrigger, type TabsTriggerProps } from "./TabsTrigger";',
   ].join("\n")
 );
 writeFileSync(join(root, "components", "index.ts"), 'export { Tabs } from "./Tabs";\n');
@@ -287,6 +288,9 @@ console.log("\n=== 7. Directory scan: parsing heuristics ===");
   check("node_modules subfolder excluded (Fake not present)", byName.Fake === undefined);
   check("export-list component (Tabs) found with its own <Name>Props", JSON.stringify(byName.Tabs?.props?.sort()) === JSON.stringify(["onValueChange", "value"]));
   check("export-list sub-component (TabsList) falls back to file-wide props", JSON.stringify(byName.TabsList?.props?.sort()) === JSON.stringify(["onValueChange", "value"]));
+  check("re-exported name recorded on the file's candidates (reexports)", JSON.stringify(byName.Tabs?.reexports) === JSON.stringify(["TabsTrigger"]) && JSON.stringify(byName.TabsList?.reexports) === JSON.stringify(["TabsTrigger"]));
+  check("re-exported name is NOT itself a candidate (scanned in its own file)", byName.TabsTrigger === undefined);
+  check("file without re-exports has no reexports field", byName.Button?.reexports === undefined);
   check("generic component (List<T>) found", byName.List?.file_path === "List.tsx");
   check("lowercase export-list name (tabsVariants) excluded", byName.tabsVariants === undefined);
   check("barrel re-export (export { Tabs } from) does not add a second Tabs", (body?.registration?.candidates ?? []).filter((c) => c.name === "Tabs").length === 1);

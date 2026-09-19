@@ -912,7 +912,8 @@ server's working directory) -- never an absolute path.
   files). Each exported, uppercase-named function or const component found
   becomes a candidate -- including names in `export { A, B }` lists and
   generic components like `function List<T>(`; `export { X } from "./x"`
-  re-exports are skipped (X is scanned in its own file). Props are read in
+  re-exports are not candidates themselves (X is scanned in its own file)
+  but are recorded in a `reexports` field on that file's candidates. Props are read in
   priority order from a `<Name>Props` interface/type, a `.propTypes` block,
   the component's own destructured parameters, or (last resort) the file's
   other `*Props` types. A `/** ... */` comment directly above a component's
