@@ -53,6 +53,8 @@ async function connect(env) {
     env: {
       ...process.env,
       ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY ?? "unused-not-needed-for-this-script",
+      // Summaries are on by default when a key is set -- this script must stay free/offline.
+      PATTERN_NO_SUMMARIES: "1",
       ...env,
     },
   });

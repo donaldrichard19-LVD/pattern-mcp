@@ -951,8 +951,9 @@ resulting ledger entry, set server-side regardless of what the model wrote,
 so `read_ledger` and `export_ledger_provenance` can match on it reliably.
 
 This only writes local config to `~/.pattern/design_systems.json` (override
-with `PATTERN_DESIGN_SYSTEMS_PATH`) -- it never calls the Anthropic API unless
-you opt in with `summarize: true` (below).
+with `PATTERN_DESIGN_SYSTEMS_PATH`) -- it does not call the Anthropic API for a
+manifest, and for a directory only to write capability summaries
+(on by default with a key; see below).
 Registration is a point-in-time snapshot, not a live link: re-run this
 whenever the design system's own components change meaningfully.
 
@@ -987,28 +988,32 @@ agent) know to double-check before accepting a `custom_build` verdict at
 face value. Absent entirely when there's no overlap, or outside
 design-system mode.
 
-### Optional: `summarize` (capability summaries)
+### Capability summaries (`summarize`, on by default)
 
-`register_design_system` with `directory_path` and `"summarize": true` writes a
-short (2-3 sentence) capability summary for each scanned file with Claude
-Haiku and stores it on the registration. In the eval this was the single
-biggest gain for the Jev scorer below (29/29 in 5 of 5 runs without prop names,
-and the lowest correct score 0.55 vs a highest "nothing fits" of 0.18); on real
-libraries it scored 37/38 with the lowest correct 0.56 and highest "nothing
-fits" 0.12. The default scorer also sees the summaries.
+Registering with `directory_path` also writes a short (2-3 sentence) capability
+summary for each scanned file with Claude Haiku and stores it on the
+registration -- **by default, whenever `ANTHROPIC_API_KEY` is set.** In the
+eval this was the single biggest gain for the Jev scorer below (29/29 in 5 of
+5 runs without prop names, lowest correct score 0.55 vs a highest "nothing
+fits" of 0.18); on real libraries it scored 37/38 with the lowest correct 0.56
+and highest "nothing fits" 0.12. The default scorer also sees the summaries.
 
-- **Opt-in, and it sends code:** up to 8000 characters of each file that needs a
-  summary go to `api.anthropic.com`. Needs `ANTHROPIC_API_KEY`. Off by default.
+- **This sends code.** Up to 8000 characters of each file that needs a summary
+  go to `api.anthropic.com`. The response's `summaries.notice` says so every
+  time it happens. To keep registration fully local, pass `"summarize": false`
+  on a call or set `PATTERN_NO_SUMMARIES=1` to turn it off everywhere. No key,
+  nothing is sent (the response says the summaries were skipped).
 - **Cost:** about 0.2 cents per file (measured: 96 files, $0.18 total). Capped at
   `PATTERN_SUMMARY_MAX_FILES` files per registration (default 200); the
   response's `summaries` block reports files generated / reused / failed /
   skipped, tokens and estimated cost.
 - **Cached by file content:** re-registering pays only for files that changed.
-  Unchanged files keep their summary even when you re-register *without* the
-  flag; a changed file's stale summary is dropped.
-- A file that fails to summarize is just left without one -- the registration
-  still succeeds. `summarize` is refused with `manifest_path` (no source files
-  to read) and, when refused, leaves your previous registration untouched.
+  Unchanged files keep their summary even with `summarize: false`; a changed
+  file's stale summary is dropped and rewritten on the next default run.
+- A file that fails to summarize is left without one -- the registration still
+  succeeds. `"summarize": true` (explicit) is refused, leaving your previous
+  registration untouched, when there is no key or you passed `manifest_path`
+  (no source files to read); the unset default never refuses, it just skips.
 
 ### Scoring your design system with Jev (experimental, opt-in)
 

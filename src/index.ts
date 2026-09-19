@@ -186,6 +186,16 @@ const JEV_BATCH_TOKENS = Number(process.env.PATTERN_JEV_BATCH_TOKENS ?? 18000);
 const JEV_USD_PER_MTOK_IN = process.env.PATTERN_JEV_USD_PER_MTOK_IN;
 const JEV_USD_PER_MTOK_OUT = process.env.PATTERN_JEV_USD_PER_MTOK_OUT;
 
+// register_design_system writes a short Haiku capability summary per scanned
+// file BY DEFAULT when ANTHROPIC_API_KEY is set (see design-system-summaries.ts).
+// That sends up to 8000 chars of each such source file to api.anthropic.com, so
+// there are two ways out: pass `summarize: false` per call, or set
+// PATTERN_NO_SUMMARIES=1 to turn it off everywhere. No key -> nothing is sent.
+const SUMMARIZE_BY_DEFAULT = process.env.PATTERN_NO_SUMMARIES !== "1";
+const SUMMARY_EGRESS_NOTICE =
+  "Source text (up to 8000 characters of each file that needed a summary) was sent to api.anthropic.com to write these summaries. " +
+  "Pass summarize: false on register_design_system, or set PATTERN_NO_SUMMARIES=1, to turn this off.";
+
 const SEARCH_BUDGET_RAW = process.env.PATTERN_SEARCH_BUDGET ?? "3";
 const SEARCH_BUDGET: number | null =
   SEARCH_BUDGET_RAW.trim().toLowerCase() === "unlimited"
@@ -1110,7 +1120,7 @@ const REGISTER_DESIGN_SYSTEM_INPUT_SCHEMA = {
     summarize: {
       type: "boolean",
       description:
-        "Opt-in, directory_path only. Writes a short (2-3 sentence) capability summary for each scanned file with Claude Haiku and stores it on the registration -- a big accuracy/confidence gain for the Jev design-system scorer (PATTERN_SCORER=jev) and harmless for the default one. Sends up to 8000 characters of each source file that needs a summary to api.anthropic.com, so it is off by default; needs ANTHROPIC_API_KEY; costs about 0.2 cents per file (capped at PATTERN_SUMMARY_MAX_FILES, default 200 files). Summaries are cached by file content: re-registering only pays for files that changed, and unchanged files keep their summary even without this flag.",
+        "directory_path only. ON BY DEFAULT when ANTHROPIC_API_KEY is set: writes a short (2-3 sentence) capability summary for each scanned file with Claude Haiku and stores it on the registration -- a big accuracy/confidence gain for the Jev design-system scorer (PATTERN_SCORER=jev) and harmless for the default one. This SENDS up to 8000 characters of each source file that needs a summary to api.anthropic.com; pass false (or set PATTERN_NO_SUMMARIES=1) to keep registration fully local. true refuses (leaving the previous registration untouched) when there is no key or no directory_path; unset never refuses, it just skips. Costs about 0.2 cents per file (capped at PATTERN_SUMMARY_MAX_FILES, default 200 files). Summaries are cached by file content: re-registering only pays for files that changed, and unchanged files keep their summary even with summarize: false.",
     },
   },
   required: ["project_id"],
@@ -4744,8 +4754,10 @@ const ALL_TOOLS = [
         "registered, recommend_component scores ONLY against these " +
         "candidates for this project_id -- external-library search stops " +
         "entirely, it does not layer on top. This only writes local " +
-        "config; it never calls the Anthropic API unless you pass " +
-        "summarize: true (opt-in, sends source file text to Anthropic). " +
+        "config; for a directory_path it also calls Anthropic (Haiku) by " +
+        "default to write short per-file summaries when ANTHROPIC_API_KEY " +
+        "is set, sending source file text -- pass summarize: false or set " +
+        "PATTERN_NO_SUMMARIES=1 to keep it fully local. " +
         "Re-run this whenever " +
         "the design system's own components change meaningfully -- " +
         "registration is a point-in-time snapshot, not a live link.",
@@ -5038,16 +5050,26 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     };
 
     try {
-      // Checked before registering so a refused request leaves the previous
-      // registration untouched.
-      if (args.summarize) {
+      // Explicit `summarize: true` is refused up front (previous registration
+      // untouched) when it can't be honored. The default (unset) never
+      // refuses: it just skips when there's nothing to read or no key.
+      if (args.summarize === true) {
         if (!args.directory_path) {
           throw new Error("summarize: true needs directory_path -- summaries are written from source files, and a manifest has none to read.");
         }
         if (!ANTHROPIC_API_KEY) throw new Error(MISSING_API_KEY_MESSAGE);
       }
+      const wantSummaries = args.summarize ?? SUMMARIZE_BY_DEFAULT;
       const registration = registerDesignSystem(args);
-      const summaries = args.summarize ? await summarizeRegistration(registration) : undefined;
+      let summaries: Record<string, unknown> | undefined;
+      if (wantSummaries && args.directory_path) {
+        if (ANTHROPIC_API_KEY) {
+          const stats = await summarizeRegistration(registration);
+          summaries = { ...stats, ...(stats.generated > 0 ? { notice: SUMMARY_EGRESS_NOTICE } : {}) };
+        } else {
+          summaries = { skipped: "ANTHROPIC_API_KEY is not set, so no capability summaries were written (nothing was sent anywhere)." };
+        }
+      }
       return {
         content: [{ type: "text", text: JSON.stringify({ status: "registered", registration, ...(summaries ? { summaries } : {}) }) }],
       };

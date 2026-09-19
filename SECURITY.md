@@ -221,11 +221,14 @@ two places:
 
 Leave `PATTERN_SCORER` unset and no data goes to TypeSafe.
 
-### Optional: `register_design_system` with `summarize: true`
+### Default: `register_design_system` capability summaries
 
-Off by default. When set, up to 8000 characters of each source file that needs a
-summary are sent to `api.anthropic.com` (Claude Haiku) to write a short
-capability description, which is then stored in your local registration file
+**On by default** for `directory_path` registrations when `ANTHROPIC_API_KEY` is
+set. Up to 8000 characters of each source file that needs a summary are sent to
+`api.anthropic.com` (Claude Haiku) to write a short capability description,
+which is stored in your local registration file
 (`~/.pattern/design_systems.json`) and, in Jev mode, sent onward to TypeSafe as
-evidence text. Without the flag, registration is fully local and makes no
-network calls.
+evidence text. Every response that sent code includes a `summaries.notice` saying
+so. Turn it off with `"summarize": false` on a call, or `PATTERN_NO_SUMMARIES=1`
+for everything; with no `ANTHROPIC_API_KEY`, or with a `manifest_path`,
+nothing is sent. Registration is fully local only with one of those.
