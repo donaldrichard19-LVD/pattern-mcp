@@ -9,6 +9,9 @@
  *   E1  free regex: also `export { A, B }` lists, all Props types, doc comment
  *   E2  E1 + first ~1000 chars of source (imports stripped)
  *   E3  E1 + cached Haiku-written capability summary (costs tokens; measured)
+ *   R   the candidates the SHIPPED register_design_system tool actually
+ *       produces (name-level, recursive, incl. sub-components), obtained by
+ *       spawning dist/index.js. Requires `npm run build` first.
  * Requires ANTHROPIC_API_KEY (.env ok) and TYPESAFE_API_KEY (env).
  * Usage: node scripts/design-system-jev-eval.mjs [--no-sonnet]
  */
@@ -17,6 +20,9 @@ import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { tmpdir } from "node:os";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 if (!process.env.ANTHROPIC_API_KEY && existsSync(join(root, ".env"))) {
@@ -105,9 +111,25 @@ async function summary(sys, f) {
   return (cache[key] = r.text.trim());
 }
 
+// ---------- shipped scanner (variant R) ----------
+const REAL = { buzz: { root: "~/projects/buzz", rel: "desktop/src/shared/ui" }, calvin: { root: "~/family-hq", rel: "frontend/src/components" } };
+async function shippedCandidates(sys) {
+  const t = new StdioClientTransport({ command: "node", args: [join(root, "dist/index.js")], env: { ...process.env, PATTERN_PROJECT_ROOT: home(REAL[sys].root), PATTERN_DESIGN_SYSTEMS_PATH: join(tmpdir(), `ds-eval-${sys}.json`), PATTERN_TOOLS: "full" } });
+  const c = new Client({ name: "ds-eval", version: "1" }, { capabilities: {} });
+  await c.connect(t);
+  const r = await c.callTool({ name: "register_design_system", arguments: { project_id: `eval-${sys}`, directory_path: REAL[sys].rel } });
+  await c.close();
+  return JSON.parse(r.content[0].text).registration.candidates;
+}
+
 // ---------- evidence variants ----------
 async function buildPool(sys, variant) {
   const out = [];
+  if (variant === "R") {
+    for (const c of await shippedCandidates(sys))
+      out.push({ file: c.file_path ?? c.name, name: c.name, evidence: `${c.name}(props: ${c.props.join(", ") || "none listed"})${c.description ? `; ${c.description}` : ""}` });
+    return out;
+  }
   for (const f of pools[sys]) {
     const cur = currentScanner(f.content);
     if (variant === "E0") {
@@ -127,7 +149,7 @@ async function buildPool(sys, variant) {
 // ---------- scorers ----------
 async function scoreJev(need, pool) {
   const state = { component_need: need, candidates: pool.map((c, i) => ({ id: `c${i}`, evidence: c.evidence })) };
-  const questions = Object.fromEntries(pool.map((c, i) => [`c${i}`, { type: "noul", instructions: `Candidate c${i} (${c.file}) can fully satisfy the component_need as-is, without being rebuilt.` }]));
+  const questions = Object.fromEntries(pool.map((c, i) => [`c${i}`, { type: "noul", instructions: `Candidate c${i} (${c.name ?? ""} ${c.file}) can fully satisfy the component_need as-is, without being rebuilt.` }]));
   const res = await jev(state, questions);
   const ranked = pool.map((c, i) => ({ file: c.file, p: res.answers[`c${i}`]?.noul ?? 0 })).sort((a, b) => b.p - a.p);
   return { ranked, usage: res.usage };
@@ -136,24 +158,25 @@ async function scoreSonnet(need, pool) {
   const list = pool.map((c) => `- [${c.file}] ${c.evidence.replace(/\n/g, " ")}`).join("\n");
   const r = await anthropic("claude-sonnet-5",
     `You choose an existing component from a project's own design system for a UI need. Use ONLY the candidates listed; never invent one. If none can satisfy the need as-is, say none.\n\nNEED: ${need}\n\nCANDIDATES:\n${list}\n\nReply with JSON only: {"match": "<file name in brackets, or null>"}`, 100);
-  let match = null; try { match = JSON.parse(r.text.match(/\{[\s\S]*\}/)[0]).match; if (typeof match === "string") match = match.replace(/[\[\]]/g, "") || null; } catch {}
+  let match = null; try { match = JSON.parse(r.text.match(/\{[\s\S]*\}/)[0]).match; if (typeof match === "string") match = match.match(/[\w.\/-]+\.(?:tsx?|jsx?)/)?.[0] ?? null; } catch {}
   return { match, usage: r.usage };
 }
 
 // ---------- run ----------
-const VARIANTS = ["E0", "E1", "E2", "E3"], THRESH = 0.5;
-const runs = {};
+const VARIANTS = ["E0", "E1", "E2", "E3", "R"], THRESH = 0.5;
+const runs = {}, poolSizes = {};
 for (const v of VARIANTS) {
   process.stdout.write(`\n[${v}] building pools... `);
   const pool = {}; for (const sys of Object.keys(pools)) pool[sys] = await buildPool(sys, v);
   console.log(Object.entries(pool).map(([s, p]) => `${s}:${p.length}/${pools[s].length} files`).join("  "));
+  poolSizes[v] = Object.fromEntries(Object.entries(pool).map(([sy, p]) => [sy, p.length]));
   const rows = [];
   for (let i = 0; i < evalSet.cases.length; i += 4) {
     const batch = evalSet.cases.slice(i, i + 4);
     rows.push(...await Promise.all(batch.map(async (c) => {
       const p = pool[c.system]; const row = { id: c.id, gold: c.gold, goldInPool: c.gold.length === 0 || c.gold.some((g) => p.some((x) => x.file === g)) };
       try { const t0 = Date.now(); const j = await scoreJev(c.need, p); row.jev = { ...j, ms: Date.now() - t0 }; } catch (e) { row.jev = { error: e.message }; }
-      if (RUN_SONNET && (v === "E0" || v === "E3")) { try { row.sonnet = await scoreSonnet(c.need, p); } catch (e) { row.sonnet = { error: e.message }; } }
+      if (RUN_SONNET && (v === "E0" || v === "E3" || v === "R")) { try { row.sonnet = await scoreSonnet(c.need, p); } catch (e) { row.sonnet = { error: e.message }; } }
       return row;
     })));
     process.stdout.write(".");
@@ -174,12 +197,12 @@ function metrics(rows, pick) {
   return { pos, neg, "top1(found&right)": `${top1}/${pos}`, "top3(any rank)": s3(top3, pos), "neg correctly none": `${negOk}/${neg}`, "overall": `${top1 + negOk}/${pos + neg}`, "gold in pool": `${inPool}/${pos}`, "mean max-p pos/neg": neg ? `${(sumPos / Math.max(pos, 1)).toFixed(2)} / ${(sumNeg / neg).toFixed(2)}` : "-", errors };
 }
 const s3 = (a, b) => `${a}/${b}`;
-const jevPick = (r) => r.jev?.ranked ? { top1: r.jev.ranked[0].file, top3: r.jev.ranked.slice(0, 3).map((x) => x.file), maxp: r.jev.ranked[0].p, found: r.jev.ranked[0].p >= THRESH } : r.jev;
+const jevPick = (r) => r.jev?.ranked ? { top1: r.jev.ranked[0].file, top3: [...new Set(r.jev.ranked.map((x) => x.file))].slice(0, 3), maxp: r.jev.ranked[0].p, found: r.jev.ranked[0].p >= THRESH } : r.jev;
 const sonPick = (r) => r.sonnet?.usage ? { top1: r.sonnet.match, top3: r.sonnet.match ? [r.sonnet.match] : [], found: !!r.sonnet.match } : r.sonnet;
 console.log("\n\n=== Results (Jev found iff max p >= " + THRESH + ") ===");
 const summary_ = {};
 for (const v of VARIANTS) {
-  summary_[v] = { jev: metrics(runs[v], jevPick) };
+  summary_[v] = { pool_sizes: poolSizes[v], jev: metrics(runs[v], jevPick) };
   const jt = runs[v].reduce((a, r) => a + (r.jev?.usage?.input_tokens ?? 0), 0), jo = runs[v].reduce((a, r) => a + (r.jev?.usage?.output_tokens ?? 0), 0);
   summary_[v].jev_tokens = { input: jt, output: jo, avg_ms: Math.round(runs[v].reduce((a, r) => a + (r.jev?.ms ?? 0), 0) / runs[v].length) };
   console.log(`\n${v} Jev:`, JSON.stringify(summary_[v].jev), "\n    tokens:", JSON.stringify(summary_[v].jev_tokens));

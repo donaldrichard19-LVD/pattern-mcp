@@ -1,5 +1,16 @@
 {
   "_meta": {
+    "label_audit": {
+      "date": "2026-09-19",
+      "method": "Claude re-read the source of every component where Jev/Sonnet disagreed with gold or Jev scored a non-gold file >= 0.3, then corrected labels. Still NOT independently verified by a human.",
+      "changes": {
+        "b-status-badge": "removed UnreadPill.tsx -- it is a 'N new messages' scroll-to-unread button, not a status label next to an item",
+        "b-spinner": "removed ViewLoadingFallback.tsx (page-specific skeleton layouts, not a spinner); added progress.tsx (documents an indeterminate sweep mode)",
+        "b-skeleton": "removed Shimmer.tsx -- it shimmers a text string, it is not block placeholders",
+        "b-modal": "added alert-dialog.tsx and chooser-dialog-content.tsx -- both are modal windows with title/description/footer slots"
+      },
+      "checked_and_kept": "b-confirm-delete (dialog.tsx is generic; alert-dialog.tsx is purpose-built), b-lightbox (markdown.tsx only uses lightbox helpers internally), b-side-sheet (sidebar.tsx wraps Sheet on mobile, not the need), b-dropdown (popover.tsx is generic floating content, not an action menu), c-emoji-avatar (PartnerStatus.jsx merely renders EmojiAvatar), all 9 buzz/calvin negatives (no matching component found by grep or reading)"
+    },
     "description": "Design-system-scored eval: given a component need and a project's own component library, does the scorer find the right existing component, or correctly say nothing fits? Gold is AUTHORED BY CLAUDE from reading component filenames/exports, NOT independently verified by a human -- treat as a first-pass label set. Needs are phrased functionally (no component names). 'gold' lists acceptable files; empty gold = nothing in the library should match.",
     "systems": {
       "buzz": { "dir": "~/projects/buzz/desktop/src/shared/ui", "exts": [".tsx"], "note": "shadcn-style primitives (many use `export { A, B }`) plus app-specific widgets" },
@@ -8,14 +19,14 @@
   },
   "cases": [
     { "id": "b-confirm-delete", "system": "buzz", "need": "Ask the user to confirm before a destructive action like deleting a message, with a cancel and a confirm button", "gold": ["alert-dialog.tsx"] },
-    { "id": "b-status-badge", "system": "buzz", "need": "Show a small colored label with a count or status next to an item", "gold": ["badge.tsx", "UnreadPill.tsx"] },
+    { "id": "b-status-badge", "system": "buzz", "need": "Show a small colored label with a count or status next to an item", "gold": ["badge.tsx"] },
     { "id": "b-avatar", "system": "buzz", "need": "Show a person's profile picture, falling back to their initials when there is no image", "gold": ["avatar.tsx", "UserAvatar.tsx"] },
     { "id": "b-switch", "system": "buzz", "need": "A control to turn a setting on or off", "gold": ["switch.tsx", "toggle.tsx", "checkbox.tsx"] },
     { "id": "b-tabs", "system": "buzz", "need": "Let the user switch between several sections of a panel using tabs", "gold": ["tabs.tsx"] },
     { "id": "b-stepper", "system": "buzz", "need": "Show which step the user is on in a multi-step onboarding flow", "gold": ["step-progress.tsx"] },
-    { "id": "b-spinner", "system": "buzz", "need": "Show a loading indicator while a request is in flight", "gold": ["spinner.tsx", "ViewLoadingFallback.tsx"] },
-    { "id": "b-skeleton", "system": "buzz", "need": "Placeholder blocks that shimmer while content is loading", "gold": ["skeleton.tsx", "Shimmer.tsx"] },
-    { "id": "b-modal", "system": "buzz", "need": "A modal window with a title, description and footer action buttons", "gold": ["dialog.tsx"] },
+    { "id": "b-spinner", "system": "buzz", "need": "Show a loading indicator while a request is in flight", "gold": ["spinner.tsx", "progress.tsx"] },
+    { "id": "b-skeleton", "system": "buzz", "need": "Placeholder blocks that shimmer while content is loading", "gold": ["skeleton.tsx"] },
+    { "id": "b-modal", "system": "buzz", "need": "A modal window with a title, description and footer action buttons", "gold": ["dialog.tsx", "alert-dialog.tsx", "chooser-dialog-content.tsx"] },
     { "id": "b-context-menu", "system": "buzz", "need": "A menu that appears when the user right-clicks an item", "gold": ["context-menu.tsx"] },
     { "id": "b-dropdown", "system": "buzz", "need": "A menu of actions that opens from a button", "gold": ["dropdown-menu.tsx"] },
     { "id": "b-side-sheet", "system": "buzz", "need": "A panel that slides in from the edge of the screen over the page", "gold": ["sheet.tsx"] },
