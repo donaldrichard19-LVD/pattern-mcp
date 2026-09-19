@@ -18,6 +18,7 @@
  *   R2A R2 + names from `export { X } from` re-exports added to the exports list
  *   R2B R2 with prop names dropped
  *   R2AB both of the above
+ *   R3B  R3 (Haiku summary) with prop names dropped;  R3A / R3AB likewise
  * Requires ANTHROPIC_API_KEY (.env ok) and TYPESAFE_API_KEY (env).
  * Usage: node scripts/design-system-jev-eval.mjs [--no-sonnet]
  */
@@ -131,9 +132,9 @@ async function shippedCandidates(sys) {
 // ---------- evidence variants ----------
 async function buildPool(sys, variant) {
   const out = [];
-  const mR2 = variant.match(/^R2(A|B|AB)?$/);
-  if (mR2 || variant === "R3") {
-    const flags = mR2?.[1] ?? "";
+  const mR2 = variant.match(/^(R2|R3)(A|B|AB)?$/);
+  if (mR2) {
+    const flags = mR2[2] ?? "";
     const withReexports = flags.includes("A"), noProps = flags.includes("B");
     const byFile = new Map();
     for (const c of await shippedCandidates(sys)) {
@@ -150,7 +151,7 @@ async function buildPool(sys, variant) {
       }
       const props = noProps ? "omitted" : [...g.props].slice(0, 25).join(", ") || "none listed";
       let ev = `file: ${file}; exports: ${names.join(", ")}; props: ${props}${g.description ? `; doc: ${g.description}` : ""}`;
-      if (variant === "R3") {
+      if (mR2[1] === "R3") {
         const abs = join(home(REAL[sys].root), REAL[sys].rel, file);
         ev += `\nsummary: ${await summary(sys, { file, content: readFileSync(abs, "utf8") })}`;
       }
@@ -210,7 +211,7 @@ for (const v of VARIANTS) {
     rows.push(...await Promise.all(batch.map(async (c) => {
       const p = pool[c.system]; const row = { id: c.id, gold: c.gold, goldInPool: c.gold.length === 0 || c.gold.some((g) => p.some((x) => x.file === g)) };
       try { const t0 = Date.now(); const j = await scoreJev(c.need, p); row.jev = { ...j, ms: Date.now() - t0 }; } catch (e) { row.jev = { error: e.message }; }
-      if (RUN_SONNET && (v === "E0" || v === "E3" || v === "R" || v === "R2" || v === "R3")) { try { row.sonnet = await scoreSonnet(c.need, p); } catch (e) { row.sonnet = { error: e.message }; } }
+      if (RUN_SONNET && (v === "E0" || v === "E3" || v === "R" || v === "R2" || v === "R3" || v === "R2B" || v === "R2AB" || v === "R3B")) { try { row.sonnet = await scoreSonnet(c.need, p); } catch (e) { row.sonnet = { error: e.message }; } }
       return row;
     })));
     process.stdout.write(".");
