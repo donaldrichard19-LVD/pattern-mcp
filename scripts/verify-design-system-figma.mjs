@@ -1,0 +1,184 @@
+#!/usr/bin/env node
+/**
+ * verify-design-system-figma.mjs
+ *
+ * Free, deterministic check of the Figma design-system source
+ * (src/design-system-figma.ts): register_design_system with `figma_json_path`
+ * (local) and `figma_file_key` (BYO token, fetched from a STUB Figma server),
+ * plus how Figma candidates reach the Jev scorer (STUB Jev). The fixture is
+ * modelled on Figma's documented GET /v1/files/:key response. It is NOT a real
+ * Figma export: this proves the parser handles the documented shape, not that
+ * it handles every real file.
+ *
+ * Run: node scripts/verify-design-system-figma.mjs (after `npm run build`)
+ */
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
+import { resolve, join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { tmpdir } from "node:os";
+
+const serverEntry = resolve(dirname(fileURLToPath(import.meta.url)), "..", "dist/index.js");
+let failures = 0;
+const check = (label, ok) => { if (ok) console.log(`  ok: ${label}`); else { console.error(`  FAIL: ${label}`); failures++; } };
+const listen = (h) => new Promise((r) => { const s = createServer(h); s.listen(0, "127.0.0.1", () => r(s)); });
+
+const FIXTURE = {
+  name: "Demo UI Kit",
+  document: { id: "0:0", type: "DOCUMENT", name: "Document", children: [
+    { id: "0:1", type: "CANVAS", name: "Inputs", children: [
+      { id: "1:1", type: "FRAME", name: "Buttons", children: [
+        { id: "2:1", type: "COMPONENT_SET", name: "Button",
+          componentPropertyDefinitions: {
+            Size: { type: "VARIANT", defaultValue: "M", variantOptions: ["S", "M", "L"] },
+            State: { type: "VARIANT", defaultValue: "Default", variantOptions: ["Default", "Hover", "Disabled", "Loading"] },
+            "Show icon#12:0": { type: "BOOLEAN", defaultValue: false },
+            "Label#12:1": { type: "TEXT", defaultValue: "Button" },
+          },
+          children: [{ id: "2:2", type: "COMPONENT", name: "Size=S, State=Default" }, { id: "2:3", type: "COMPONENT", name: "Size=M, State=Hover" }] },
+        { id: "2:9", type: "INSTANCE", name: "Button", children: [{ id: "2:10", type: "COMPONENT", name: "should-never-be-a-candidate" }] },
+        { id: "3:1", type: "COMPONENT", name: "Toggle" },
+        { id: "3:2", type: "COMPONENT", name: "._hidden helper" },
+        { id: "3:3", type: "COMPONENT_SET", name: "_Internal" },
+      ] },
+    ] },
+    { id: "0:2", type: "CANVAS", name: "Feedback", children: [
+      { id: "1:2", type: "SECTION", name: "Alerts", children: [
+        { id: "4:1", type: "COMPONENT_SET", name: "Alert", children: [
+          { id: "4:2", type: "COMPONENT", name: "Type=Info, Closable=True" },
+          { id: "4:3", type: "COMPONENT", name: "Type=Error, Closable=False" },
+        ] },
+      ] },
+      { id: "4:5", type: "COMPONENT", name: "Toggle" },
+    ] },
+  ] },
+  components: { "3:1": { description: "On/off switch for a setting." }, "4:5": { description: "Feedback toggle chip." } },
+  componentSets: { "2:1": { description: "Primary action button with sizes and states." } },
+};
+
+const figmaRequests = [];
+const figmaStub = await listen((req, res) => {
+  figmaRequests.push({ url: req.url, token: req.headers["x-figma-token"] });
+  if (req.url.startsWith("/v1/files/forbidden")) { res.writeHead(403); res.end("no"); return; }
+  if (req.url.startsWith("/v1/files/missing")) { res.writeHead(404); res.end("no"); return; }
+  if (req.headers["x-figma-token"] !== "figd_test_token") { res.writeHead(403); res.end("bad token"); return; }
+  res.writeHead(200, { "content-type": "application/json" });
+  res.end(JSON.stringify(FIXTURE));
+});
+const jevRequests = [];
+const jevStub = await listen((req, res) => {
+  let raw = ""; req.on("data", (c) => (raw += c));
+  req.on("end", () => {
+    const body = JSON.parse(raw); jevRequests.push(body);
+    const answers = {};
+    for (const c of body.state.candidates) answers[c.id] = { type: "noul", noul: /Alert/.test(c.evidence) ? 0.9 : 0.05 };
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ model: "stub", answers, usage: { input_tokens: 5, output_tokens: 1 } }));
+  });
+});
+
+const root = mkdtempSync(join(tmpdir(), "pattern-verify-figma-"));
+writeFileSync(join(root, "kit.json"), JSON.stringify(FIXTURE));
+writeFileSync(join(root, "not-json.json"), "this is { not json");
+writeFileSync(join(root, "not-figma.json"), JSON.stringify({ hello: "world" }));
+
+async function connect(extra = {}) {
+  const t = new StdioClientTransport({ command: "node", args: [serverEntry], env: {
+    ...process.env, ANTHROPIC_API_KEY: "", TYPESAFE_API_KEY: "jev-test", TYPESAFE_API_URL: `http://127.0.0.1:${jevStub.address().port}/v1/systemone`,
+    FIGMA_API_URL: `http://127.0.0.1:${figmaStub.address().port}`, PATTERN_PROJECT_ROOT: root,
+    PATTERN_DESIGN_SYSTEMS_PATH: join(root, `ds-${Math.random().toString(36).slice(2)}.json`), PATTERN_LEDGER_PATH: join(root, "ledger.jsonl"),
+    PATTERN_LOG_PATH: join(root, "calls.log"), PATTERN_MEMORY_PATH: join(root, "memory.json"), PATTERN_TOOLS: "full", ...extra } });
+  const c = new Client({ name: "verify-figma", version: "0.1.0" }, { capabilities: {} });
+  await c.connect(t);
+  return c;
+}
+const parse = (r) => { const text = r.content?.[0]?.text ?? ""; try { return { isError: !!r.isError, body: JSON.parse(text), text }; } catch { return { isError: !!r.isError, body: null, text }; } };
+const reg = (c, args) => c.callTool({ name: "register_design_system", arguments: args });
+
+const client = await connect();
+
+console.log("\n=== 1. Local saved file (figma_json_path) ===");
+{
+  const { isError, body } = parse(await reg(client, { project_id: "f1", figma_json_path: "kit.json" }));
+  check("no error", !isError && body?.status === "registered");
+  check("source_kind is figma, source_path is the relative path", body?.registration?.source_kind === "figma" && body.registration.source_path === "kit.json");
+  const c = body.registration.candidates;
+  const names = c.map((x) => x.name).sort();
+  check("exactly 4 candidates: Button, Toggle x2, Alert", JSON.stringify(names) === JSON.stringify(["Alert", "Button", "Toggle", "Toggle"]));
+  check("instances and their children are never candidates", !c.some((x) => x.name === "should-never-be-a-candidate") && c.filter((x) => x.name === "Button").length === 1);
+  check("hidden components/sets (._ / _ prefix) are skipped", !c.some((x) => /hidden|Internal/.test(x.name)));
+  const button = c.find((x) => x.name === "Button");
+  check("component set carries its VARIANT options", JSON.stringify(button?.figma?.variants) === JSON.stringify({ Size: ["S", "M", "L"], State: ["Default", "Hover", "Disabled", "Loading"] }));
+  check("non-variant properties recorded, '#id' suffix stripped", JSON.stringify(button?.figma?.properties) === JSON.stringify(["Show icon", "Label"]));
+  check("page and section recorded", button?.figma?.page === "Inputs" && button.figma.section === "Buttons");
+  check("description comes from the top-level componentSets map", button?.description === "Primary action button with sizes and states.");
+  const alert = c.find((x) => x.name === "Alert");
+  check("variants recovered from child names when no property definitions", JSON.stringify(alert?.figma?.variants) === JSON.stringify({ Type: ["Info", "Error"], Closable: ["True", "False"] }));
+  check("SECTION ancestors count as the section", alert?.figma?.section === "Alerts" && alert.figma.page === "Feedback");
+  const toggles = c.filter((x) => x.name === "Toggle");
+  check("same-named components on different pages stay separate", toggles.length === 2 && new Set(toggles.map((t) => t.figma.node_id)).size === 2);
+  check("standalone component descriptions come from the components map", toggles.some((t) => t.description === "On/off switch for a setting.") && toggles.some((t) => t.description === "Feedback toggle chip."));
+  check("no summaries block (nothing to read source from) and no Anthropic call", body.summaries === undefined);
+}
+
+console.log("\n=== 2. Bad input is refused clearly ===");
+{
+  const bad = parse(await reg(client, { project_id: "f2", figma_json_path: "not-json.json" }));
+  check("invalid JSON -> clear error", bad.isError && /not valid JSON/.test(bad.text));
+  const notFigma = parse(await reg(client, { project_id: "f2", figma_json_path: "not-figma.json" }));
+  check("valid JSON that isn't a Figma file -> tells you what to save", notFigma.isError && /GET https:\/\/api\.figma\.com\/v1\/files/.test(notFigma.text));
+  const escape = parse(await reg(client, { project_id: "f2", figma_json_path: "../etc/passwd" }));
+  check("path escaping the project root -> refused", escape.isError && /within the project root/.test(escape.text));
+  const two = parse(await reg(client, { project_id: "f2", figma_json_path: "kit.json", directory_path: "." }));
+  check("two sources at once -> refused", two.isError === true);
+}
+
+console.log("\n=== 3. Live fetch (figma_file_key) uses the token from the environment ===");
+{
+  const noToken = parse(await reg(client, { project_id: "f3", figma_file_key: "abc123" }));
+  check("no FIGMA_ACCESS_TOKEN -> refused, points at the token-free alternative", noToken.isError && /FIGMA_ACCESS_TOKEN/.test(noToken.text) && /figma_json_path/.test(noToken.text));
+  const withTok = await connect({ FIGMA_ACCESS_TOKEN: "figd_test_token" });
+  figmaRequests.length = 0;
+  const ok = parse(await reg(withTok, { project_id: "f3", figma_file_key: "abc123" }));
+  check("fetches and registers", !ok.isError && ok.body?.registration?.candidate_count === 4);
+  check("source_path is figma:<key>", ok.body?.registration?.source_path === "figma:abc123");
+  check("token sent in X-Figma-Token to the right file", figmaRequests.length === 1 && figmaRequests[0].token === "figd_test_token" && figmaRequests[0].url === "/v1/files/abc123");
+  check("the token never appears in the tool response", !ok.text.includes("figd_test_token"));
+  const forbidden = parse(await reg(withTok, { project_id: "f3", figma_file_key: "forbidden" }));
+  check("403 -> clear message", forbidden.isError && /403/.test(forbidden.text) && /FIGMA_ACCESS_TOKEN/.test(forbidden.text));
+  const missing = parse(await reg(withTok, { project_id: "f3", figma_file_key: "missing" }));
+  check("404 -> clear message", missing.isError && /404/.test(missing.text));
+  const both = parse(await reg(withTok, { project_id: "f3", figma_file_key: "abc123", figma_json_path: "kit.json" }));
+  check("figma_file_key + another source -> refused", both.isError === true);
+  await withTok.close();
+}
+
+console.log("\n=== 4. Figma candidates reach the Jev scorer ===");
+{
+  const jev = await connect({ PATTERN_SCORER: "jev" });
+  await reg(jev, { project_id: "j1", figma_json_path: "kit.json" });
+  jevRequests.length = 0;
+  const { isError, body } = parse(await jev.callTool({ name: "recommend_component", arguments: { component_need: "a dismissible alert banner", domain: "t", framework: "React", project_id: "j1" } }));
+  check("no error, no Anthropic key needed", !isError);
+  const evidence = jevRequests[0]?.state.candidates.map((c) => c.evidence) ?? [];
+  check("4 pool entries (one per component; same-named Toggles not merged)", evidence.length === 4);
+  check("evidence carries variants, location and description", evidence.some((e) => /variants: Type: Info \| Error; Closable: True \| False/.test(e) && /located: Feedback > Alerts/.test(e)));
+  check("Alert is found", body?.verdict === "use_existing" && body?.design_system_match?.components?.includes("Alert"));
+  check("match has no file (Figma components aren't files)", body?.design_system_match?.file === null);
+  await jev.close();
+  const noVariants = await connect({ PATTERN_SCORER: "jev", PATTERN_JEV_FIGMA_VARIANTS: "0" });
+  await reg(noVariants, { project_id: "j2", figma_json_path: "kit.json" });
+  jevRequests.length = 0;
+  await noVariants.callTool({ name: "recommend_component", arguments: { component_need: "a dismissible alert banner", domain: "t", framework: "React", project_id: "j2" } });
+  const ev2 = jevRequests[0]?.state.candidates.map((c) => c.evidence) ?? [];
+  check("PATTERN_JEV_FIGMA_VARIANTS=0 drops variant text but keeps location", ev2.every((e) => !/variants:/.test(e)) && ev2.some((e) => /located:/.test(e)));
+  await noVariants.close();
+}
+
+await client.close();
+figmaStub.close();
+jevStub.close();
+if (failures > 0) { console.error(`\n${failures} check(s) FAILED.`); process.exit(1); }
+console.log("\nAll checks passed.");

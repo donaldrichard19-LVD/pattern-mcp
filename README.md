@@ -920,6 +920,8 @@ server's working directory) -- never an absolute path.
   definition becomes its `description`; components without one get `null`. This is a heuristic scan, not a
   full parser -- a sparse or partial props list for some components is
   expected, not a bug, especially on plain JS with no prop typing at all.
+- **`figma_json_path`** / **`figma_file_key`** -- a Figma file as the design
+  system (experimental, see below).
 
 ### Output
 
@@ -987,6 +989,39 @@ proof of a real match -- it only surfaces the risk so you (or the calling
 agent) know to double-check before accepting a `custom_build` verdict at
 face value. Absent entirely when there's no overlap, or outside
 design-system mode.
+
+### Figma as the design system (experimental)
+
+Point registration at a Figma file instead of code: `figma_json_path` (a saved
+`GET https://api.figma.com/v1/files/<file_key>` response, relative to the
+project root -- fully local, no token, no network) or `figma_file_key` (fetched
+from `api.figma.com` with `FIGMA_ACCESS_TOKEN` from your **environment only**,
+never a tool argument, so it can't land in logs or transcripts).
+
+- **One candidate per component set** (Figma's component-with-variants) and per
+  standalone component, carrying its page/section, its Figma description, its
+  variant options (e.g. `State: Default | Hover | Disabled`) and its
+  boolean/text/slot property names. Hidden components (names starting with `.`
+  or `_`) and instances are skipped. Two components with the same name on
+  different pages stay separate.
+- **Scored like any registration:** the default scorer sees the extra text, and
+  with `PATTERN_SCORER=jev` the same collapse-and-score path is used
+  (`design_system_match.file` is `null` -- a Figma component isn't a file).
+  Set `PATTERN_JEV_FIGMA_VARIANTS=0` to leave variant/slot text out of what Jev
+  sees.
+- **No capability summaries:** there is no source file to summarize, so
+  `summarize` does nothing for a Figma source.
+- **Data boundary:** `figma_json_path` never leaves your machine at
+  registration. `figma_file_key` sends your token and the file key to
+  `api.figma.com` and downloads the whole file response. Later scoring sends
+  component names, page/section names, descriptions and variant text to
+  Anthropic, or to TypeSafe in Jev mode.
+- **Status -- read this:** built to Figma's documented file schema and tested
+  on fixtures modelled on it (`scripts/verify-design-system-figma.mjs`). It has
+  **not** been run on a real Figma file or measured in an eval -- none was
+  available when it was built. Whether variant text helps or hurts the scorer
+  (prop names hurt on code libraries) is unmeasured. Treat results on a real
+  file as unvalidated until you've checked them.
 
 ### Capability summaries (`summarize`, on by default)
 

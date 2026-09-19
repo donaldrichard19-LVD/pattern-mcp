@@ -19,6 +19,7 @@
 // benchmark), so callers must not present them as confidence percentages.
 
 import { callJev, type NoulQuestion } from "./staged/jev.js";
+import { describeFigma, type FigmaCandidateInfo } from "./design-system-figma.js";
 
 export interface JevDesignCandidate {
   name: string;
@@ -28,6 +29,7 @@ export interface JevDesignCandidate {
   file_path: string | null;
   reexports?: string[];
   summary?: string | null;
+  figma?: FigmaCandidateInfo;
 }
 
 export interface JevPoolEntry {
@@ -50,7 +52,9 @@ export interface RankedEntry {
 export function collapseForJev(candidates: JevDesignCandidate[]): JevPoolEntry[] {
   const groups = new Map<string, JevDesignCandidate[]>();
   for (const c of candidates) {
-    const groupKey = c.file_path ?? `name:${c.name}`;
+    // Figma components have no file; the node id keeps two same-named
+    // components on different pages from merging into one entry.
+    const groupKey = c.file_path ?? (c.figma ? `figma:${c.figma.node_id}` : `name:${c.name}`);
     const list = groups.get(groupKey);
     if (list) list.push(c);
     else groups.set(groupKey, [c]);
@@ -64,9 +68,11 @@ export function collapseForJev(candidates: JevDesignCandidate[]): JevPoolEntry[]
     const description = group.map((c) => c.description).find((d): d is string => !!d);
     const usage = group.map((c) => c.usage_example).find((u): u is string => !!u);
     const summary = group.map((c) => c.summary).find((t): t is string => !!t);
+    const figmaText = describeFigma(group[0], process.env.PATTERN_JEV_FIGMA_VARIANTS !== "0");
     const parts = [
       file ? `file: ${file}` : "component",
       `exports: ${[...components, ...reexports].join(", ")}`,
+      ...(figmaText ? [figmaText] : []),
       ...(description ? [`doc: ${description}`] : []),
       ...(usage ? [`usage: ${usage}`] : []),
       ...(summary ? [`summary: ${summary}`] : []),

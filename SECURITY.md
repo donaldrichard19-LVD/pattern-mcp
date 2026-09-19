@@ -232,3 +232,14 @@ evidence text. Every response that sent code includes a `summaries.notice` sayin
 so. Turn it off with `"summarize": false` on a call, or `PATTERN_NO_SUMMARIES=1`
 for everything; with no `ANTHROPIC_API_KEY`, or with a `manifest_path`,
 nothing is sent. Registration is fully local only with one of those.
+
+### Optional: Figma sources for `register_design_system`
+
+`figma_json_path` is local: it reads a saved file and makes no network call.
+`figma_file_key` sends `FIGMA_ACCESS_TOKEN` (read from the environment; never a
+tool argument) and the file key to `api.figma.com` and downloads the whole file
+response into memory. The token is not stored or echoed in tool output. Derived
+evidence from a Figma registration (component names, page/section names,
+descriptions, variant options) is later sent to Anthropic when scoring, or to
+`api.typesafe.ai` when `PATTERN_SCORER=jev`. Use a token scoped to read-only file
+content, and prefer `figma_json_path` if you don't want Pattern to call Figma.

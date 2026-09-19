@@ -55,6 +55,7 @@ import {
 import { offerEnforcementSetupOnce } from "./init-enforcement.js";
 import { connectInstructionsText, offerClientConnectSetupOnce, runConnect } from "./client-connect.js";
 import { collapseForJev, rankWithJev } from "./design-system-jev.js";
+import { describeFigma, fetchFigmaFile, parseFigmaFile, type FigmaCandidateInfo } from "./design-system-figma.js";
 import {
   SUMMARY_MODEL,
   carryOverSummaries,
@@ -1110,12 +1111,22 @@ const REGISTER_DESIGN_SYSTEM_INPUT_SCHEMA = {
     manifest_path: {
       type: "string",
       description:
-        "Path to a components manifest, relative to the project root (PATTERN_PROJECT_ROOT, defaults to this server's working directory) -- never an absolute path. Two recognized shapes: a hand-authored JSON array of {name, props, description, usage_example} objects (optionally wrapped in {\"components\": [...]}); or a Storybook-exported stories/index JSON file (an object with a top-level \"entries\" or \"stories\" map) -- component names only in that case, since Storybook's basic export doesn't carry prop data. Exactly one of manifest_path or directory_path is required.",
+        "Path to a components manifest, relative to the project root (PATTERN_PROJECT_ROOT, defaults to this server's working directory) -- never an absolute path. Two recognized shapes: a hand-authored JSON array of {name, props, description, usage_example} objects (optionally wrapped in {\"components\": [...]}); or a Storybook-exported stories/index JSON file (an object with a top-level \"entries\" or \"stories\" map) -- component names only in that case, since Storybook's basic export doesn't carry prop data. Exactly one of manifest_path, directory_path, figma_json_path or figma_file_key is required.",
     },
     directory_path: {
       type: "string",
       description:
-        "Path to a directory of component source files, relative to the project root -- never an absolute path. Scanned recursively for .jsx/.tsx/.js/.ts files (excluding node_modules/dist/build/.git and test/story files); each exported, uppercase-named function or const component found is a candidate, with props read from a `<Name>Props` interface/type, a `.propTypes` block, or (as a last resort) the component's own destructured parameters. This is a heuristic scan, not a full parser -- an empty or partial props list for some components is expected, not a bug, especially on plain JS with no prop typing at all. Exactly one of manifest_path or directory_path is required.",
+        "Path to a directory of component source files, relative to the project root -- never an absolute path. Scanned recursively for .jsx/.tsx/.js/.ts files (excluding node_modules/dist/build/.git and test/story files); each exported, uppercase-named function or const component found is a candidate, with props read from a `<Name>Props` interface/type, a `.propTypes` block, or (as a last resort) the component's own destructured parameters. This is a heuristic scan, not a full parser -- an empty or partial props list for some components is expected, not a bug, especially on plain JS with no prop typing at all. Exactly one of manifest_path, directory_path, figma_json_path or figma_file_key is required.",
+    },
+    figma_json_path: {
+      type: "string",
+      description:
+        "Path (relative to the project root) to a saved Figma file response -- the JSON from GET https://api.figma.com/v1/files/<file_key>. Fully local: no token, no network call. One candidate per component set (component-with-variants) and per standalone component, carrying its page/section, description and variant options; hidden components (names starting with . or _) and instances are skipped. Experimental: built to Figma's documented schema, not yet run against a real file. Exactly one of manifest_path, directory_path, figma_json_path or figma_file_key is required.",
+    },
+    figma_file_key: {
+      type: "string",
+      description:
+        "Figma file key (the part of a figma.com/design/<key>/... URL). Fetches the file from api.figma.com with FIGMA_ACCESS_TOKEN (environment only, never a tool argument) and registers it like figma_json_path -- so your token and this request go to Figma. Experimental. Exactly one of manifest_path, directory_path, figma_json_path or figma_file_key is required.",
     },
     summarize: {
       type: "boolean",
@@ -1546,7 +1557,9 @@ async function runSinglePass(input: {
           const descPart = c.description ? `; description: ${c.description}` : "";
           const usagePart = c.usage_example ? `; usage_example: ${c.usage_example}` : "";
           const summaryPart = c.summary ? `; summary: ${c.summary}` : "";
-          return `${i + 1}. ${c.name} -- ${propsPart}${descPart}${usagePart}${summaryPart}`;
+          const figmaText = describeFigma(c);
+          const figmaPart = figmaText ? `; ${figmaText}` : "";
+          return `${i + 1}. ${c.name} -- ${propsPart}${descPart}${usagePart}${summaryPart}${figmaPart}`;
         })
         .join("\n")}`
     : "";
@@ -2151,11 +2164,15 @@ export interface DesignSystemCandidate {
   // Hash of the source file's content when `summary` was written, so a
   // re-registration reuses the summary only while the file is unchanged.
   summary_hash?: string;
+  // Only for source_kind "figma": where the component lives in the file and
+  // its variant structure. Untested on real Figma files -- see
+  // design-system-figma.ts.
+  figma?: FigmaCandidateInfo;
 }
 
 export interface DesignSystemRegistration {
   project_id: string;
-  source_kind: "manifest" | "directory_scan";
+  source_kind: "manifest" | "directory_scan" | "figma";
   // The path as passed to register_design_system, relative to
   // PROJECT_ROOT -- never the resolved absolute path (see
   // resolveWithinRoot), so this stays portable across machines.
@@ -2549,19 +2566,50 @@ export function registerDesignSystem(input: {
   project_id: string;
   manifest_path?: string;
   directory_path?: string;
+  figma_json_path?: string;
+  // Internal: an already-fetched Figma file (the handler's figma_file_key
+  // path), with the label to store as source_path.
+  figma_file?: unknown;
+  figma_source_label?: string;
 }): DesignSystemRegistration {
-  const provided = [input.manifest_path, input.directory_path].filter((v) => v !== undefined && v !== "");
+  const provided = [input.manifest_path, input.directory_path, input.figma_json_path, input.figma_file].filter(
+    (v) => v !== undefined && v !== ""
+  );
   if (provided.length !== 1) {
     throw new Error(
-      "register_design_system requires exactly one of manifest_path or directory_path (both relative to the project root)."
+      "register_design_system requires exactly one of manifest_path, directory_path, figma_json_path or figma_file_key (paths relative to the project root)."
     );
   }
 
-  let sourceKind: "manifest" | "directory_scan";
+  let sourceKind: "manifest" | "directory_scan" | "figma";
   let sourcePath: string;
   let candidates: DesignSystemCandidate[];
 
-  if (input.manifest_path) {
+  if (input.figma_json_path || input.figma_file !== undefined) {
+    sourceKind = "figma";
+    let raw: unknown = input.figma_file;
+    if (input.figma_json_path) {
+      sourcePath = input.figma_json_path;
+      const abs = resolveWithinRoot(PROJECT_ROOT, input.figma_json_path);
+      if (!abs) {
+        throw new Error(
+          `figma_json_path "${input.figma_json_path}" must be a relative path within the project root (${PROJECT_ROOT}) -- it was either absolute or escaped the project root.`
+        );
+      }
+      if (!existsSync(abs) || !statSync(abs).isFile()) {
+        throw new Error(`No file found at "${input.figma_json_path}" (resolved to ${abs}).`);
+      }
+      try {
+        raw = JSON.parse(readFileSync(abs, "utf8"));
+      } catch {
+        throw new Error(`Figma file at "${input.figma_json_path}" is not valid JSON.`);
+      }
+    } else {
+      sourcePath = input.figma_source_label ?? "figma";
+    }
+    const parsed = parseFigmaFile(raw, sourcePath);
+    candidates = parsed.candidates;
+  } else if (input.manifest_path) {
     sourceKind = "manifest";
     sourcePath = input.manifest_path;
     const abs = resolveWithinRoot(PROJECT_ROOT, input.manifest_path);
@@ -5046,6 +5094,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       project_id: string;
       manifest_path?: string;
       directory_path?: string;
+      figma_json_path?: string;
+      figma_file_key?: string;
       summarize?: boolean;
     };
 
@@ -5060,7 +5110,26 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (!ANTHROPIC_API_KEY) throw new Error(MISSING_API_KEY_MESSAGE);
       }
       const wantSummaries = args.summarize ?? SUMMARIZE_BY_DEFAULT;
-      const registration = registerDesignSystem(args);
+      // figma_file_key: fetch with the user's own token (env only -- a token
+      // in tool arguments would land in logs/transcripts), then register the
+      // fetched file like a saved one.
+      let registerInput: Parameters<typeof registerDesignSystem>[0] = args;
+      if (args.figma_file_key) {
+        const others = [args.manifest_path, args.directory_path, args.figma_json_path].filter((v) => v !== undefined && v !== "");
+        if (others.length > 0) {
+          throw new Error("register_design_system requires exactly one of manifest_path, directory_path, figma_json_path or figma_file_key.");
+        }
+        const token = process.env.FIGMA_ACCESS_TOKEN;
+        if (!token) {
+          throw new Error("figma_file_key needs FIGMA_ACCESS_TOKEN set in the environment (a Figma personal access token that can read the file). Alternatively save the file's JSON and pass figma_json_path, which needs no token and makes no network call.");
+        }
+        registerInput = {
+          project_id: args.project_id,
+          figma_file: await fetchFigmaFile(args.figma_file_key, token),
+          figma_source_label: `figma:${args.figma_file_key}`,
+        };
+      }
+      const registration = registerDesignSystem(registerInput);
       let summaries: Record<string, unknown> | undefined;
       if (wantSummaries && args.directory_path) {
         if (ANTHROPIC_API_KEY) {
