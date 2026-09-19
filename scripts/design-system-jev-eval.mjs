@@ -14,6 +14,7 @@
  *       spawning dist/index.js. Requires `npm run build` first.
  *   R2  the same shipped-scanner output collapsed to ONE candidate per file
  *       (exports joined, props unioned, file name in evidence, like E1).
+ *   R3  R2 + the cached Haiku capability summary (like E3, on shipped output).
  * Requires ANTHROPIC_API_KEY (.env ok) and TYPESAFE_API_KEY (env).
  * Usage: node scripts/design-system-jev-eval.mjs [--no-sonnet]
  */
@@ -127,15 +128,21 @@ async function shippedCandidates(sys) {
 // ---------- evidence variants ----------
 async function buildPool(sys, variant) {
   const out = [];
-  if (variant === "R2") {
+  if (variant === "R2" || variant === "R3") {
     const byFile = new Map();
     for (const c of await shippedCandidates(sys)) {
       const f = c.file_path ?? c.name;
       const g = byFile.get(f) ?? { names: [], props: new Set(), description: c.description };
       g.names.push(c.name); c.props.forEach((p) => g.props.add(p)); byFile.set(f, g);
     }
-    for (const [file, g] of byFile)
-      out.push({ file, evidence: `file: ${file}; exports: ${g.names.join(", ")}; props: ${[...g.props].slice(0, 25).join(", ") || "none listed"}${g.description ? `; doc: ${g.description}` : ""}` });
+    for (const [file, g] of byFile) {
+      let ev = `file: ${file}; exports: ${g.names.join(", ")}; props: ${[...g.props].slice(0, 25).join(", ") || "none listed"}${g.description ? `; doc: ${g.description}` : ""}`;
+      if (variant === "R3") {
+        const abs = join(home(REAL[sys].root), REAL[sys].rel, file);
+        ev += `\nsummary: ${await summary(sys, { file, content: readFileSync(abs, "utf8") })}`;
+      }
+      out.push({ file, evidence: ev });
+    }
     return out;
   }
   if (variant === "R") {
@@ -177,11 +184,12 @@ async function scoreSonnet(need, pool) {
 
 // ---------- run ----------
 const VARIANTS = (process.env.VARIANTS ?? "E0,E1,E2,E3,R,R2").split(","), THRESH = 0.5;
-const runs = {}, poolSizes = {};
+const runs = {}, poolSizes = {}, evidenceSamples = {};
 for (const v of VARIANTS) {
   process.stdout.write(`\n[${v}] building pools... `);
   const pool = {}; for (const sys of Object.keys(pools)) pool[sys] = await buildPool(sys, v);
   console.log(Object.entries(pool).map(([s, p]) => `${s}:${p.length}/${pools[s].length} files`).join("  "));
+  evidenceSamples[v] = Object.fromEntries(Object.entries(pool).flatMap(([sy, p]) => p.filter((x) => ["markdown.tsx", "ChatDrawer.jsx", "tooltip.tsx"].includes(x.file)).map((x) => [`${sy}/${x.file}`, x.evidence])));
   poolSizes[v] = Object.fromEntries(Object.entries(pool).map(([sy, p]) => [sy, p.length]));
   const rows = [];
   for (let i = 0; i < evalSet.cases.length; i += 4) {
@@ -189,7 +197,7 @@ for (const v of VARIANTS) {
     rows.push(...await Promise.all(batch.map(async (c) => {
       const p = pool[c.system]; const row = { id: c.id, gold: c.gold, goldInPool: c.gold.length === 0 || c.gold.some((g) => p.some((x) => x.file === g)) };
       try { const t0 = Date.now(); const j = await scoreJev(c.need, p); row.jev = { ...j, ms: Date.now() - t0 }; } catch (e) { row.jev = { error: e.message }; }
-      if (RUN_SONNET && (v === "E0" || v === "E3" || v === "R" || v === "R2")) { try { row.sonnet = await scoreSonnet(c.need, p); } catch (e) { row.sonnet = { error: e.message }; } }
+      if (RUN_SONNET && (v === "E0" || v === "E3" || v === "R" || v === "R2" || v === "R3")) { try { row.sonnet = await scoreSonnet(c.need, p); } catch (e) { row.sonnet = { error: e.message }; } }
       return row;
     })));
     process.stdout.write(".");
@@ -228,5 +236,5 @@ for (const v of VARIANTS) {
 }
 console.log(`\nHaiku summaries generated this run: ${haikuCalls} calls, ${haikuIn} in / ${haikuOut} out tokens (cached in eval/design-system-summaries.json)`);
 writeFileSync(cachePath, JSON.stringify(cache, null, 1));
-writeFileSync(join(root, "eval/design-system-jev-log.json"), JSON.stringify({ generated_at: new Date().toISOString(), threshold: THRESH, haiku: { calls: haikuCalls, input_tokens: haikuIn, output_tokens: haikuOut }, summary: summary_, runs }, null, 1));
+writeFileSync(join(root, "eval/design-system-jev-log.json"), JSON.stringify({ generated_at: new Date().toISOString(), threshold: THRESH, haiku: { calls: haikuCalls, input_tokens: haikuIn, output_tokens: haikuOut }, summary: summary_, evidenceSamples, runs }, null, 1));
 console.log("Wrote eval/design-system-jev-log.json");
