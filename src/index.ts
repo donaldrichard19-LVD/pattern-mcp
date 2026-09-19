@@ -55,6 +55,13 @@ import {
 import { offerEnforcementSetupOnce } from "./init-enforcement.js";
 import { connectInstructionsText, offerClientConnectSetupOnce, runConnect } from "./client-connect.js";
 import { collapseForJev, rankWithJev } from "./design-system-jev.js";
+import {
+  SUMMARY_MODEL,
+  carryOverSummaries,
+  makeAnthropicSummaryCall,
+  summarizeCandidates,
+  type SummarizeStats,
+} from "./design-system-summaries.js";
 
 // Read as early as possible in this file's own module-level code, wrapped
 // so a missing/corrupt package.json can't itself become a new, unguarded
@@ -1100,6 +1107,11 @@ const REGISTER_DESIGN_SYSTEM_INPUT_SCHEMA = {
       description:
         "Path to a directory of component source files, relative to the project root -- never an absolute path. Scanned recursively for .jsx/.tsx/.js/.ts files (excluding node_modules/dist/build/.git and test/story files); each exported, uppercase-named function or const component found is a candidate, with props read from a `<Name>Props` interface/type, a `.propTypes` block, or (as a last resort) the component's own destructured parameters. This is a heuristic scan, not a full parser -- an empty or partial props list for some components is expected, not a bug, especially on plain JS with no prop typing at all. Exactly one of manifest_path or directory_path is required.",
     },
+    summarize: {
+      type: "boolean",
+      description:
+        "Opt-in, directory_path only. Writes a short (2-3 sentence) capability summary for each scanned file with Claude Haiku and stores it on the registration -- a big accuracy/confidence gain for the Jev design-system scorer (PATTERN_SCORER=jev) and harmless for the default one. Sends up to 8000 characters of each source file that needs a summary to api.anthropic.com, so it is off by default; needs ANTHROPIC_API_KEY; costs about 0.2 cents per file (capped at PATTERN_SUMMARY_MAX_FILES, default 200 files). Summaries are cached by file content: re-registering only pays for files that changed, and unchanged files keep their summary even without this flag.",
+    },
   },
   required: ["project_id"],
 } as const;
@@ -1523,7 +1535,8 @@ async function runSinglePass(input: {
           const propsPart = c.props.length > 0 ? `props: ${c.props.join(", ")}` : "props: (none captured)";
           const descPart = c.description ? `; description: ${c.description}` : "";
           const usagePart = c.usage_example ? `; usage_example: ${c.usage_example}` : "";
-          return `${i + 1}. ${c.name} -- ${propsPart}${descPart}${usagePart}`;
+          const summaryPart = c.summary ? `; summary: ${c.summary}` : "";
+          return `${i + 1}. ${c.name} -- ${propsPart}${descPart}${usagePart}${summaryPart}`;
         })
         .join("\n")}`
     : "";
@@ -2125,6 +2138,9 @@ export interface DesignSystemCandidate {
   // Optional natural-language capability summary (see the Jev design-system
   // path). Absent unless a registration was enriched with one.
   summary?: string | null;
+  // Hash of the source file's content when `summary` was written, so a
+  // re-registration reuses the summary only while the file is unchanged.
+  summary_hash?: string;
 }
 
 export interface DesignSystemRegistration {
@@ -2477,6 +2493,41 @@ function parseManifestCandidates(raw: string, sourcePath: string): DesignSystemC
   );
 }
 
+// Source text of a scanned candidate file, or null if unreadable. `rel` is
+// always a scanner-produced path relative to the scanned directory.
+function readCandidateSource(scanRoot: string, rel: string): string | null {
+  try {
+    return readFileSync(join(scanRoot, rel), "utf8");
+  } catch {
+    return null;
+  }
+}
+
+// Opt-in (`summarize: true`): fill in a short Haiku-written capability
+// summary for every scanned file still missing a valid one, then persist.
+// Sends up to 8000 chars of each such source file to Anthropic.
+async function summarizeRegistration(
+  registration: DesignSystemRegistration
+): Promise<SummarizeStats & { estimated_cost_usd: number; model: string }> {
+  const scanRoot = resolveWithinRoot(PROJECT_ROOT, registration.source_path);
+  if (!scanRoot) throw new Error(`source_path "${registration.source_path}" is outside the project root.`);
+  const reused = new Set(registration.candidates.filter((c) => c.summary && c.file_path).map((c) => c.file_path)).size;
+  const stats = await summarizeCandidates(
+    registration.candidates,
+    (rel) => readCandidateSource(scanRoot, rel),
+    makeAnthropicSummaryCall(ANTHROPIC_API_KEY!, ANTHROPIC_WORKSPACE_ID || undefined),
+    reused
+  );
+  const file = readDesignSystems();
+  file[registration.project_id] = registration;
+  writeDesignSystems(file);
+  return {
+    ...stats,
+    model: SUMMARY_MODEL,
+    estimated_cost_usd: estimateCostUsd(stats.tokens, SUMMARY_MODEL),
+  };
+}
+
 // Core of the register_design_system tool. Exactly one of manifest_path
 // or directory_path, both resolved via resolveWithinRoot -- same
 // PROJECT_ROOT-scoped, relative-path-only boundary check_ledger_liveness
@@ -2526,6 +2577,15 @@ export function registerDesignSystem(input: {
       throw new Error(`No directory found at "${sourcePath}" (resolved to ${abs}).`);
     }
     candidates = scanDirectoryForDesignSystem(abs);
+  }
+
+  // Reuse still-valid capability summaries from the previous registration
+  // (same file, unchanged content). Free -- local hashing only.
+  if (sourceKind === "directory_scan") {
+    const scanRoot = resolveWithinRoot(PROJECT_ROOT, sourcePath);
+    if (scanRoot) {
+      carryOverSummaries(candidates, readDesignSystems()[input.project_id]?.candidates, (rel) => readCandidateSource(scanRoot, rel));
+    }
   }
 
   if (candidates.length === 0) {
@@ -4684,7 +4744,9 @@ const ALL_TOOLS = [
         "registered, recommend_component scores ONLY against these " +
         "candidates for this project_id -- external-library search stops " +
         "entirely, it does not layer on top. This only writes local " +
-        "config; it never calls the Anthropic API. Re-run this whenever " +
+        "config; it never calls the Anthropic API unless you pass " +
+        "summarize: true (opt-in, sends source file text to Anthropic). " +
+        "Re-run this whenever " +
         "the design system's own components change meaningfully -- " +
         "registration is a point-in-time snapshot, not a live link.",
       inputSchema: REGISTER_DESIGN_SYSTEM_INPUT_SCHEMA,
@@ -4972,12 +5034,22 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       project_id: string;
       manifest_path?: string;
       directory_path?: string;
+      summarize?: boolean;
     };
 
     try {
+      // Checked before registering so a refused request leaves the previous
+      // registration untouched.
+      if (args.summarize) {
+        if (!args.directory_path) {
+          throw new Error("summarize: true needs directory_path -- summaries are written from source files, and a manifest has none to read.");
+        }
+        if (!ANTHROPIC_API_KEY) throw new Error(MISSING_API_KEY_MESSAGE);
+      }
       const registration = registerDesignSystem(args);
+      const summaries = args.summarize ? await summarizeRegistration(registration) : undefined;
       return {
-        content: [{ type: "text", text: JSON.stringify({ status: "registered", registration }) }],
+        content: [{ type: "text", text: JSON.stringify({ status: "registered", registration, ...(summaries ? { summaries } : {}) }) }],
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

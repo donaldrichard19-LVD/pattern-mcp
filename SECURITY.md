@@ -220,3 +220,12 @@ two places:
   above still leaves your machine.
 
 Leave `PATTERN_SCORER` unset and no data goes to TypeSafe.
+
+### Optional: `register_design_system` with `summarize: true`
+
+Off by default. When set, up to 8000 characters of each source file that needs a
+summary are sent to `api.anthropic.com` (Claude Haiku) to write a short
+capability description, which is then stored in your local registration file
+(`~/.pattern/design_systems.json`) and, in Jev mode, sent onward to TypeSafe as
+evidence text. Without the flag, registration is fully local and makes no
+network calls.
