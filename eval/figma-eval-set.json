@@ -1,0 +1,242 @@
+{
+ "_meta": {
+  "description": "Figma frames-mode eval: given a real Figma file's designs as candidates, does the scorer find the right design for a need, or say nothing fits? Source: the public Figma Community file '30+ Chart UI Components | BRIX Templates' (file key TkX9ifsyzkjZtIY0Lkzj3K), registered with figma_mode 'frames', figma_pages ['Design'] (43 candidates). The file itself is NOT committed (third-party content, 5 MB): fetch it with figma_file_key + FIGMA_ACCESS_TOKEN or save GET /v1/files/<key> and point FIGMA_EVAL_JSON at it.",
+  "labeling": "Gold labels authored by Claude by LOOKING at PNG renders of the four category frames and matching each card to its candidate via the text inside it -- not verified by a human. 'gold' lists every candidate a reasonable designer would accept; empty gold = nothing in the file should match (checked by eye across all four sheets).",
+  "known_quirks": "The file misspells one layer ('Pie Charts > Chat 2' is the credit-score gauge). 'Dashboard' groups in each category are page-shell distractors."
+ },
+ "cases": [
+  {
+   "id": "bar-highlight-tooltip-weekdays",
+   "need": "A bar chart over days of the week where one bar is highlighted and a tooltip shows its value",
+   "gold": [
+    "Bar Charts > Chart 3",
+    "Bar Charts > Chart 10",
+    "Bar Charts > Chart 12"
+   ]
+  },
+  {
+   "id": "bar-horizontal-ranking",
+   "need": "A horizontal bar chart that ranks countries or categories by value, with the labels on the left",
+   "gold": [
+    "Bar Charts > Chart 5",
+    "Bar Charts > Chart 13",
+    "Bar Charts > Chart 11"
+   ]
+  },
+  {
+   "id": "bar-stacked-tiers-legend",
+   "need": "A stacked bar chart over months with a legend naming the plan tiers",
+   "gold": [
+    "Bar Charts > Chart 8",
+    "Other Charts > Chart 2"
+   ]
+  },
+  {
+   "id": "bar-grouped-two-series",
+   "need": "A grouped bar chart comparing two groups side by side across years, with a legend",
+   "gold": [
+    "Bar Charts > Chart 2",
+    "Bar Charts > Chart 7"
+   ]
+  },
+  {
+   "id": "bar-candlestick-price",
+   "need": "A candlestick chart for a price with time-range buttons like 1h, 12h and 24h",
+   "gold": [
+    "Bar Charts > Chart 6"
+   ]
+  },
+  {
+   "id": "bar-mini-revenue-card",
+   "need": "A compact revenue card with a tiny bar sparkline and a two-row legend showing amounts",
+   "gold": [
+    "Bar Charts > Chart 4"
+   ]
+  },
+  {
+   "id": "bar-track-background-12mo",
+   "need": "Tall vertical bars over twelve months, each drawn against a full-height grey track, with a Quarter/Semester/Annual toggle",
+   "gold": [
+    "Bar Charts > Chart 1"
+   ]
+  },
+  {
+   "id": "bar-with-line-overlay",
+   "need": "A bar chart with a smooth line drawn over the bars and an annual dropdown",
+   "gold": [
+    "Bar Charts > Chart 9"
+   ]
+  },
+  {
+   "id": "line-headline-number-toggle",
+   "need": "A line chart card with a big headline number, a percent change versus last period, and a Daily/Weekly/Annually toggle",
+   "gold": [
+    "Line Charts > Chart 1"
+   ]
+  },
+  {
+   "id": "line-kpi-sparkline-cards",
+   "need": "Small KPI cards each with a large number, a percent change, and a tiny sparkline",
+   "gold": [
+    "Line Charts > Chart 4",
+    "Line Charts > Chart 5",
+    "Line Charts > Chart 6"
+   ]
+  },
+  {
+   "id": "line-dashed-multi-series",
+   "need": "A smooth multi-series line chart with dashed lines, a legend of series names, and a 7 days / 30 days / 12 months toggle",
+   "gold": [
+    "Line Charts > Chart 7"
+   ]
+  },
+  {
+   "id": "line-this-vs-last-month",
+   "need": "A line chart comparing this month with last month over four weeks",
+   "gold": [
+    "Line Charts > Chart 3"
+   ]
+  },
+  {
+   "id": "line-realtime-hours",
+   "need": "A real-time line chart with a marker and tooltip along an hourly time axis",
+   "gold": [
+    "Line Charts > Chart 9"
+   ]
+  },
+  {
+   "id": "line-circle-markers-toggle",
+   "need": "A line chart with circle markers on each data point, a tooltip, and a Day/Week/Month/Year toggle",
+   "gold": [
+    "Other Charts > Chart 1"
+   ]
+  },
+  {
+   "id": "area-vertical-marker-months",
+   "need": "An area chart with a vertical marker line and month selector pills underneath",
+   "gold": [
+    "Other Charts > Chart 4",
+    "Line Charts > Chart 2"
+   ]
+  },
+  {
+   "id": "area-forecast-cone",
+   "need": "A forecast area chart showing a widening range of projected values",
+   "gold": [
+    "Other Charts > Chart 3"
+   ]
+  },
+  {
+   "id": "donut-segment-percentages",
+   "need": "A donut chart with percentage labels inside the segments and a legend with counts",
+   "gold": [
+    "Pie Charts > Chart 6"
+   ]
+  },
+  {
+   "id": "gauge-goal-semicircle",
+   "need": "A semicircular gauge showing progress toward a sales goal with the percentage in the middle",
+   "gold": [
+    "Pie Charts > Chart 4"
+   ]
+  },
+  {
+   "id": "gauge-credit-score",
+   "need": "A credit-score style gauge with a multi-coloured arc and a large number",
+   "gold": [
+    "Pie Charts > Chat 2"
+   ]
+  },
+  {
+   "id": "radial-concentric-rings",
+   "need": "Concentric radial progress rings for several teams, with a legend",
+   "gold": [
+    "Pie Charts > Chart 1"
+   ]
+  },
+  {
+   "id": "pie-table-legend",
+   "need": "A pie chart with a table-style legend showing values and percent changes per country",
+   "gold": [
+    "Pie Charts > Chart 7"
+   ]
+  },
+  {
+   "id": "pie-callout-tooltips",
+   "need": "A pie chart with callout tooltips pointing at individual slices",
+   "gold": [
+    "Pie Charts > Chart 9"
+   ]
+  },
+  {
+   "id": "half-donut-tooltip",
+   "need": "A half-donut chart with a tooltip and a platform legend",
+   "gold": [
+    "Pie Charts > Chart 3"
+   ]
+  },
+  {
+   "id": "bubble-overlap-status",
+   "need": "Overlapping circles sized by percentage, with a legend of statuses",
+   "gold": [
+    "Other Charts > Chart 5"
+   ]
+  },
+  {
+   "id": "segmented-sentiment-bar",
+   "need": "A segmented horizontal bar for negative, neutral and positive sentiment with counts and emoji",
+   "gold": [
+    "Other Charts > Chart 6"
+   ]
+  },
+  {
+   "id": "lollipop-avatars",
+   "need": "A lollipop-style chart with sticks and a user avatar under each one",
+   "gold": [
+    "Other Charts > Chart 8"
+   ]
+  },
+  {
+   "id": "bar-3d-cylinders",
+   "need": "A 3D cylinder bar chart, stacked in two colours",
+   "gold": [
+    "Other Charts > Chart 7"
+   ]
+  },
+  {
+   "id": "none-scatter",
+   "need": "A scatter plot with a fitted regression line",
+   "gold": []
+  },
+  {
+   "id": "none-heatmap-calendar",
+   "need": "A GitHub-style calendar heatmap of daily activity",
+   "gold": []
+  },
+  {
+   "id": "none-radar",
+   "need": "A radar (spider) chart comparing several metrics",
+   "gold": []
+  },
+  {
+   "id": "none-gantt",
+   "need": "A Gantt chart of project tasks over time",
+   "gold": []
+  },
+  {
+   "id": "none-sankey",
+   "need": "A Sankey diagram showing flow between categories",
+   "gold": []
+  },
+  {
+   "id": "none-treemap",
+   "need": "A treemap sized by category share",
+   "gold": []
+  },
+  {
+   "id": "none-choropleth",
+   "need": "A choropleth map colouring countries by value",
+   "gold": []
+  }
+ ]
+}

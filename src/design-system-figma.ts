@@ -22,6 +22,12 @@ export interface FigmaCandidateInfo {
   variants: Record<string, string[]>;
   /** Non-variant property names (BOOLEAN / TEXT / INSTANCE_SWAP), e.g. "Show icon". */
   properties: string[];
+  /** "frame" for frames mode candidates (a design, not a defined component); absent = component. */
+  kind?: "frame";
+  /** Frames mode: distinct meaningful layer names inside the design (default names like "Rectangle 4" dropped). */
+  layers?: string[];
+  /** Frames mode: distinct text contents inside the design (labels, headings, sample data). */
+  texts?: string[];
 }
 
 export interface FigmaCandidate {
@@ -75,7 +81,18 @@ function parseVariantName(name: string): Record<string, string> {
   return out;
 }
 
-export function parseFigmaFile(raw: unknown, sourceLabel: string): { candidates: FigmaCandidate[]; stats: FigmaParseStats } {
+export interface FigmaParseOptions {
+  /** "components" (default): defined COMPONENT / COMPONENT_SET nodes. "frames": named designs on pages. */
+  mode?: "components" | "frames";
+  /** Frames mode: only these pages (matched case-insensitively by substring). Default: every page. */
+  pages?: string[];
+}
+
+export function parseFigmaFile(
+  raw: unknown,
+  sourceLabel: string,
+  options: FigmaParseOptions = {}
+): { candidates: FigmaCandidate[]; stats: FigmaParseStats } {
   const file = raw as FigmaFile;
   if (!file || typeof file !== "object" || !file.document || !Array.isArray(file.document.children)) {
     throw new Error(
@@ -85,6 +102,7 @@ export function parseFigmaFile(raw: unknown, sourceLabel: string): { candidates:
   }
 
   const stats: FigmaParseStats = { pages: 0, component_sets: 0, standalone_components: 0, skipped_private: 0 };
+  if (options.mode === "frames") return { candidates: parseFigmaFrames(file, options.pages), stats };
   const candidates: FigmaCandidate[] = [];
   type Frame = { node: FigmaNode; page: string | null; section: string | null };
   const stack: Frame[] = [];
@@ -153,10 +171,15 @@ export function describeFigma(c: { figma?: FigmaCandidateInfo }, includeVariants
   const variants = Object.entries(f.variants)
     .map(([k, vs]) => `${k}: ${vs.join(" | ")}`)
     .join("; ");
+  // Frames-mode content (what is drawn inside the design). PATTERN_JEV_FIGMA_TEXT=0
+  // leaves it out, for A/B testing.
+  const includeContent = process.env.PATTERN_JEV_FIGMA_TEXT !== "0";
   const parts = [
     ...(where ? [`located: ${where}`] : []),
     ...(includeVariants && variants ? [`variants: ${variants}`] : []),
     ...(includeVariants && f.properties.length > 0 ? [`toggles/slots: ${f.properties.join(", ")}`] : []),
+    ...(includeContent && f.layers && f.layers.length > 0 ? [`layers: ${f.layers.join(", ")}`] : []),
+    ...(includeContent && f.texts && f.texts.length > 0 ? [`text: ${f.texts.join(" | ")}`] : []),
   ];
   return parts.length > 0 ? parts.join("; ") : null;
 }
@@ -177,4 +200,98 @@ export async function fetchFigmaFile(fileKey: string, token: string): Promise<un
   if (res.status === 404) throw new Error(`Figma file "${fileKey}" was not found (404): check the file key.`);
   if (!res.ok) throw new Error(`Figma API error ${res.status}: ${(await res.text()).slice(0, 200)}`);
   return res.json();
+}
+
+// ---------------------------------------------------------------------------
+// Frames mode
+//
+// Many real Figma files -- community templates especially -- never use Figma
+// components: the reusable designs are plain frames/groups (the BRIX chart file
+// this was built against has 4 components, all style-guide helpers, and 30+
+// charts as ungrouped layers named "Chart 1".."Chart 13"). Frames mode treats
+// each named design as a candidate and builds its evidence from what is inside:
+// layer names and text. Heuristics, deliberately simple:
+//   - a top-level frame/group with >= 3 substantial container children is a
+//     "sheet" (Bar Charts > Chart 1..13): each child is a candidate, the
+//     sheet's name becomes its `section`;
+//   - otherwise a substantial top-level frame/group is itself a candidate;
+//   - "substantial" = at least FRAMES_MIN_DESCENDANTS nodes, which drops
+//     headings and labels;
+//   - instances are never descended into.
+// ---------------------------------------------------------------------------
+
+const FRAMES_MIN_DESCENDANTS = 5;
+const FRAMES_SHEET_MIN_CHILDREN = 3;
+const FRAMES_MAX_CANDIDATES = 500;
+const FRAMES_MAX_LAYERS = 25;
+const FRAMES_MAX_TEXTS = 25;
+const FRAMES_TEXT_CAP = 40;
+const CONTAINER_TYPES = new Set(["FRAME", "GROUP", "SECTION", "COMPONENT", "COMPONENT_SET"]);
+const DEFAULT_LAYER_NAME = /^(rectangle|ellipse|vector|line|frame|group|union|subtract|intersect|exclude|polygon|star|image|text|boolean|mask|arrow|slice|layer|shape|container)( ?\d+)?$/i;
+
+interface FramesNode extends FigmaNode {
+  characters?: string;
+}
+
+function descendantCount(node: FramesNode): number {
+  let n = 0;
+  const stack: FramesNode[] = [...(node.children ?? [])];
+  while (stack.length > 0) {
+    const cur = stack.pop()!;
+    n++;
+    if (cur.type !== "INSTANCE") for (const c of cur.children ?? []) stack.push(c);
+  }
+  return n;
+}
+
+function collectFrameEvidence(node: FramesNode): { layers: string[]; texts: string[] } {
+  const layers = new Set<string>();
+  const texts = new Set<string>();
+  const stack: FramesNode[] = [...(node.children ?? [])].reverse();
+  while (stack.length > 0) {
+    const cur = stack.pop()!;
+    const name = (cur.name ?? "").trim();
+    if (cur.type === "TEXT") {
+      const t = (cur.characters ?? "").replace(/\s+/g, " ").trim();
+      if (t) texts.add(t.slice(0, FRAMES_TEXT_CAP));
+    } else if (name && !DEFAULT_LAYER_NAME.test(name)) {
+      layers.add(name);
+    }
+    if (cur.type !== "INSTANCE") for (const c of [...(cur.children ?? [])].reverse()) stack.push(c);
+  }
+  return { layers: [...layers].slice(0, FRAMES_MAX_LAYERS), texts: [...texts].slice(0, FRAMES_MAX_TEXTS) };
+}
+
+function parseFigmaFrames(file: FigmaFile, pageFilter: string[] | undefined): FigmaCandidate[] {
+  const out: FigmaCandidate[] = [];
+  const wanted = (pageFilter ?? []).map((p) => p.toLowerCase());
+  const pages = (file.document?.children ?? []).filter((p) => p.type === "CANVAS");
+  const push = (node: FramesNode, page: string | null, section: string | null) => {
+    if (out.length >= FRAMES_MAX_CANDIDATES) return;
+    const name = (node.name ?? "").trim();
+    if (!name) return;
+    const { layers, texts } = collectFrameEvidence(node);
+    out.push({
+      name: section ? `${section} > ${name}` : name,
+      props: [],
+      description: null,
+      usage_example: null,
+      file_path: null,
+      figma: { node_id: node.id ?? `frame:${section ?? ""}:${name}`, page, section, variants: {}, properties: [], kind: "frame", layers, texts },
+    });
+  };
+  for (const page of pages) {
+    const pageName = page.name ?? null;
+    if (wanted.length > 0 && !wanted.some((w) => (pageName ?? "").toLowerCase().includes(w))) continue;
+    for (const top of page.children ?? []) {
+      if (!CONTAINER_TYPES.has(top.type ?? "") || !(top.name ?? "").trim()) continue;
+      const kids = (top.children ?? []).filter((c) => CONTAINER_TYPES.has(c.type ?? "") && descendantCount(c) >= FRAMES_MIN_DESCENDANTS);
+      if (kids.length >= FRAMES_SHEET_MIN_CHILDREN) {
+        for (const kid of kids) push(kid, pageName, (top.name ?? "").trim());
+      } else if (descendantCount(top) >= FRAMES_MIN_DESCENDANTS) {
+        push(top, pageName, null);
+      }
+    }
+  }
+  return out;
 }

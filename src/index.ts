@@ -1128,6 +1128,18 @@ const REGISTER_DESIGN_SYSTEM_INPUT_SCHEMA = {
       description:
         "Figma file key (the part of a figma.com/design/<key>/... URL). Fetches the file from api.figma.com with FIGMA_ACCESS_TOKEN (environment only, never a tool argument) and registers it like figma_json_path -- so your token and this request go to Figma. Experimental. Exactly one of manifest_path, directory_path, figma_json_path or figma_file_key is required.",
     },
+    figma_mode: {
+      type: "string",
+      enum: ["components", "frames"],
+      description:
+        "Only with figma_json_path / figma_file_key. \"components\" (default): one candidate per defined component / component set. \"frames\": one candidate per named design (frame or group) on the pages -- for files, community templates especially, that draw their designs as plain frames instead of components. In frames mode a frame with 3+ substantial sub-designs is treated as a sheet (\"Bar Charts > Chart 5\"), and each candidate's evidence is its layer names and text contents. Experimental.",
+    },
+    figma_pages: {
+      type: "array",
+      items: { type: "string" },
+      description:
+        "Frames mode only: restrict to pages whose name contains any of these strings (case-insensitive), e.g. [\"Design\"], to skip cover / style-guide / license pages.",
+    },
     summarize: {
       type: "boolean",
       description:
@@ -2567,6 +2579,8 @@ export function registerDesignSystem(input: {
   manifest_path?: string;
   directory_path?: string;
   figma_json_path?: string;
+  figma_mode?: "components" | "frames";
+  figma_pages?: string[];
   // Internal: an already-fetched Figma file (the handler's figma_file_key
   // path), with the label to store as source_path.
   figma_file?: unknown;
@@ -2607,8 +2621,16 @@ export function registerDesignSystem(input: {
     } else {
       sourcePath = input.figma_source_label ?? "figma";
     }
-    const parsed = parseFigmaFile(raw, sourcePath);
+    const parsed = parseFigmaFile(raw, sourcePath, { mode: input.figma_mode, pages: input.figma_pages });
     candidates = parsed.candidates;
+    if (candidates.length === 0) {
+      throw new Error(
+        input.figma_mode === "frames"
+          ? `No designs were found in "${sourcePath}" in frames mode (looked for named frames/groups with at least 5 layers${input.figma_pages?.length ? ` on pages matching ${JSON.stringify(input.figma_pages)}` : ""}). Check figma_pages.`
+          : `No components were found in "${sourcePath}" (${parsed.stats.pages} pages, 0 defined components or component sets; ${parsed.stats.skipped_private} hidden ones skipped). ` +
+            `Many Figma files -- community templates especially -- draw their designs as plain frames rather than components; pass figma_mode: "frames" to register those instead.`
+      );
+    }
   } else if (input.manifest_path) {
     sourceKind = "manifest";
     sourcePath = input.manifest_path;
@@ -5096,6 +5118,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       directory_path?: string;
       figma_json_path?: string;
       figma_file_key?: string;
+      figma_mode?: "components" | "frames";
+      figma_pages?: string[];
       summarize?: boolean;
     };
 
@@ -5127,6 +5151,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           project_id: args.project_id,
           figma_file: await fetchFigmaFile(args.figma_file_key, token),
           figma_source_label: `figma:${args.figma_file_key}`,
+          figma_mode: args.figma_mode,
+          figma_pages: args.figma_pages,
         };
       }
       const registration = registerDesignSystem(registerInput);

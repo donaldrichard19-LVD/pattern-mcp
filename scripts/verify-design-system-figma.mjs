@@ -58,6 +58,29 @@ const FIXTURE = {
   componentSets: { "2:1": { description: "Primary action button with sizes and states." } },
 };
 
+// Frames-mode fixture: a template that draws its designs as plain frames/groups (no components).
+const layer = (id, name, type = "RECTANGLE") => ({ id, type, name });
+const text = (id, characters) => ({ id, type: "TEXT", name: characters, characters });
+const chart = (id, name, layers, texts) => ({ id, type: "GROUP", name, children: [...layers.map((n, i) => layer(`${id}:l${i}`, n)), ...texts.map((t, i) => text(`${id}:t${i}`, t))] });
+const FRAMES_FIXTURE = {
+  name: "Chart Templates",
+  document: { id: "0:0", type: "DOCUMENT", name: "Document", children: [
+    { id: "0:1", type: "CANVAS", name: "Design", children: [
+      { id: "10:1", type: "FRAME", name: "Bar Charts", children: [
+        chart("11:1", "Chart 1", ["Rectangle 4", "Bars", "Bar", "Card Info."], ["Online users", "JAN", "FEB", "JAN"]),
+        chart("11:2", "Chart 2", ["Ellipse 9", "Legend", "Tooltip"], ["Demographic", "Masculine", "Feminine"]),
+        { ...chart("11:3", "Chart 3", ["Bars", "Highlighted Bar"], ["Average views", "MON", "TUE"]), children: [layer("11:3:x", "Bars"), text("11:3:y", "Average views"), text("11:3:z", "MON"), layer("11:3:q", "Highlighted Bar"), { id: "11:3:i", type: "INSTANCE", name: "Button", children: [layer("11:3:ij", "inner-instance-layer"), layer("11:3:ik", "another"), layer("11:3:il", "third"), layer("11:3:im", "fourth"), layer("11:3:in", "fifth")] }] },
+        chart("11:4", "Heading", ["Line"], ["Bar charts"]),
+      ] },
+      { id: "10:2", type: "GROUP", name: "CHART TYPE - Bar", children: [layer("12:1", "a"), layer("12:2", "b"), text("12:3", "Bar")] },
+      { id: "10:3", type: "FRAME", name: "Standalone Dashboard", children: [layer("13:1", "Sidebar"), layer("13:2", "Header"), text("13:3", "Overview"), layer("13:4", "Content"), layer("13:5", "Footer")] },
+    ] },
+    { id: "0:2", type: "CANVAS", name: "Cover", children: [
+      { id: "20:1", type: "FRAME", name: "Community Cover", children: [layer("21:1", "Logo"), layer("21:2", "Title"), text("21:3", "Free template"), layer("21:4", "Art"), layer("21:5", "Badge")] },
+    ] },
+  ] },
+  components: {}, componentSets: {},
+};
 const figmaRequests = [];
 const figmaStub = await listen((req, res) => {
   figmaRequests.push({ url: req.url, token: req.headers["x-figma-token"] });
@@ -65,7 +88,7 @@ const figmaStub = await listen((req, res) => {
   if (req.url.startsWith("/v1/files/missing")) { res.writeHead(404); res.end("no"); return; }
   if (req.headers["x-figma-token"] !== "figd_test_token") { res.writeHead(403); res.end("bad token"); return; }
   res.writeHead(200, { "content-type": "application/json" });
-  res.end(JSON.stringify(FIXTURE));
+  res.end(JSON.stringify(req.url.startsWith("/v1/files/framesfile") ? FRAMES_FIXTURE : FIXTURE));
 });
 const jevRequests = [];
 const jevStub = await listen((req, res) => {
@@ -82,6 +105,7 @@ const jevStub = await listen((req, res) => {
 const root = mkdtempSync(join(tmpdir(), "pattern-verify-figma-"));
 writeFileSync(join(root, "kit.json"), JSON.stringify(FIXTURE));
 writeFileSync(join(root, "not-json.json"), "this is { not json");
+writeFileSync(join(root, "frames.json"), JSON.stringify(FRAMES_FIXTURE));
 writeFileSync(join(root, "not-figma.json"), JSON.stringify({ hello: "world" }));
 
 async function connect(extra = {}) {
@@ -175,6 +199,47 @@ console.log("\n=== 4. Figma candidates reach the Jev scorer ===");
   const ev2 = jevRequests[0]?.state.candidates.map((c) => c.evidence) ?? [];
   check("PATTERN_JEV_FIGMA_VARIANTS=0 drops variant text but keeps location", ev2.every((e) => !/variants:/.test(e)) && ev2.some((e) => /located:/.test(e)));
   await noVariants.close();
+}
+
+console.log("\n=== 5. Frames mode: designs drawn as plain frames/groups ===");
+{
+  const noComps = parse(await reg(client, { project_id: "fr0", figma_json_path: "frames.json" }));
+  check("components mode on a file with no components -> error pointing at frames mode", noComps.isError && /figma_mode: "frames"/.test(noComps.text));
+  const { isError, body } = parse(await reg(client, { project_id: "fr1", figma_json_path: "frames.json", figma_mode: "frames", figma_pages: ["design"] }));
+  check("no error", !isError && body?.status === "registered");
+  const c = body.registration.candidates;
+  const names = c.map((x) => x.name).sort();
+  check("sheet children become candidates named 'Sheet > Design'; standalone frame is its own", JSON.stringify(names) === JSON.stringify(["Bar Charts > Chart 1", "Bar Charts > Chart 2", "Bar Charts > Chart 3", "Standalone Dashboard"]));
+  check("small headings/labels are skipped (Heading group, 3-layer 'CHART TYPE' group)", !c.some((x) => /Heading|CHART TYPE/.test(x.name)));
+  check("figma_pages filter is case-insensitive substring and drops the Cover page", !c.some((x) => x.figma.page === "Cover"));
+  const c1 = c.find((x) => x.name === "Bar Charts > Chart 1");
+  check("kind is frame; page and section recorded", c1.figma.kind === "frame" && c1.figma.page === "Design" && c1.figma.section === "Bar Charts");
+  check("default layer names (Rectangle 4) are dropped, meaningful ones kept", !c1.figma.layers.includes("Rectangle 4") && c1.figma.layers.includes("Bars") && c1.figma.layers.includes("Card Info."));
+  check("text contents are collected and de-duplicated", JSON.stringify(c1.figma.texts) === JSON.stringify(["Online users", "JAN", "FEB"]));
+  const c3 = c.find((x) => x.name === "Bar Charts > Chart 3");
+  check("instances are never descended into (their inner layers are not evidence)", !c3.figma.layers.includes("inner-instance-layer") && c3.figma.layers.includes("Highlighted Bar"));
+  const all = parse(await reg(client, { project_id: "fr2", figma_json_path: "frames.json", figma_mode: "frames" }));
+  check("no page filter includes every page (cover junk appears)", all.body.registration.candidates.some((x) => x.figma.page === "Cover"));
+  const noMatch = parse(await reg(client, { project_id: "fr3", figma_json_path: "frames.json", figma_mode: "frames", figma_pages: ["nope"] }));
+  check("a page filter that matches nothing -> clear error", noMatch.isError && /figma_pages/.test(noMatch.text));
+  const withTok = await connect({ FIGMA_ACCESS_TOKEN: "figd_test_token" });
+  const live = parse(await reg(withTok, { project_id: "fr4", figma_file_key: "framesfile", figma_mode: "frames", figma_pages: ["Design"] }));
+  check("figma_mode works with figma_file_key too", !live.isError && live.body.registration.candidate_count === 4);
+  await withTok.close();
+  const jev = await connect({ PATTERN_SCORER: "jev" });
+  await reg(jev, { project_id: "fj", figma_json_path: "frames.json", figma_mode: "frames", figma_pages: ["Design"] });
+  jevRequests.length = 0;
+  await jev.callTool({ name: "recommend_component", arguments: { component_need: "Alert something", domain: "t", framework: "React", project_id: "fj" } });
+  const ev = jevRequests[0]?.state.candidates.map((x) => x.evidence) ?? [];
+  check("Jev evidence carries location, layers and text", ev.some((e) => /located: Design > Bar Charts/.test(e) && /layers: Bars, Bar, Card Info\./.test(e) && /text: Online users \| JAN \| FEB/.test(e)));
+  await jev.close();
+  const noText = await connect({ PATTERN_SCORER: "jev", PATTERN_JEV_FIGMA_TEXT: "0" });
+  await reg(noText, { project_id: "fj2", figma_json_path: "frames.json", figma_mode: "frames", figma_pages: ["Design"] });
+  jevRequests.length = 0;
+  await noText.callTool({ name: "recommend_component", arguments: { component_need: "Alert something", domain: "t", framework: "React", project_id: "fj2" } });
+  const ev2 = jevRequests[0]?.state.candidates.map((x) => x.evidence) ?? [];
+  check("PATTERN_JEV_FIGMA_TEXT=0 drops layers/text but keeps location", ev2.every((e) => !/layers:|text:/.test(e)) && ev2.some((e) => /located:/.test(e)));
+  await noText.close();
 }
 
 await client.close();

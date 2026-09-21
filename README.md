@@ -1016,12 +1016,33 @@ never a tool argument, so it can't land in logs or transcripts).
   `api.figma.com` and downloads the whole file response. Later scoring sends
   component names, page/section names, descriptions and variant text to
   Anthropic, or to TypeSafe in Jev mode.
-- **Status -- read this:** built to Figma's documented file schema and tested
-  on fixtures modelled on it (`scripts/verify-design-system-figma.mjs`). It has
-  **not** been run on a real Figma file or measured in an eval -- none was
-  available when it was built. Whether variant text helps or hurts the scorer
-  (prop names hurt on code libraries) is unmeasured. Treat results on a real
-  file as unvalidated until you've checked them.
+- **Frames mode (`figma_mode: "frames"`)** for files that never use Figma
+  components -- community templates especially. One real example: the public
+  "30+ Chart UI Components | BRIX Templates" file defines only 4 components (all
+  style-guide helpers) and draws its 43 chart designs as plain groups named
+  "Chart 1".."Chart 13" inside "Bar Charts" / "Pie Charts" frames, so the default
+  mode registers nothing useful. In frames mode each named design becomes a
+  candidate (a frame with 3+ substantial sub-designs is treated as a sheet, giving
+  `Bar Charts > Chart 5`), and its evidence is the layer names and text inside it.
+  Use `figma_pages` (e.g. `["Design"]`) to skip cover, style-guide and license
+  pages. Details in the tool description.
+- **What was measured (one real file, 27 needs the designs satisfy + 7 they
+  don't, labels written by looking at renders of the designs -- see
+  `eval/figma-eval-set.json`, `scripts/figma-frames-eval.mjs`):** components mode
+  0/27; frames mode with layers + text about 18/27 right (the right design was in
+  the top 4 for 26/27) but its scores overlapped the "nothing fits" scores, so
+  misses came back as "not found"; names alone 1/27. Text and layer names can't
+  say what is *drawn* ("candlestick", "gauge", "rings"). Adding a Claude Haiku
+  **vision caption** of each rendered design as its summary took it to 23/27 right
+  (27/27 in the top 4), 7/7 "nothing fits", and a clean score gap (lowest correct
+  0.45-0.52 vs highest "nothing fits" 0.11-0.15), identical across three runs, for
+  about $0.04 per 43 designs. **The vision caption step is currently an eval
+  prototype only**, not a product feature: `register_design_system` does not yet
+  render or caption Figma designs.
+- **Status -- read this:** both modes have now run on exactly one real Figma file
+  (a chart template), and components mode has **not** been tried on a real design
+  system with components and variants, so whether variant text helps or hurts the
+  scorer is still unmeasured. Treat results on other files as unvalidated.
 
 ### Capability summaries (`summarize`, on by default)
 
