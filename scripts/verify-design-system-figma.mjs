@@ -81,14 +81,46 @@ const FRAMES_FIXTURE = {
   ] },
   components: {}, componentSets: {},
 };
+const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
+const imageRequests = [];
+let rateLimitNextImageRequest = false;
+const modifiedFrames = JSON.parse(JSON.stringify(FRAMES_FIXTURE));
+modifiedFrames.document.children[0].children[0].children[0].children.push(text("11:1:new", "A brand new label"));
+const failFrames = JSON.parse(JSON.stringify(FRAMES_FIXTURE));
+failFrames.document.children[0].children[0].children[1].name = "Chart 2 FAIL";
 const figmaRequests = [];
 const figmaStub = await listen((req, res) => {
+  if (req.url.startsWith("/img/")) { res.writeHead(200, { "content-type": "image/png" }); res.end(PNG); return; }
+  if (req.url.startsWith("/v1/images/")) {
+    const u = new URL(req.url, "http://x");
+    imageRequests.push({ ids: u.searchParams.get("ids").split(","), scale: u.searchParams.get("scale"), token: req.headers["x-figma-token"] });
+    if (rateLimitNextImageRequest) { rateLimitNextImageRequest = false; res.writeHead(429, { "content-type": "application/json" }); res.end(JSON.stringify({ err: "Rate limit exceeded" })); return; }
+    const images = {};
+    for (const id of u.searchParams.get("ids").split(",")) images[id] = `http://127.0.0.1:${figmaStub.address().port}/img/${encodeURIComponent(id)}.png`;
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ err: null, images }));
+    return;
+  }
   figmaRequests.push({ url: req.url, token: req.headers["x-figma-token"] });
   if (req.url.startsWith("/v1/files/forbidden")) { res.writeHead(403); res.end("no"); return; }
   if (req.url.startsWith("/v1/files/missing")) { res.writeHead(404); res.end("no"); return; }
   if (req.headers["x-figma-token"] !== "figd_test_token") { res.writeHead(403); res.end("bad token"); return; }
   res.writeHead(200, { "content-type": "application/json" });
-  res.end(JSON.stringify(req.url.startsWith("/v1/files/framesfile") ? FRAMES_FIXTURE : FIXTURE));
+  res.end(JSON.stringify(req.url.startsWith("/v1/files/framesfile3") ? failFrames : req.url.startsWith("/v1/files/framesfile2") ? modifiedFrames : req.url.startsWith("/v1/files/framesfile") ? FRAMES_FIXTURE : FIXTURE));
+});
+const anthropicRequests = [];
+const anthropicStub = await listen((req, res) => {
+  let raw = ""; req.on("data", (c) => (raw += c));
+  req.on("end", () => {
+    const body = JSON.parse(raw);
+    const blocks = body.messages[0].content;
+    const prompt = blocks.find((b) => b.type === "text")?.text ?? "";
+    anthropicRequests.push({ key: req.headers["x-api-key"], model: body.model, blocks, prompt });
+    if (prompt.includes("Chart 2 FAIL")) { res.writeHead(500); res.end("stub failure"); return; }
+    const name = (prompt.match(/Design name: (.*)$/m) ?? [])[1];
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ content: [{ type: "text", text: `Caption of ${name}: a stacked bar chart with a legend.` }], usage: { input_tokens: 300, output_tokens: 40 } }));
+  });
 });
 const jevRequests = [];
 const jevStub = await listen((req, res) => {
@@ -112,6 +144,7 @@ async function connect(extra = {}) {
   const t = new StdioClientTransport({ command: "node", args: [serverEntry], env: {
     ...process.env, ANTHROPIC_API_KEY: "", TYPESAFE_API_KEY: "jev-test", TYPESAFE_API_URL: `http://127.0.0.1:${jevStub.address().port}/v1/systemone`,
     FIGMA_API_URL: `http://127.0.0.1:${figmaStub.address().port}`, PATTERN_PROJECT_ROOT: root,
+    PATTERN_SUMMARY_API_URL: `http://127.0.0.1:${anthropicStub.address().port}/v1/messages`, PATTERN_FIGMA_RATE_BACKOFF_MS: "10",
     PATTERN_DESIGN_SYSTEMS_PATH: join(root, `ds-${Math.random().toString(36).slice(2)}.json`), PATTERN_LEDGER_PATH: join(root, "ledger.jsonl"),
     PATTERN_LOG_PATH: join(root, "calls.log"), PATTERN_MEMORY_PATH: join(root, "memory.json"), PATTERN_TOOLS: "full", ...extra } });
   const c = new Client({ name: "verify-figma", version: "0.1.0" }, { capabilities: {} });
@@ -242,7 +275,62 @@ console.log("\n=== 5. Frames mode: designs drawn as plain frames/groups ===");
   await noText.close();
 }
 
+console.log("\n=== 6. Vision captions (opt-in): renders designs, sends images to Anthropic ===");
+{
+  const cap = await connect({ FIGMA_ACCESS_TOKEN: "figd_test_token", ANTHROPIC_API_KEY: "sk-test" });
+  const captionArgs = { figma_file_key: "framesfile", figma_mode: "frames", figma_pages: ["Design"] };
+
+  const withJson = parse(await reg(cap, { project_id: "v0", figma_json_path: "frames.json", figma_mode: "frames", summarize: true }));
+  check("summarize: true + figma_json_path is refused (a saved JSON stays fully local)", withJson.isError && /figma_file_key/.test(withJson.text));
+  const noAnthropic = await connect({ FIGMA_ACCESS_TOKEN: "figd_test_token", ANTHROPIC_API_KEY: "" });
+  const noKey = parse(await reg(noAnthropic, { project_id: "v0", ...captionArgs, summarize: true }));
+  check("summarize: true without ANTHROPIC_API_KEY is refused", noKey.isError === true);
+  await noAnthropic.close();
+
+  imageRequests.length = 0; anthropicRequests.length = 0;
+  const dflt = parse(await reg(cap, { project_id: "v1", ...captionArgs }));
+  check("DEFAULT (summarize unset) sends nothing: no render request, no Anthropic call, no summaries block", !dflt.isError && imageRequests.length === 0 && anthropicRequests.length === 0 && dflt.body.summaries === undefined);
+  const off = parse(await reg(cap, { project_id: "v1", ...captionArgs, summarize: false }));
+  check("summarize: false sends nothing either", imageRequests.length === 0 && anthropicRequests.length === 0 && off.body.summaries === undefined);
+
+  rateLimitNextImageRequest = true;
+  const on = parse(await reg(cap, { project_id: "v2", ...captionArgs, summarize: true }));
+  check("summarize: true captions every design (4 generated, 0 failed)", !on.isError && on.body.summaries?.generated === 4 && on.body.summaries.failed === 0);
+  check("a rate-limited images request is retried, then succeeds", imageRequests.length >= 2 && imageRequests[0].ids.length === imageRequests[1].ids.length);
+  check("the Figma token is sent on render requests", imageRequests.every((r) => r.token === "figd_test_token"));
+  check("one vision request per design, image sent as base64 PNG", anthropicRequests.length === 4 && anthropicRequests.every((r) => r.blocks.some((b) => b.type === "image" && b.source.media_type === "image/png" && b.source.data.length > 20)));
+  check("uses the configured key and the Haiku model", anthropicRequests.every((r) => r.key === "sk-test" && /haiku/.test(r.model)));
+  check("tokens and cost are reported", on.body.summaries.tokens.input_tokens === 1200 && on.body.summaries.estimated_cost_usd > 0);
+  check("response says images were sent to Anthropic", /images of 4 design/.test(on.body.summaries.notice ?? "") && /api\.anthropic\.com/.test(on.body.summaries.notice));
+  const chart1 = on.body.registration.candidates.find((x) => x.name === "Bar Charts > Chart 1");
+  check("caption stored as the summary, with a hash", /Caption of Bar Charts > Chart 1/.test(chart1.summary ?? "") && /^[0-9a-f]{10}$/.test(chart1.summary_hash ?? ""));
+  check("the token never appears in the response", !JSON.stringify(on.body).includes("figd_test_token") && !JSON.stringify(on.body).includes("sk-test"));
+
+  imageRequests.length = 0; anthropicRequests.length = 0;
+  const again = parse(await reg(cap, { project_id: "v2", ...captionArgs, summarize: true }));
+  check("re-registering an unchanged file reuses all captions: nothing rendered or sent", again.body.summaries.generated === 0 && again.body.summaries.reused === 4 && imageRequests.length === 0 && anthropicRequests.length === 0);
+  const plain = parse(await reg(cap, { project_id: "v2", figma_file_key: "framesfile", figma_mode: "frames", figma_pages: ["Design"] }));
+  check("captions survive a re-registration without the flag", plain.body.registration.candidates.every((x) => !!x.summary) && imageRequests.length === 0);
+
+  const changed = parse(await reg(cap, { project_id: "v2", figma_file_key: "framesfile2", figma_mode: "frames", figma_pages: ["Design"], summarize: true }));
+  check("only the design whose contents changed is re-captioned", changed.body.summaries.generated === 1 && changed.body.summaries.reused === 3 && anthropicRequests.length === 1 && /Chart 1/.test(anthropicRequests[0].prompt));
+
+  const failing = parse(await reg(cap, { project_id: "v4", figma_file_key: "framesfile3", figma_mode: "frames", figma_pages: ["Design"], summarize: true }));
+  check("one design failing to caption doesn't fail the registration", !failing.isError && failing.body.summaries.failed === 1 && failing.body.summaries.generated === 3);
+  check("the failed design just has no caption", !failing.body.registration.candidates.find((x) => /Chart 2 FAIL/.test(x.name))?.summary);
+
+  const jev = await connect({ FIGMA_ACCESS_TOKEN: "figd_test_token", ANTHROPIC_API_KEY: "sk-test", PATTERN_SCORER: "jev" });
+  await reg(jev, { project_id: "v3", ...captionArgs, summarize: true });
+  jevRequests.length = 0;
+  await jev.callTool({ name: "recommend_component", arguments: { component_need: "a stacked bar chart", domain: "t", framework: "React", project_id: "v3" } });
+  const ev = jevRequests[0]?.state.candidates.map((x) => x.evidence) ?? [];
+  check("captions reach the Jev scorer as `summary:` evidence", ev.length > 0 && ev.every((e) => /summary: Caption of/.test(e)));
+  await jev.close();
+  await cap.close();
+}
+
 await client.close();
+anthropicStub.close();
 figmaStub.close();
 jevStub.close();
 if (failures > 0) { console.error(`\n${failures} check(s) FAILED.`); process.exit(1); }

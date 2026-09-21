@@ -1036,9 +1036,22 @@ never a tool argument, so it can't land in logs or transcripts).
   **vision caption** of each rendered design as its summary took it to 23/27 right
   (27/27 in the top 4), 7/7 "nothing fits", and a clean score gap (lowest correct
   0.45-0.52 vs highest "nothing fits" 0.11-0.15), identical across three runs, for
-  about $0.04 per 43 designs. **The vision caption step is currently an eval
-  prototype only**, not a product feature: `register_design_system` does not yet
-  render or caption Figma designs.
+  about $0.04 per 43 designs.
+- **Vision captions (`summarize: true` with `figma_file_key`, opt-in only):**
+  renders each registered design with Figma's images API and has Claude Haiku
+  write a 2-sentence caption of what is drawn, stored as the candidate's
+  `summary` (the default scorer and Jev both use it). **Unlike the code
+  summaries this is never on by default,** because it **sends images of your
+  designs to `api.anthropic.com`** and asks Figma to render them with your
+  token. Needs `ANTHROPIC_API_KEY` and `FIGMA_ACCESS_TOKEN`; it is refused with
+  `figma_json_path` (a saved file stays fully local and doesn't say which file to
+  render). Shipped path measured live on the same file: 43 designs captioned in
+  23 s for $0.039, then 23/27 right (27/27 in the top 4), 7/7 "nothing fits".
+  Captions are cached by design contents: re-registering an unchanged file
+  renders and sends nothing, and only a changed design is re-captioned (a
+  caption survives even a re-registration without the flag). One design failing
+  to caption never fails the registration. The response's `summaries.notice`
+  says images were sent.
 - **Status -- read this:** both modes have now run on exactly one real Figma file
   (a chart template), and components mode has **not** been tried on a real design
   system with components and variants, so whether variant text helps or hurts the

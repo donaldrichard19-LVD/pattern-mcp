@@ -56,6 +56,7 @@ import { offerEnforcementSetupOnce } from "./init-enforcement.js";
 import { connectInstructionsText, offerClientConnectSetupOnce, runConnect } from "./client-connect.js";
 import { collapseForJev, rankWithJev } from "./design-system-jev.js";
 import { describeFigma, fetchFigmaFile, parseFigmaFile, type FigmaCandidateInfo } from "./design-system-figma.js";
+import { captionFigmaDesigns, carryOverCaptions } from "./design-system-figma-captions.js";
 import {
   SUMMARY_MODEL,
   carryOverSummaries,
@@ -1143,7 +1144,7 @@ const REGISTER_DESIGN_SYSTEM_INPUT_SCHEMA = {
     summarize: {
       type: "boolean",
       description:
-        "directory_path only. ON BY DEFAULT when ANTHROPIC_API_KEY is set: writes a short (2-3 sentence) capability summary for each scanned file with Claude Haiku and stores it on the registration -- a big accuracy/confidence gain for the Jev design-system scorer (PATTERN_SCORER=jev) and harmless for the default one. This SENDS up to 8000 characters of each source file that needs a summary to api.anthropic.com; pass false (or set PATTERN_NO_SUMMARIES=1) to keep registration fully local. true refuses (leaving the previous registration untouched) when there is no key or no directory_path; unset never refuses, it just skips. Costs about 0.2 cents per file (capped at PATTERN_SUMMARY_MAX_FILES, default 200 files). Summaries are cached by file content: re-registering only pays for files that changed, and unchanged files keep their summary even with summarize: false.",
+        "Two different things. (1) directory_path: ON BY DEFAULT when ANTHROPIC_API_KEY is set: writes a short (2-3 sentence) capability summary for each scanned file with Claude Haiku and stores it on the registration -- a big accuracy/confidence gain for the Jev design-system scorer (PATTERN_SCORER=jev) and harmless for the default one. This SENDS up to 8000 characters of each source file that needs a summary to api.anthropic.com; pass false (or set PATTERN_NO_SUMMARIES=1) to keep registration fully local. true refuses (leaving the previous registration untouched) when there is no key or no directory_path; unset never refuses, it just skips. Costs about 0.2 cents per file (capped at PATTERN_SUMMARY_MAX_FILES, default 200 files). Summaries are cached by file content: re-registering only pays for files that changed, and unchanged files keep their summary even with summarize: false. (2) figma_file_key: OPT-IN ONLY (summarize: true; never default) -- renders each registered design with Figma's images API and has Claude Haiku write a 2-sentence VISION caption of it (chart type, what is drawn, tooltips/legends/toggles), stored as the candidate's summary. Text and layer names can't say what is drawn, and on a real file this raised needs matched from ~17/27 to 23/27 with a clean score gap. It SENDS IMAGES OF YOUR DESIGNS to api.anthropic.com and asks Figma to render them with your token; needs ANTHROPIC_API_KEY and FIGMA_ACCESS_TOKEN; costs under a tenth of a cent per design; refused with figma_json_path (fully local).",
     },
   },
   required: ["project_id"],
@@ -2623,6 +2624,9 @@ export function registerDesignSystem(input: {
     }
     const parsed = parseFigmaFile(raw, sourcePath, { mode: input.figma_mode, pages: input.figma_pages });
     candidates = parsed.candidates;
+    // Reuse still-valid vision captions from the previous registration (same
+    // design, same contents). Free.
+    carryOverCaptions(candidates, readDesignSystems()[input.project_id]?.candidates);
     if (candidates.length === 0) {
       throw new Error(
         input.figma_mode === "frames"
@@ -5128,11 +5132,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       // untouched) when it can't be honored. The default (unset) never
       // refuses: it just skips when there's nothing to read or no key.
       if (args.summarize === true) {
-        if (!args.directory_path) {
-          throw new Error("summarize: true needs directory_path -- summaries are written from source files, and a manifest has none to read.");
+        if (args.figma_json_path) {
+          throw new Error("summarize: true with a Figma source needs figma_file_key -- captions are made from images rendered by the Figma API, and a saved JSON file doesn't say which file to render. figma_json_path stays fully local.");
+        }
+        if (!args.directory_path && !args.figma_file_key) {
+          throw new Error("summarize: true needs directory_path (source files to summarize) or figma_file_key (designs to render and caption) -- a manifest has neither to read.");
         }
         if (!ANTHROPIC_API_KEY) throw new Error(MISSING_API_KEY_MESSAGE);
       }
+      // Code summaries are ON by default (directory_path only); Figma vision
+      // captions send rendered IMAGES of designs to Anthropic and are strictly
+      // opt-in (summarize: true + figma_file_key), never default.
       const wantSummaries = args.summarize ?? SUMMARIZE_BY_DEFAULT;
       // figma_file_key: fetch with the user's own token (env only -- a token
       // in tool arguments would land in logs/transcripts), then register the
@@ -5157,7 +5167,27 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
       const registration = registerDesignSystem(registerInput);
       let summaries: Record<string, unknown> | undefined;
-      if (wantSummaries && args.directory_path) {
+      if (args.summarize === true && args.figma_file_key) {
+        const stats = await captionFigmaDesigns(
+          registration.candidates,
+          args.figma_file_key,
+          process.env.FIGMA_ACCESS_TOKEN!,
+          ANTHROPIC_API_KEY!,
+          registration.candidates.filter((c) => c.figma && c.summary).length,
+          ANTHROPIC_WORKSPACE_ID || undefined
+        );
+        const file = readDesignSystems();
+        file[registration.project_id] = registration;
+        writeDesignSystems(file);
+        summaries = {
+          ...stats,
+          model: SUMMARY_MODEL,
+          estimated_cost_usd: estimateCostUsd(stats.tokens, SUMMARY_MODEL),
+          ...(stats.generated > 0
+            ? { notice: `Rendered images of ${stats.generated} design(s) from your Figma file were sent to api.anthropic.com (Claude Haiku) to write these captions. Leave summarize unset (or false) to keep Figma registration text-only.` }
+            : {}),
+        };
+      } else if (wantSummaries && args.directory_path) {
         if (ANTHROPIC_API_KEY) {
           const stats = await summarizeRegistration(registration);
           summaries = { ...stats, ...(stats.generated > 0 ? { notice: SUMMARY_EGRESS_NOTICE } : {}) };

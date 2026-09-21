@@ -243,3 +243,15 @@ evidence from a Figma registration (component names, page/section names,
 descriptions, variant options) is later sent to Anthropic when scoring, or to
 `api.typesafe.ai` when `PATTERN_SCORER=jev`. Use a token scoped to read-only file
 content, and prefer `figma_json_path` if you don't want Pattern to call Figma.
+
+### Opt-in only: Figma vision captions (`summarize: true` + `figma_file_key`)
+
+**Never on by default.** Renders each registered design through the Figma images
+API (using `FIGMA_ACCESS_TOKEN`) and sends **the rendered images** to
+`api.anthropic.com` (Claude Haiku) to be captioned. Images of unreleased designs
+can show more than layer names do, so leave it off for anything you wouldn't
+send to Anthropic. The caption text is stored in your local registration file
+and, in Jev mode, sent onward to TypeSafe as evidence. Not available with
+`figma_json_path`, which stays fully local. Every response that sent images
+includes a `summaries.notice` saying so.
+

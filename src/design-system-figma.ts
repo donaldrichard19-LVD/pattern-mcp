@@ -28,6 +28,8 @@ export interface FigmaCandidateInfo {
   layers?: string[];
   /** Frames mode: distinct text contents inside the design (labels, headings, sample data). */
   texts?: string[];
+  /** Rendered size in Figma px (from absoluteBoundingBox); lets the caption step pick a render scale. */
+  size?: { w: number; h: number };
 }
 
 export interface FigmaCandidate {
@@ -47,6 +49,7 @@ export interface FigmaParseStats {
 }
 
 interface FigmaNode {
+  absoluteBoundingBox?: { width?: number; height?: number };
   id?: string;
   name?: string;
   type?: string;
@@ -66,6 +69,10 @@ const DESCRIPTION_CAP = 500;
 // private/hidden and are not published to a team library.
 const isPrivateName = (name: string) => /^[._]/.test(name);
 const cleanPropertyName = (name: string) => name.replace(/#\d+:\d+$/, "").trim();
+const sizeOf = (n: FigmaNode): { w: number; h: number } | undefined => {
+  const b = n.absoluteBoundingBox;
+  return b && typeof b.width === "number" && typeof b.height === "number" ? { w: Math.round(b.width), h: Math.round(b.height) } : undefined;
+};
 const clean = (text: string | undefined): string | null => {
   const t = (text ?? "").replace(/\s+/g, " ").trim();
   return t ? t.slice(0, DESCRIPTION_CAP) : null;
@@ -147,7 +154,7 @@ export function parseFigmaFile(
         description: clean(meta?.description ?? node.description),
         usage_example: null,
         file_path: null,
-        figma: { node_id: id, page, section, variants, properties },
+        figma: { node_id: id, page, section, variants, properties, size: sizeOf(node) },
       });
       if (type === "COMPONENT_SET") stats.component_sets++;
       else stats.standalone_components++;
@@ -277,7 +284,7 @@ function parseFigmaFrames(file: FigmaFile, pageFilter: string[] | undefined): Fi
       description: null,
       usage_example: null,
       file_path: null,
-      figma: { node_id: node.id ?? `frame:${section ?? ""}:${name}`, page, section, variants: {}, properties: [], kind: "frame", layers, texts },
+      figma: { node_id: node.id ?? `frame:${section ?? ""}:${name}`, page, section, variants: {}, properties: [], kind: "frame", layers, texts, size: sizeOf(node) },
     });
   };
   for (const page of pages) {
