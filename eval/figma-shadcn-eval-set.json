@@ -1,0 +1,464 @@
+{
+ "_meta": {
+  "description": "Components-mode eval on a real design system: the community Figma file 'shadcn/ui components with variables & Tailwind classes' (file key eGmaKYgeO8AHj9FtE9aT5v, 135 MB, 98 component sets, ~15.5k components of which ~14.1k are icons). Registered with figma_exclude_pages ['Icons'] -> 95 candidates. The file is NOT committed (third-party, 135 MB): fetch with figma_file_key + FIGMA_ACCESS_TOKEN or save GET /v1/files/<key> and point FIGMA_EVAL_JSON at it.",
+  "grading": "By PAGE (component family), not candidate name: this file often defines only sub-parts as component sets (AlertDialogHeader, DialogFooter, Table cell), so a need is right when the top pick sits on any of the listed pages. Page names are the file's own, including its typos ('Contex Menu', 'Seperator', 'Input OPT').",
+  "labeling": "Authored by Claude from the file's page and component-set names and knowledge of shadcn/ui; not verified by a human.",
+  "kinds": {
+   "positive": "a listed page has a component candidate that should satisfy the need",
+   "none": "nothing in shadcn/ui or this file matches",
+   "gap": "shadcn has the component and this file has a page for it, but the page defines no component/component-set (only frames of instances), so components mode has no candidate to find -- reported separately, expected NOT found"
+  }
+ },
+ "cases": [
+  {
+   "id": "button-variants-sizes",
+   "kind": "positive",
+   "need": "A primary call-to-action button with default, outline, secondary, ghost and destructive styles in several sizes, with hover and disabled states",
+   "gold_pages": [
+    "Button"
+   ]
+  },
+  {
+   "id": "button-icon-only",
+   "kind": "positive",
+   "need": "A button that contains only an icon",
+   "gold_pages": [
+    "Button",
+    "Button Group",
+    "Toggle & Toggle Group"
+   ]
+  },
+  {
+   "id": "button-group-joined",
+   "kind": "positive",
+   "need": "A group of joined buttons that acts as a single control",
+   "gold_pages": [
+    "Button Group"
+   ]
+  },
+  {
+   "id": "badge-status",
+   "kind": "positive",
+   "need": "A small status label or pill shown next to an item",
+   "gold_pages": [
+    "Badge"
+   ]
+  },
+  {
+   "id": "alert-banner",
+   "kind": "positive",
+   "need": "An inline banner that tells the user about a success or destructive message, with an icon",
+   "gold_pages": [
+    "Alert"
+   ]
+  },
+  {
+   "id": "dialog-confirm-destructive",
+   "kind": "positive",
+   "need": "A modal that asks the user to confirm a destructive action, with a header and footer buttons",
+   "gold_pages": [
+    "Alert Dialog",
+    "Dialog"
+   ]
+  },
+  {
+   "id": "dialog-standard",
+   "kind": "positive",
+   "need": "A standard modal dialog with a title and an action footer",
+   "gold_pages": [
+    "Dialog",
+    "Alert Dialog"
+   ]
+  },
+  {
+   "id": "edge-panel",
+   "kind": "positive",
+   "need": "A panel that slides in from the edge of the screen over the page",
+   "gold_pages": [
+    "Sheet",
+    "Drawer"
+   ]
+  },
+  {
+   "id": "tabs",
+   "kind": "positive",
+   "need": "A tabbed interface with selectable tab triggers",
+   "gold_pages": [
+    "Tabs"
+   ]
+  },
+  {
+   "id": "expandable-sections",
+   "kind": "positive",
+   "need": "Sections where a trigger expands and collapses hidden content",
+   "gold_pages": [
+    "Accordion",
+    "Collapsible"
+   ]
+  },
+  {
+   "id": "avatar-fallback-group",
+   "kind": "positive",
+   "need": "A profile picture with a fallback, and a group of overlapping avatars",
+   "gold_pages": [
+    "Avatar"
+   ]
+  },
+  {
+   "id": "checkbox-states",
+   "kind": "positive",
+   "need": "A checkbox with checked, unchecked and indeterminate states",
+   "gold_pages": [
+    "Checkbox"
+   ]
+  },
+  {
+   "id": "radio-single-choice",
+   "kind": "positive",
+   "need": "A single-choice list of radio options",
+   "gold_pages": [
+    "Radio Group"
+   ]
+  },
+  {
+   "id": "switch-on-off",
+   "kind": "positive",
+   "need": "An on/off switch in small and default sizes",
+   "gold_pages": [
+    "Switch"
+   ]
+  },
+  {
+   "id": "text-input-states",
+   "kind": "positive",
+   "need": "A single-line text input with a label and error and disabled states",
+   "gold_pages": [
+    "Input"
+   ]
+  },
+  {
+   "id": "input-addons",
+   "kind": "positive",
+   "need": "An input with attached prefix or suffix addons and icons",
+   "gold_pages": [
+    "Input Group"
+   ]
+  },
+  {
+   "id": "multiline-input",
+   "kind": "positive",
+   "need": "A multi-line text area for longer input",
+   "gold_pages": [
+    "Textarea"
+   ]
+  },
+  {
+   "id": "otp-input",
+   "kind": "positive",
+   "need": "A one-time passcode input with a separate box for each digit",
+   "gold_pages": [
+    "Input OPT"
+   ]
+  },
+  {
+   "id": "slider",
+   "kind": "positive",
+   "need": "A horizontal slider with a draggable thumb",
+   "gold_pages": [
+    "Slider"
+   ]
+  },
+  {
+   "id": "spinner",
+   "kind": "positive",
+   "need": "A loading spinner in several sizes",
+   "gold_pages": [
+    "Spinner"
+   ]
+  },
+  {
+   "id": "skeleton-placeholder",
+   "kind": "positive",
+   "need": "Placeholder shapes shown while content is loading",
+   "gold_pages": [
+    "Skeleton"
+   ]
+  },
+  {
+   "id": "tooltip-placement",
+   "kind": "positive",
+   "need": "A tooltip that can appear on different sides of its trigger",
+   "gold_pages": [
+    "Tooltip"
+   ]
+  },
+  {
+   "id": "hover-card",
+   "kind": "positive",
+   "need": "A card that previews content when hovering over a link",
+   "gold_pages": [
+    "Hover Card"
+   ]
+  },
+  {
+   "id": "popover-header",
+   "kind": "positive",
+   "need": "A popover panel with a header, anchored to a trigger",
+   "gold_pages": [
+    "Popover"
+   ]
+  },
+  {
+   "id": "context-menu",
+   "kind": "positive",
+   "need": "A menu that appears when the user right-clicks",
+   "gold_pages": [
+    "Contex Menu"
+   ]
+  },
+  {
+   "id": "dropdown-actions",
+   "kind": "positive",
+   "need": "A dropdown menu of actions with labels and items",
+   "gold_pages": [
+    "Dropdown Menu",
+    "Menubar"
+   ]
+  },
+  {
+   "id": "menubar",
+   "kind": "positive",
+   "need": "A top menubar with grouped menu items",
+   "gold_pages": [
+    "Menubar"
+   ]
+  },
+  {
+   "id": "command-palette",
+   "kind": "positive",
+   "need": "A command palette with searchable items and group headings",
+   "gold_pages": [
+    "Command"
+   ]
+  },
+  {
+   "id": "combobox-chips",
+   "kind": "positive",
+   "need": "A combobox with a searchable list and selected chips",
+   "gold_pages": [
+    "Combobox"
+   ]
+  },
+  {
+   "id": "native-select",
+   "kind": "positive",
+   "need": "A native select control with option labels",
+   "gold_pages": [
+    "Native Select"
+   ]
+  },
+  {
+   "id": "breadcrumb",
+   "kind": "positive",
+   "need": "A breadcrumb navigation trail with separators",
+   "gold_pages": [
+    "Breadcrumb"
+   ]
+  },
+  {
+   "id": "nav-menu",
+   "kind": "positive",
+   "need": "A navigation menu of items in a page header",
+   "gold_pages": [
+    "Navigation Menu"
+   ]
+  },
+  {
+   "id": "sidebar",
+   "kind": "positive",
+   "need": "A collapsible sidebar with a header, group labels and menu buttons",
+   "gold_pages": [
+    "Sidebar"
+   ]
+  },
+  {
+   "id": "table-cells",
+   "kind": "positive",
+   "need": "A data table with header cells and body cells",
+   "gold_pages": [
+    "Table"
+   ]
+  },
+  {
+   "id": "calendar-grid",
+   "kind": "positive",
+   "need": "A month calendar grid with selectable dates",
+   "gold_pages": [
+    "Calendar"
+   ]
+  },
+  {
+   "id": "card-header-footer",
+   "kind": "positive",
+   "need": "A card with a header, content and a footer",
+   "gold_pages": [
+    "Card"
+   ]
+  },
+  {
+   "id": "list-item-row",
+   "kind": "positive",
+   "need": "A list item row with a leading visual, a title and a description",
+   "gold_pages": [
+    "Item"
+   ]
+  },
+  {
+   "id": "keycap",
+   "kind": "positive",
+   "need": "A keyboard shortcut key cap indicator",
+   "gold_pages": [
+    "Kbd"
+   ]
+  },
+  {
+   "id": "separator",
+   "kind": "positive",
+   "need": "A thin line separator, horizontal or vertical",
+   "gold_pages": [
+    "Seperator"
+   ]
+  },
+  {
+   "id": "scrollbar",
+   "kind": "positive",
+   "need": "A custom scrollbar for a scrollable area",
+   "gold_pages": [
+    "Scroll-area"
+   ]
+  },
+  {
+   "id": "toast",
+   "kind": "positive",
+   "need": "A transient toast notification",
+   "gold_pages": [
+    "Toast"
+   ]
+  },
+  {
+   "id": "toggle-pressed",
+   "kind": "positive",
+   "need": "A toggle button that can be pressed and unpressed, alone or in a group",
+   "gold_pages": [
+    "Toggle & Toggle Group"
+   ]
+  },
+  {
+   "id": "chat-bubble",
+   "kind": "positive",
+   "need": "A chat message bubble with reactions",
+   "gold_pages": [
+    "Bubble",
+    "Message"
+   ]
+  },
+  {
+   "id": "card-carousel",
+   "kind": "positive",
+   "need": "A carousel of cards",
+   "gold_pages": [
+    "Carousel"
+   ]
+  },
+  {
+   "id": "survey-choice",
+   "kind": "positive",
+   "need": "A selectable answer option for a survey question",
+   "gold_pages": [
+    "Questionnaire"
+   ]
+  },
+  {
+   "id": "file-attachment",
+   "kind": "positive",
+   "need": "A file attachment with a media preview",
+   "gold_pages": [
+    "Attachment"
+   ]
+  },
+  {
+   "id": "none-kanban",
+   "kind": "none",
+   "need": "A drag-and-drop kanban board with columns",
+   "gold_pages": []
+  },
+  {
+   "id": "none-richtext",
+   "kind": "none",
+   "need": "A rich text editor with a bold, italic and link toolbar",
+   "gold_pages": []
+  },
+  {
+   "id": "none-colorpicker",
+   "kind": "none",
+   "need": "A color picker with a hue slider and swatches",
+   "gold_pages": []
+  },
+  {
+   "id": "none-starrating",
+   "kind": "none",
+   "need": "A five-star rating input",
+   "gold_pages": []
+  },
+  {
+   "id": "none-treeview",
+   "kind": "none",
+   "need": "A tree view of nested folders that expand and collapse",
+   "gold_pages": []
+  },
+  {
+   "id": "none-gantt",
+   "kind": "none",
+   "need": "A Gantt chart of project tasks over time",
+   "gold_pages": []
+  },
+  {
+   "id": "none-map",
+   "kind": "none",
+   "need": "An interactive map with pins",
+   "gold_pages": []
+  },
+  {
+   "id": "gap-pagination",
+   "kind": "gap",
+   "need": "A pagination control with page numbers and previous/next",
+   "gold_pages": [
+    "Pagination"
+   ]
+  },
+  {
+   "id": "gap-progress",
+   "kind": "gap",
+   "need": "A progress bar showing percent complete",
+   "gold_pages": [
+    "Progress"
+   ]
+  },
+  {
+   "id": "gap-datepicker",
+   "kind": "gap",
+   "need": "A date picker that opens a calendar from an input",
+   "gold_pages": [
+    "Date Picker"
+   ]
+  },
+  {
+   "id": "gap-select",
+   "kind": "gap",
+   "need": "A select dropdown for choosing one option from a list",
+   "gold_pages": [
+    "Select"
+   ]
+  }
+ ]
+}

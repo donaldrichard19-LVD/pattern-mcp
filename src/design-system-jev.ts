@@ -32,6 +32,20 @@ export interface JevDesignCandidate {
   figma?: FigmaCandidateInfo;
 }
 
+// Figma COMPONENT candidates are collapsed into ONE entry per PAGE (component
+// family) -- the Figma analogue of one entry per source file for code. Real
+// design systems define a component's sub-parts as separate sets (SheetHeader,
+// SheetFooter, Table cell), and a header alone can't "fully satisfy" a slide-in
+// panel even though its page is exactly right. On the real shadcn/ui Figma file
+// (46 needs) this took Jev from ~27 right to ~41, the right family into the top
+// 4 for 46/46, and cut tokens per need. PATTERN_JEV_FIGMA_GROUP=off restores
+// one entry per component set. Frames-mode designs are never grouped.
+const FIGMA_GROUP_BY_PAGE = () => process.env.PATTERN_JEV_FIGMA_GROUP !== "off";
+// Variant options / toggle names are NOT sent by default: on the same file they
+// made no accuracy difference (41 vs 41, 27 vs 28) and cost ~50% more tokens.
+// PATTERN_JEV_FIGMA_VARIANTS=1 includes them.
+const FIGMA_VARIANTS_ON = () => process.env.PATTERN_JEV_FIGMA_VARIANTS === "1";
+
 export interface JevPoolEntry {
   /** Stable id used as the Jev answer key. */
   key: string;
@@ -54,7 +68,8 @@ export function collapseForJev(candidates: JevDesignCandidate[]): JevPoolEntry[]
   for (const c of candidates) {
     // Figma components have no file; the node id keeps two same-named
     // components on different pages from merging into one entry.
-    const groupKey = c.file_path ?? (c.figma ? `figma:${c.figma.node_id}` : `name:${c.name}`);
+    const byPage = FIGMA_GROUP_BY_PAGE() && c.figma && c.figma.kind !== "frame" && c.figma.page;
+    const groupKey = c.file_path ?? (byPage ? `figma-page:${c.figma!.page}` : c.figma ? `figma:${c.figma.node_id}` : `name:${c.name}`);
     const list = groups.get(groupKey);
     if (list) list.push(c);
     else groups.set(groupKey, [c]);
@@ -68,7 +83,17 @@ export function collapseForJev(candidates: JevDesignCandidate[]): JevPoolEntry[]
     const description = group.map((c) => c.description).find((d): d is string => !!d);
     const usage = group.map((c) => c.usage_example).find((u): u is string => !!u);
     const summary = group.map((c) => c.summary).find((t): t is string => !!t);
-    const figmaText = describeFigma(group[0], process.env.PATTERN_JEV_FIGMA_VARIANTS !== "0");
+    const includeVariants = FIGMA_VARIANTS_ON();
+    const isPageGroup = FIGMA_GROUP_BY_PAGE() && !!group[0].figma && group[0].figma.kind !== "frame" && !!group[0].figma.page;
+    // Page group: name the family, then list each part with its own variants.
+    const figmaText = isPageGroup
+      ? `component family: ${group[0].figma!.page!.trim()}; parts: ${group
+          .map((m) => {
+            const v = includeVariants ? describeFigma({ figma: { ...m.figma!, page: null, section: null } }, true) : null;
+            return v ? `${m.name} (${v})` : m.name;
+          })
+          .join("; ")}`
+      : describeFigma(group[0], includeVariants);
     const parts = [
       file ? `file: ${file}` : "component",
       `exports: ${[...components, ...reexports].join(", ")}`,

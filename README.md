@@ -1007,8 +1007,21 @@ never a tool argument, so it can't land in logs or transcripts).
 - **Scored like any registration:** the default scorer sees the extra text, and
   with `PATTERN_SCORER=jev` the same collapse-and-score path is used
   (`design_system_match.file` is `null` -- a Figma component isn't a file).
-  Set `PATTERN_JEV_FIGMA_VARIANTS=0` to leave variant/slot text out of what Jev
-  sees.
+  Jev scores one entry per **page** (component family): real design systems
+  define sub-parts as separate component sets (`SheetHeader`, `Table cell`), and a
+  header alone can't "fully satisfy" a slide-in panel although its page is right.
+  `PATTERN_JEV_FIGMA_GROUP=off` restores one entry per component set. Variant
+  options and toggle names are **not** sent by default (no accuracy gain, ~50%
+  more tokens); `PATTERN_JEV_FIGMA_VARIANTS=1` includes them.
+- **Big files:** a real design system can be huge (the shadcn/ui Figma file is
+  135 MB: fetched in ~20 s, parsed in ~3 s) and full of icon components (14,135
+  of its 14,220 standalone components are icons). Use `figma_exclude_pages`
+  (e.g. `["Icons"]`) or `figma_pages` to keep only what should be scored; a
+  registration over `PATTERN_FIGMA_MAX_CANDIDATES` (default 3000) candidates is
+  refused with the biggest pages named, not silently truncated. Registering a
+  large file with vision captions can outlast a client's request timeout (some
+  MCP clients cap it around 60 s); caption progress is saved as it goes, so
+  re-running resumes instead of starting over.
 - **No capability summaries:** there is no source file to summarize, so
   `summarize` does nothing for a Figma source.
 - **Data boundary:** `figma_json_path` never leaves your machine at
@@ -1052,10 +1065,23 @@ never a tool argument, so it can't land in logs or transcripts).
   caption survives even a re-registration without the flag). One design failing
   to caption never fails the registration. The response's `summaries.notice`
   says images were sent.
-- **Status -- read this:** both modes have now run on exactly one real Figma file
-  (a chart template), and components mode has **not** been tried on a real design
-  system with components and variants, so whether variant text helps or hurts the
-  scorer is still unmeasured. Treat results on other files as unvalidated.
+- **Components mode, measured on a real design system** (the community
+  shadcn/ui Figma file: 95 candidates after excluding icons; 46 needs a
+  component page satisfies, 7 nothing satisfies, 4 whose page defines no
+  component at all; graded by component page; labels written by Claude from the
+  page/set names, `eval/figma-shadcn-eval-set.json`, `scripts/figma-components-eval.mjs`):
+  one entry per component set got ~27/46 right (the right family in the top 4 for
+  ~44) with Jev under-confident, versus 40/46 for a one-call Sonnet baseline on the
+  same evidence; **one entry per page got 41-42/46** (top 4: 46/46), 7/7 "nothing
+  fits", at 4.3k tokens per need; the 4 pages with no component were correctly not
+  found in 3 of 4. Variant text made no difference (41 vs 41; 27 vs 28) and
+  vision captions added almost nothing (28 vs 27) on this well-named library, so
+  **captions pay off for frames-mode template files, not for a well-named component
+  library.** Score gap is thin here: lowest correct 0.40 vs highest "nothing fits"
+  0.29-0.30.
+- **Status -- read this:** each mode has run on exactly one real Figma file (a
+  chart template; the shadcn/ui design system), with labels I wrote myself. Treat
+  results on other files as unvalidated.
 
 ### Capability summaries (`summarize`, on by default)
 

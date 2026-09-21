@@ -220,18 +220,31 @@ console.log("\n=== 4. Figma candidates reach the Jev scorer ===");
   const { isError, body } = parse(await jev.callTool({ name: "recommend_component", arguments: { component_need: "a dismissible alert banner", domain: "t", framework: "React", project_id: "j1" } }));
   check("no error, no Anthropic key needed", !isError);
   const evidence = jevRequests[0]?.state.candidates.map((c) => c.evidence) ?? [];
-  check("4 pool entries (one per component; same-named Toggles not merged)", evidence.length === 4);
-  check("evidence carries variants, location and description", evidence.some((e) => /variants: Type: Info \| Error; Closable: True \| False/.test(e) && /located: Feedback > Alerts/.test(e)));
-  check("Alert is found", body?.verdict === "use_existing" && body?.design_system_match?.components?.includes("Alert"));
+  check("DEFAULT: collapsed to one entry per PAGE (component family): Inputs + Feedback", evidence.length === 2);
+  const feedback = evidence.find((e) => /component family: Feedback/.test(e)) ?? "";
+  check("a family entry lists its parts (Alert and the same-page Toggle)", /parts: Alert; Toggle|parts: .*Alert.*Toggle/.test(feedback));
+  check("same-named Toggles on different pages stay in their own families", evidence.filter((e) => /Toggle/.test(e)).length === 2);
+  check("variant options are NOT sent by default", evidence.every((e) => !/variants:|Info \| Error|Size: S/.test(e)));
+  check("description still reaches the evidence", evidence.some((e) => /Primary action button with sizes and states/.test(e)));
+  check("Alert's family is found", body?.verdict === "use_existing" && body?.design_system_match?.components?.includes("Alert"));
   check("match has no file (Figma components aren't files)", body?.design_system_match?.file === null);
   await jev.close();
-  const noVariants = await connect({ PATTERN_SCORER: "jev", PATTERN_JEV_FIGMA_VARIANTS: "0" });
-  await reg(noVariants, { project_id: "j2", figma_json_path: "kit.json" });
+
+  const withVariants = await connect({ PATTERN_SCORER: "jev", PATTERN_JEV_FIGMA_VARIANTS: "1" });
+  await reg(withVariants, { project_id: "j2", figma_json_path: "kit.json" });
   jevRequests.length = 0;
-  await noVariants.callTool({ name: "recommend_component", arguments: { component_need: "a dismissible alert banner", domain: "t", framework: "React", project_id: "j2" } });
+  await withVariants.callTool({ name: "recommend_component", arguments: { component_need: "a dismissible alert banner", domain: "t", framework: "React", project_id: "j2" } });
   const ev2 = jevRequests[0]?.state.candidates.map((c) => c.evidence) ?? [];
-  check("PATTERN_JEV_FIGMA_VARIANTS=0 drops variant text but keeps location", ev2.every((e) => !/variants:/.test(e)) && ev2.some((e) => /located:/.test(e)));
-  await noVariants.close();
+  check("PATTERN_JEV_FIGMA_VARIANTS=1 includes each part's variant options", ev2.some((e) => /Alert \(.*Type: Info \| Error; Closable: True \| False/.test(e)) && ev2.some((e) => /Size: S \| M \| L/.test(e)));
+  await withVariants.close();
+
+  const perSet = await connect({ PATTERN_SCORER: "jev", PATTERN_JEV_FIGMA_GROUP: "off" });
+  await reg(perSet, { project_id: "j3", figma_json_path: "kit.json" });
+  jevRequests.length = 0;
+  await perSet.callTool({ name: "recommend_component", arguments: { component_need: "a dismissible alert banner", domain: "t", framework: "React", project_id: "j3" } });
+  const ev3 = jevRequests[0]?.state.candidates.map((c) => c.evidence) ?? [];
+  check("PATTERN_JEV_FIGMA_GROUP=off restores one entry per component (4) with location", ev3.length === 4 && ev3.some((e) => /located: Feedback > Alerts/.test(e)));
+  await perSet.close();
 }
 
 console.log("\n=== 5. Frames mode: designs drawn as plain frames/groups ===");

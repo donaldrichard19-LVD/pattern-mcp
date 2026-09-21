@@ -193,6 +193,9 @@ const JEV_USD_PER_MTOK_OUT = process.env.PATTERN_JEV_USD_PER_MTOK_OUT;
 // That sends up to 8000 chars of each such source file to api.anthropic.com, so
 // there are two ways out: pass `summarize: false` per call, or set
 // PATTERN_NO_SUMMARIES=1 to turn it off everywhere. No key -> nothing is sent.
+// Registration guard for Figma sources: more candidates than this is refused
+// (see registerDesignSystem) instead of silently truncated.
+const FIGMA_MAX_CANDIDATES = Number(process.env.PATTERN_FIGMA_MAX_CANDIDATES ?? 3000);
 const SUMMARIZE_BY_DEFAULT = process.env.PATTERN_NO_SUMMARIES !== "1";
 const SUMMARY_EGRESS_NOTICE =
   "Source text (up to 8000 characters of each file that needed a summary) was sent to api.anthropic.com to write these summaries. " +
@@ -1139,7 +1142,13 @@ const REGISTER_DESIGN_SYSTEM_INPUT_SCHEMA = {
       type: "array",
       items: { type: "string" },
       description:
-        "Frames mode only: restrict to pages whose name contains any of these strings (case-insensitive), e.g. [\"Design\"], to skip cover / style-guide / license pages.",
+        "Both Figma modes: restrict to pages whose name contains any of these strings (case-insensitive), e.g. [\"Design\"], to skip cover / style-guide / license pages.",
+    },
+    figma_exclude_pages: {
+      type: "array",
+      items: { type: "string" },
+      description:
+        "Both Figma modes: skip pages whose name contains any of these strings (case-insensitive), e.g. [\"Icons\"]. Real design systems often carry thousands of icon components that would swamp scoring; a registration over PATTERN_FIGMA_MAX_CANDIDATES (3000) candidates is refused with the biggest pages named.",
     },
     summarize: {
       type: "boolean",
@@ -2582,6 +2591,7 @@ export function registerDesignSystem(input: {
   figma_json_path?: string;
   figma_mode?: "components" | "frames";
   figma_pages?: string[];
+  figma_exclude_pages?: string[];
   // Internal: an already-fetched Figma file (the handler's figma_file_key
   // path), with the label to store as source_path.
   figma_file?: unknown;
@@ -2622,15 +2632,28 @@ export function registerDesignSystem(input: {
     } else {
       sourcePath = input.figma_source_label ?? "figma";
     }
-    const parsed = parseFigmaFile(raw, sourcePath, { mode: input.figma_mode, pages: input.figma_pages });
+    const parsed = parseFigmaFile(raw, sourcePath, { mode: input.figma_mode, pages: input.figma_pages, excludePages: input.figma_exclude_pages });
     candidates = parsed.candidates;
+    // A real design system can define tens of thousands of components (one
+    // 135 MB file had 14,135 standalone ones -- icons -- against 95 real UI
+    // components). Scoring that many is slow, costly and noisy, so refuse and
+    // say where they are rather than silently truncating.
+    if (candidates.length > FIGMA_MAX_CANDIDATES) {
+      const byPage = new Map<string, number>();
+      for (const c of candidates) byPage.set(c.figma?.page ?? "(no page)", (byPage.get(c.figma?.page ?? "(no page)") ?? 0) + 1);
+      const top = [...byPage.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([p, n]) => `"${p}" (${n})`).join(", ");
+      throw new Error(
+        `"${sourcePath}" produced ${candidates.length} candidates, over the ${FIGMA_MAX_CANDIDATES} limit (PATTERN_FIGMA_MAX_CANDIDATES). ` +
+          `Biggest pages: ${top}. Icon libraries are the usual cause -- pass figma_exclude_pages (e.g. ["Icons"]) or figma_pages to keep only the pages you want scored.`
+      );
+    }
     // Reuse still-valid vision captions from the previous registration (same
     // design, same contents). Free.
     carryOverCaptions(candidates, readDesignSystems()[input.project_id]?.candidates);
     if (candidates.length === 0) {
       throw new Error(
         input.figma_mode === "frames"
-          ? `No designs were found in "${sourcePath}" in frames mode (looked for named frames/groups with at least 5 layers${input.figma_pages?.length ? ` on pages matching ${JSON.stringify(input.figma_pages)}` : ""}). Check figma_pages.`
+          ? `No designs were found in "${sourcePath}" in frames mode (looked for named frames/groups with at least 5 layers${input.figma_pages?.length ? ` on pages matching ${JSON.stringify(input.figma_pages)}` : ""}). Check figma_pages / figma_exclude_pages.`
           : `No components were found in "${sourcePath}" (${parsed.stats.pages} pages, 0 defined components or component sets; ${parsed.stats.skipped_private} hidden ones skipped). ` +
             `Many Figma files -- community templates especially -- draw their designs as plain frames rather than components; pass figma_mode: "frames" to register those instead.`
       );
@@ -5124,6 +5147,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       figma_file_key?: string;
       figma_mode?: "components" | "frames";
       figma_pages?: string[];
+      figma_exclude_pages?: string[];
       summarize?: boolean;
     };
 
@@ -5163,6 +5187,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           figma_source_label: `figma:${args.figma_file_key}`,
           figma_mode: args.figma_mode,
           figma_pages: args.figma_pages,
+          figma_exclude_pages: args.figma_exclude_pages,
         };
       }
       const registration = registerDesignSystem(registerInput);
@@ -5174,7 +5199,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           process.env.FIGMA_ACCESS_TOKEN!,
           ANTHROPIC_API_KEY!,
           registration.candidates.filter((c) => c.figma && c.summary).length,
-          ANTHROPIC_WORKSPACE_ID || undefined
+          ANTHROPIC_WORKSPACE_ID || undefined,
+          // Large files take a while (135 MB fetch + renders + captions): save
+          // progress as we go so a client timeout doesn't throw the work away.
+          () => {
+            const f = readDesignSystems();
+            f[registration.project_id] = registration;
+            writeDesignSystems(f);
+          }
         );
         const file = readDesignSystems();
         file[registration.project_id] = registration;

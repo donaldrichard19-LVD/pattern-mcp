@@ -7,12 +7,11 @@
 // COMPONENT; the variant COMPONENTs inside a set are part of that one
 // candidate, and INSTANCEs (copies of components) are never candidates.
 //
-// STATUS: written against Figma's documented file schema and tested on
-// fixtures modelled on it (scripts/verify-design-system-figma.mjs). It has NOT
-// been run on a real Figma file or measured in an eval -- there was no Figma
-// file or token available when it was built. In particular, whether variant
-// option values help or hurt the scorer (prop names hurt on code libraries) is
-// unmeasured; PATTERN_JEV_FIGMA_VARIANTS=0 exists to A/B that.
+// STATUS: built to Figma's documented file schema, tested on fixtures modelled
+// on it (scripts/verify-design-system-figma.mjs), and run on two real files: a
+// community chart template (frames mode; scripts/figma-frames-eval.mjs) and the
+// 135 MB shadcn/ui design system (components mode; scripts/figma-components-eval.mjs).
+// Both are one-file samples with Claude-authored labels.
 
 export interface FigmaCandidateInfo {
   node_id: string;
@@ -91,8 +90,17 @@ function parseVariantName(name: string): Record<string, string> {
 export interface FigmaParseOptions {
   /** "components" (default): defined COMPONENT / COMPONENT_SET nodes. "frames": named designs on pages. */
   mode?: "components" | "frames";
-  /** Frames mode: only these pages (matched case-insensitively by substring). Default: every page. */
+  /** Only these pages (matched case-insensitively by substring). Default: every page. Both modes. */
   pages?: string[];
+  /** Skip pages whose name contains any of these (case-insensitive), e.g. ["Icons"]. Both modes. */
+  excludePages?: string[];
+}
+
+function pageAllowed(pageName: string | null | undefined, include: string[] | undefined, exclude: string[] | undefined): boolean {
+  const n = (pageName ?? "").toLowerCase();
+  if (include && include.length > 0 && !include.some((w) => n.includes(w.toLowerCase()))) return false;
+  if (exclude && exclude.some((w) => w.trim() && n.includes(w.toLowerCase()))) return false;
+  return true;
 }
 
 export function parseFigmaFile(
@@ -109,11 +117,12 @@ export function parseFigmaFile(
   }
 
   const stats: FigmaParseStats = { pages: 0, component_sets: 0, standalone_components: 0, skipped_private: 0 };
-  if (options.mode === "frames") return { candidates: parseFigmaFrames(file, options.pages), stats };
+  if (options.mode === "frames") return { candidates: parseFigmaFrames(file, options.pages, options.excludePages), stats };
   const candidates: FigmaCandidate[] = [];
   type Frame = { node: FigmaNode; page: string | null; section: string | null };
   const stack: Frame[] = [];
   for (const page of [...file.document.children].reverse()) {
+    if (page.type === "CANVAS" && !pageAllowed(page.name, options.pages, options.excludePages)) continue;
     if (page.type === "CANVAS") stats.pages++;
     stack.push({ node: page, page: page.type === "CANVAS" ? (page.name ?? null) : null, section: null });
   }
@@ -269,9 +278,8 @@ function collectFrameEvidence(node: FramesNode): { layers: string[]; texts: stri
   return { layers: [...layers].slice(0, FRAMES_MAX_LAYERS), texts: [...texts].slice(0, FRAMES_MAX_TEXTS) };
 }
 
-function parseFigmaFrames(file: FigmaFile, pageFilter: string[] | undefined): FigmaCandidate[] {
+function parseFigmaFrames(file: FigmaFile, pageFilter: string[] | undefined, excludeFilter: string[] | undefined): FigmaCandidate[] {
   const out: FigmaCandidate[] = [];
-  const wanted = (pageFilter ?? []).map((p) => p.toLowerCase());
   const pages = (file.document?.children ?? []).filter((p) => p.type === "CANVAS");
   const push = (node: FramesNode, page: string | null, section: string | null) => {
     if (out.length >= FRAMES_MAX_CANDIDATES) return;
@@ -289,7 +297,7 @@ function parseFigmaFrames(file: FigmaFile, pageFilter: string[] | undefined): Fi
   };
   for (const page of pages) {
     const pageName = page.name ?? null;
-    if (wanted.length > 0 && !wanted.some((w) => (pageName ?? "").toLowerCase().includes(w))) continue;
+    if (!pageAllowed(pageName, pageFilter, excludeFilter)) continue;
     for (const top of page.children ?? []) {
       if (!CONTAINER_TYPES.has(top.type ?? "") || !(top.name ?? "").trim()) continue;
       const kids = (top.children ?? []).filter((c) => CONTAINER_TYPES.has(c.type ?? "") && descendantCount(c) >= FRAMES_MIN_DESCENDANTS);

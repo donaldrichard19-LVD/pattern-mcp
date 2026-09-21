@@ -19,6 +19,7 @@ const MAX_IMAGE_SIDE = 1400;
 const SCALE_BUCKETS = [1, 0.5, 0.25, 0.1, 0.05];
 const CAPTION_CONCURRENCY = 4;
 const RATE_LIMIT_RETRIES = 6;
+const PERSIST_EVERY = 10;
 
 export interface CaptionableCandidate {
   name: string;
@@ -109,7 +110,9 @@ export async function captionFigmaDesigns(
   figmaToken: string,
   anthropicKey: string,
   reused: number,
-  workspaceId?: string
+  workspaceId?: string,
+  /** Called every PERSIST_EVERY captions so a killed/timed-out run keeps its progress (the next run reuses them). */
+  persist?: () => void
 ): Promise<CaptionStats> {
   const withNode = candidates.filter((c) => c.figma);
   const pending = withNode.filter((c) => !c.summary);
@@ -145,6 +148,7 @@ export async function captionFigmaDesigns(
         c.summary = text;
         c.summary_hash = captionHash(c);
         stats.generated++;
+        if (persist && stats.generated % PERSIST_EVERY === 0) persist();
       } catch {
         stats.failed++;
       }

@@ -10,3 +10,4 @@ eval/*.json
 !eval/eval-set-shelfline.json
 !eval/design-system-eval-set.json
 !eval/figma-eval-set.json
+!eval/figma-shadcn-eval-set.json
