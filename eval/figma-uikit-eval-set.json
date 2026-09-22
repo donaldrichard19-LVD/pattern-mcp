@@ -1,0 +1,38 @@
+{
+  "_meta": {
+    "file": "Design System | UI kit | +6000 Components (Community), key 313oReHdGPh8T1QRLUdbPv",
+    "grading": "by Figma PAGE (component family). Third real file, a small atomic UI kit: 24 component sets, ~1.4k non-icon standalone components. Icons page (6000) is excluded.",
+    "labels": "Written by Claude from page names, variant properties and text in the saved file JSON (not from renders). Needs are phrased by what a product team would ask for, not by the page names. Treat as author-labelled, not independent."
+  },
+  "cases": [
+    { "id": "cta-button", "kind": "positive", "need": "A call-to-action button with primary, secondary and outline styles in small, medium and large sizes, with hover, pressed and disabled states", "gold_pages": ["Buttons"] },
+    { "id": "icon-button", "kind": "positive", "need": "A round button that contains only an icon", "gold_pages": ["Buttons"] },
+    { "id": "status-tag", "kind": "positive", "need": "Small colored status labels such as success, warning, danger and info", "gold_pages": ["Tag"] },
+    { "id": "progress-status", "kind": "positive", "need": "A badge showing a task's progress: not started, in progress, done or delayed", "gold_pages": ["Tag"] },
+    { "id": "text-field", "kind": "positive", "need": "A text field with a label, placeholder, helper text and error and success validation states", "gold_pages": ["Inputs"] },
+    { "id": "tag-input", "kind": "positive", "need": "An input where the user types and adds multiple tags or chips", "gold_pages": ["Inputs"] },
+    { "id": "large-input", "kind": "positive", "need": "A large prominent input field, for a search or hero form", "gold_pages": ["Inputs"] },
+    { "id": "toggle", "kind": "positive", "need": "An on/off toggle switch for a setting", "gold_pages": ["Switch"] },
+    { "id": "multiline", "kind": "positive", "need": "A multi-line text box for a message or comment", "gold_pages": ["Text Area"] },
+    { "id": "select", "kind": "positive", "need": "A dropdown to choose one option from a list that opens on click", "gold_pages": ["Dropdown"] },
+    { "id": "star-rating", "kind": "positive", "need": "A 1 to 5 star rating control, or a hearts variant", "gold_pages": ["Rating"] },
+    { "id": "checkbox", "kind": "positive", "need": "A checkbox for selecting options in a form", "gold_pages": ["Checkbox"] },
+    { "id": "side-menu", "kind": "positive", "need": "A vertical sidebar menu of items with icons, active and hover states", "gold_pages": ["Menu"] },
+    { "id": "top-nav", "kind": "positive", "need": "A top navigation bar with logo and links, in several colors, aligned left, center or right", "gold_pages": ["Navigation Bars"] },
+    { "id": "product-card", "kind": "positive", "need": "A product card with a picture, name, category and price", "gold_pages": ["Cards"] },
+    { "id": "login-card", "kind": "positive", "need": "A log-in card with email and password fields", "gold_pages": ["Cards"] },
+    { "id": "invite-card", "kind": "positive", "need": "A card with an email field and a message box to send an invitation", "gold_pages": ["Cards"] },
+    { "id": "landing-hero", "kind": "positive", "need": "A landing-page hero section with a headline, short text and a button", "gold_pages": ["Hero"] },
+    { "id": "mobile-tabbar", "kind": "positive", "need": "A mobile bottom tab bar for switching between app sections", "gold_pages": ["Layout Grid"] },
+    { "id": "mobile-chrome", "kind": "positive", "need": "A mobile status bar and home indicator for phone screen mockups", "gold_pages": ["Layout Grid"] },
+    { "id": "logo", "kind": "positive", "need": "A brand logo mark to place in a header", "gold_pages": ["Identificadores"] },
+    { "id": "decor", "kind": "positive", "need": "Decorative illustrations or background patterns for empty states and marketing pages", "gold_pages": ["Patterns and Decoration"] },
+    { "id": "none-datatable", "kind": "none", "need": "A sortable, paginated data table with row selection", "gold_pages": [] },
+    { "id": "none-datepicker", "kind": "none", "need": "A calendar date picker with range selection", "gold_pages": [] },
+    { "id": "none-modal", "kind": "none", "need": "A modal dialog with a confirm and cancel footer", "gold_pages": [] },
+    { "id": "none-tabs", "kind": "none", "need": "A horizontal tabs component for switching content panels", "gold_pages": [] },
+    { "id": "none-chart", "kind": "none", "need": "A line chart with tooltips and a legend", "gold_pages": [] },
+    { "id": "none-toast", "kind": "none", "need": "A toast notification that auto-dismisses", "gold_pages": [] },
+    { "id": "none-upload", "kind": "none", "need": "A drag-and-drop file upload area with progress", "gold_pages": [] }
+  ]
+}

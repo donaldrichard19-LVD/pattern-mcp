@@ -26,17 +26,19 @@ import { join, resolve, dirname, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const FILE_KEY = "eGmaKYgeO8AHj9FtE9aT5v";
+const FILE_KEY = process.env.FIGMA_FILE_KEY || "eGmaKYgeO8AHj9FtE9aT5v";
+const EVAL_SET = process.env.FIGMA_EVAL_SET || "eval/figma-shadcn-eval-set.json";
+const EXCLUDE_PAGES = process.env.FIGMA_EXCLUDE_PAGES ? process.env.FIGMA_EXCLUDE_PAGES.split(",") : ["Icons"];
 if (existsSync(join(root, ".env"))) {
   for (const l of readFileSync(join(root, ".env"), "utf8").split("\n")) {
-    const m = l.match(/^(ANTHROPIC_API_KEY|FIGMA_ACCESS_TOKEN)=(.*)$/);
+    const m = l.match(/^(ANTHROPIC_API_KEY|FIGMA_ACCESS_TOKEN|TYPESAFE_API_KEY)=(.*)$/);
     if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^["']|["']$/g, "");
   }
 }
 if (!process.env.TYPESAFE_API_KEY) { console.error("Missing TYPESAFE_API_KEY"); process.exit(1); }
 const WITH_SONNET = process.argv.includes("--sonnet");
 const repeats = Number(process.argv[process.argv.indexOf("--repeats") + 1]) || 3;
-const evalSet = JSON.parse(readFileSync(join(root, "eval/figma-shadcn-eval-set.json"), "utf8"));
+const evalSet = JSON.parse(readFileSync(join(root, EVAL_SET), "utf8"));
 const trim = (s) => (s ?? "").trim();
 
 let jsonPath = process.env.FIGMA_EVAL_JSON;
@@ -76,8 +78,8 @@ async function runVariant(name) {
   const c = new Client({ name: "figma-shadcn-eval", version: "1" }, { capabilities: {} });
   await c.connect(t);
   const args = v.vision
-    ? { project_id: "sh", figma_file_key: FILE_KEY, figma_exclude_pages: ["Icons"], summarize: true }
-    : { project_id: "sh", figma_json_path: basename(jsonPath), figma_exclude_pages: ["Icons"] };
+    ? { project_id: "sh", figma_file_key: FILE_KEY, figma_exclude_pages: EXCLUDE_PAGES, summarize: true }
+    : { project_id: "sh", figma_json_path: basename(jsonPath), figma_exclude_pages: EXCLUDE_PAGES };
   const reg = await c.callTool({ name: "register_design_system", arguments: args }, undefined, { timeout: 900_000 });
   if (reg.isError) throw new Error(reg.content[0].text);
   const body = JSON.parse(reg.content[0].text);
@@ -88,7 +90,7 @@ async function runVariant(name) {
     const rows = [];
     let tokens = 0, ms = 0;
     for (const cs of evalSet.cases) {
-      const res = await c.callTool({ name: "recommend_component", arguments: { component_need: cs.need, domain: "product UI", framework: "React", project_id: "sh" } });
+      const res = await c.callTool({ name: "recommend_component", arguments: { component_need: cs.need, domain: "product UI", framework: "React", project_id: "sh" } }, undefined, { timeout: 300_000 });
       const b = JSON.parse(res.content[0].text);
       tokens += b._meta.tokens_used.input; ms += b._meta.total_ms;
       const m = b.design_system_match;
@@ -123,7 +125,7 @@ for (const name of RUNS) {
     console.log(`   run ${i + 1}: right ${m.right}/${m.pos} (top-4 ${m.top4}) | nothing-fits ${m.noneOk}/${m.none} | gap-not-found ${m.gapNotFound}/${m.gap} | lowest correct ${m.minRight} vs highest none ${m.maxNone} | ${rd.avgMs}ms, ${rd.avgTokens} tok/need`);
     if (i === 0 && m.wrong.length) console.log(`      wrong: ${m.wrong.join("; ")}`);
   });
-  results.push({ name, candidates: out.registration.candidate_count, summaries: out.summaries, rounds: out.rounds.map((rd) => ({ ...metrics(rd.rows), avgMs: rd.avgMs, avgTokens: rd.avgTokens })), firstRoundRows: out.rounds[0].rows });
+  results.push({ name, candidates: out.registration.candidate_count, summaries: out.summaries, rounds: out.rounds.map((rd) => ({ ...metrics(rd.rows), avgMs: rd.avgMs, avgTokens: rd.avgTokens })), firstRoundRows: out.rounds[0].rows, allRoundRows: out.rounds.map((rd) => rd.rows) });
 }
 
 if (WITH_SONNET) {
@@ -155,5 +157,6 @@ if (WITH_SONNET) {
   console.log(`\nSonnet baseline (comp-full evidence): right ${right}/${P} | nothing-fits ${noneOk}/${N} | gap-not-found ${gapNF}/${G} | ${Math.round(inTok / evalSet.cases.length)} tok/need`);
   if (wrong.length) console.log(`   wrong: ${wrong.join("; ")}`);
 }
-writeFileSync(join(root, "eval/figma-shadcn-log.json"), JSON.stringify({ generated_at: new Date().toISOString(), results }, null, 1));
-console.log("\nWrote eval/figma-shadcn-log.json");
+const LOG = process.env.FIGMA_LOG || "eval/figma-shadcn-log.json";
+writeFileSync(join(root, LOG), JSON.stringify({ generated_at: new Date().toISOString(), results }, null, 1));
+console.log(`\nWrote ${LOG}`);

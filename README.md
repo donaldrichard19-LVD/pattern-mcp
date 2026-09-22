@@ -1079,9 +1079,19 @@ never a tool argument, so it can't land in logs or transcripts).
   **captions pay off for frames-mode template files, not for a well-named component
   library.** Score gap is thin here: lowest correct 0.40 vs highest "nothing fits"
   0.29-0.30.
-- **Status -- read this:** each mode has run on exactly one real Figma file (a
-  chart template; the shadcn/ui design system), with labels I wrote myself. Treat
-  results on other files as unvalidated.
+- **Third file, a small atomic UI kit** ("Design System | UI kit | +6000
+  Components" community file: 24 component sets, ~6,000 icons excluded, 39
+  page-family candidates; 22 positive needs + 7 nothing-fits,
+  `eval/figma-uikit-eval-set.json`): the shipped default got **22/22 right and
+  7/7 "nothing fits" in 3 of 3 runs** at ~1.5k tokens/need, lowest correct
+  0.44-0.48 vs highest "nothing fits" 0.21-0.23 (a wider gap than shadcn/ui); a
+  one-call Sonnet baseline also got 22/22. This is a **ceiling result**: the pages
+  are named after the components, so it shows the path holds up on a third file
+  shape, not that it discriminates hard cases. Vision captions were not run here.
+- **Status -- read this:** each mode has run on one to three real Figma files
+  (a chart template; the shadcn/ui design system; a small atomic UI kit), all
+  with labels written by Claude, not independently. Treat results on other files
+  as unvalidated.
 
 ### Capability summaries (`summarize`, on by default)
 
