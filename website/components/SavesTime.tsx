@@ -47,7 +47,7 @@ const CAPS: { icon: ReactNode; h: string; p: [string, string] }[] = [
     icon: <Blocks size={18} />,
     h: "Works against your own design system too",
     p: [
-      "Point Pattern at a real directory of your own components, a hand-authored manifest, or a Storybook export, and it scores against those instead of shadcn/ui, 21st.dev, and ReUI.",
+      "Point Pattern at a real directory of your own components, a hand-authored manifest, a Storybook export, or a Figma file, and it scores against those instead of shadcn/ui, 21st.dev, and ReUI.",
       "Same checklist, same evidence-based scoring, same verdict shape — just checked against components you'll actually reuse, not a library you don't have.",
     ],
   },

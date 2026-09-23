@@ -8,8 +8,8 @@ const DO = [
   { t: "A component with unique requirements", d: "Fee breakdowns, policy displays, dashboards, inboxes. Anything where fit requires judgment" },
   { t: "Before the agent starts writing UI", d: "The verdict is useful while there's still a decision to make" },
   {
-    t: "A project with its own design system",
-    d: "Register it once with register_design_system and every later call scores only against those components — not shadcn/ui, 21st.dev, or ReUI",
+    t: "A project with its own design system — code or Figma",
+    d: "Register it once with register_design_system, from a codebase or a Figma file directly, and every later call scores only against those components — not shadcn/ui, 21st.dev, or ReUI",
   },
   {
     t: "Make the check mandatory when you're ready",

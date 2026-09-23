@@ -210,7 +210,7 @@ const TOOLS: Tool[] = [
     name: "register_design_system",
     group: "Make the judgment call",
     cost: "free",
-    description: "Points recommend_component at your own design system — a manifest, a Storybook export, or a real component directory — instead of shadcn/ui, 21st.dev, and ReUI. Never calls the Anthropic API.",
+    description: "Points recommend_component at your own design system — a manifest, a Storybook export, a real component directory, or a Figma file — instead of shadcn/ui, 21st.dev, and ReUI. Registration itself is free; it only calls the Anthropic API when capability summaries or Figma vision captions are generated, both clearly notated in the response.",
     inputRows: REGISTER_DESIGN_SYSTEM_INPUT_ROWS,
     outputRows: REGISTER_DESIGN_SYSTEM_OUTPUT_ROWS,
   },

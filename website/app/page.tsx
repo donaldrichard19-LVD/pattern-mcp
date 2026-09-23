@@ -1,5 +1,6 @@
 import { AvoidsMistakes } from "@/components/AvoidsMistakes";
 import { Close } from "@/components/Close";
+import { DesignSource } from "@/components/DesignSource";
 import { Guidance } from "@/components/Guidance";
 import { Hero } from "@/components/Hero";
 import { Reference } from "@/components/Reference";
@@ -16,6 +17,7 @@ export default function Home() {
       <ScrollDemo />
       <SavesTime />
       <AvoidsMistakes />
+      <DesignSource />
       <TracksDecisions />
       <Reference />
       <Guidance />

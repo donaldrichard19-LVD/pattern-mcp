@@ -8,29 +8,34 @@
 Pattern solves a simple problem: agents don't always follow your design
 guidance. Instead of relying on the agent to interpret and follow
 instructions, Pattern turns that guidance into a checkable process. It
-evaluates UI components from external libraries or your own design
-system against a requirements checklist, then tells the agent whether to
-use an existing component or build one from scratch using a concrete
-design reference.
+evaluates UI components from external libraries, your own codebase, or a
+Figma file against a requirements checklist, then tells the agent
+whether to use an existing component or build one from scratch using a
+concrete design reference.
+
+Your design system doesn't have to be code yet. Register a Figma file
+directly and Pattern scores against the actual designs -- rendered and
+read, not guessed from layer names -- so the check works before a
+component has ever been built.
 
 [Website](https://usepattern.sh) · [npm](https://www.npmjs.com/package/pattern-mcp) · [Report an issue](https://github.com/donaldrichard19-LVD/pattern-mcp/issues/new/choose)
 
-**Current release: v0.16.0** — a component request that's on the
-skip-list (`button`, `input`, ...) now succeeds with no
-`ANTHROPIC_API_KEY` at all, instead of failing before it ever reached
-that free, local check. When a real call does fail for a missing key,
-the error now names two concrete fixes (re-run `init`, or export the
-key directly) instead of just naming the problem. Codex CLI's connect
-instructions also now carry whatever API key you entered in the
-wizard, as a ready-to-run shell export, instead of silently dropping
-it. Previously: v0.15.0 made `npx pattern-mcp init` the first and only
-command shown for getting started, everywhere (this README and the
-website), and the connect wizard stopped asking just once -- it now
-keeps offering on later bare runs until it can confirm a client is
-actually connected. Before that: v0.14.1 made the crash/exit telemetry
-added in v0.14.0 (`pattern_cli_exited`) register before any of this
-file's own module-level code runs, and tagged it and
-`pattern_cli_started` with the running package version. See
+**Current release: v0.17.0** — `register_design_system` now takes a
+Figma file directly (`figma_json_path` or `figma_file_key`), scored as
+component sets grouped by page or, for files with no real Figma
+components, as plain frames and groups; an opt-in Claude vision caption
+of each rendered design (`summarize: true`) closes the gap where layer
+names alone don't say what's actually drawn. Validated on three real
+files, from a small 24-set UI kit (22/22 right, 7/7 nothing-fits) up to
+the 15.5k-component shadcn/ui design system (41-42/46 right) — no
+longer marked experimental, and both this README and the landing page
+now cover it as part of the core "your own design system" story rather
+than a separate pitch. Previously: v0.16.0 made a skip-list component
+request (`button`, `input`, ...) succeed with no `ANTHROPIC_API_KEY` at
+all instead of failing before it reached that free, local check, gave
+missing-key errors two concrete fixes instead of just naming the
+problem, and carried the connect wizard's entered API key into Codex
+CLI's connect instructions as a ready-to-run shell export. See
 [Connect Pattern to your MCP client](#connect-pattern-to-your-mcp-client)
 for more details.
 
@@ -921,7 +926,7 @@ server's working directory) -- never an absolute path.
   full parser -- a sparse or partial props list for some components is
   expected, not a bug, especially on plain JS with no prop typing at all.
 - **`figma_json_path`** / **`figma_file_key`** -- a Figma file as the design
-  system (experimental, see below).
+  system (see below).
 
 ### Output
 
@@ -990,7 +995,7 @@ agent) know to double-check before accepting a `custom_build` verdict at
 face value. Absent entirely when there's no overlap, or outside
 design-system mode.
 
-### Figma as the design system (experimental)
+### Figma as the design system
 
 Point registration at a Figma file instead of code: `figma_json_path` (a saved
 `GET https://api.figma.com/v1/files/<file_key>` response, relative to the
