@@ -14,13 +14,7 @@ is recorded in an auditable ledger you can verify later.
 
 [Website](https://usepattern.sh) · [npm](https://www.npmjs.com/package/pattern-mcp) · [Report an issue](https://github.com/donaldrichard19-LVD/pattern-mcp/issues/new/choose)
 
-**Current release: v0.17.1** — this README's opening pitch and the npm
-package description are rewritten to state plainly what Pattern does
-now: checks a coding agent's UI decisions against real evidence,
-whether that's your own design system in code or Figma, or components
-from popular libraries, with an opt-in enforcement boundary and an
-auditable ledger behind every decision. Copy only, no behavior change.
-Previously: v0.17.0 made `register_design_system` take a Figma file
+**Current release: v0.17.1** made `register_design_system` take a Figma file
 directly (`figma_json_path` or `figma_file_key`), scored as component
 sets grouped by page or, for files with no real Figma components, as
 plain frames and groups, plus an opt-in Claude vision caption of each
