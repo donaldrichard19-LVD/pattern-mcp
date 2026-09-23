@@ -50,12 +50,6 @@ does step by step, or
 [Connect Pattern to your MCP client](#connect-pattern-to-your-mcp-client)
 if you'd rather connect a client by hand.
 
-`npx pattern-mcp` on its own (no `init`) is the server command your MCP
-client will use once connected -- running it yourself in a bare
-terminal starts a real process that just sits there waiting for a
-client, since nothing has told it to connect to one yet. Prefer `init`
-above for getting started.
-
 ## What Pattern Does
 
 Instead of returning a list of search results, Pattern looks at what you
