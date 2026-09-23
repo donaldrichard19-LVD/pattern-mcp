@@ -1,6 +1,6 @@
 "use client";
 
-import { Info, Terminal } from "lucide-react";
+import { Figma, Info, Terminal } from "lucide-react";
 import { StepStrip } from "./StepStrip";
 import { BODY, H2, LABEL, MONO, PANEL, SECTION } from "./tokens";
 import { CopyBlock, Reveal } from "./ui";
@@ -44,6 +44,9 @@ const ENFORCEMENT_INIT_LINES = ["npx pattern-check-gate init"];
 
 const AGENT_PROMPT =
   "Use recommend_component before picking a UI component: pass the specific need, my domain, and framework, then act on the verdict. Install what it recommends, or build from the reference it returns";
+
+const FIGMA_AGENT_PROMPT =
+  "Our design system lives in Figma, not code. Register it first: call register_design_system with figma_file_key (or a saved figma_json_path) and project_id set to this project. Then use recommend_component the same way for every UI decision after that, with the same project_id, so it scores against our real designs instead of shadcn/ui, 21st.dev, or ReUI";
 
 const PILL_ROWS: { widths: [number, number]; colors: [string, string]; opacities: [number, number] }[] = [
   { widths: [150, 104], colors: ["var(--blue-500)", "var(--green-500)"], opacities: [1, 0.85] },
@@ -145,6 +148,14 @@ export function Hero() {
               </span>
               <p style={{ ...MONO, margin: 0, fontSize: 12, lineHeight: 1.6, color: "var(--text-secondary)" }}>{AGENT_PROMPT}</p>
             </div>
+          </div>
+        </Reveal>
+        <Reveal delay={235}>
+          <div style={{ ...PANEL, padding: 14, display: "grid", gap: 8 }}>
+            <span style={{ display: "flex", alignItems: "center", gap: 7, fontSize: "var(--text-body-sm)", color: "var(--text-primary)" }}>
+              <Figma size={16} /> Design system in Figma, not code? Tell your agent this instead
+            </span>
+            <p style={{ ...MONO, margin: 0, fontSize: 12, lineHeight: 1.6, color: "var(--text-secondary)" }}>{FIGMA_AGENT_PROMPT}</p>
           </div>
         </Reveal>
         <Reveal delay={250}>
