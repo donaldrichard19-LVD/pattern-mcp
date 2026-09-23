@@ -19,8 +19,7 @@ directly (`figma_json_path` or `figma_file_key`), scored as component
 sets grouped by page or, for files with no real Figma components, as
 plain frames and groups, plus an opt-in Claude vision caption of each
 rendered design (`summarize: true`) for when layer names alone don't
-say what's actually drawn -- validated on three real files and no
-longer marked experimental. See
+say what's actually drawn. See
 [Connect Pattern to your MCP client](#connect-pattern-to-your-mcp-client)
 for more details.
 
