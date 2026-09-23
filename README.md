@@ -56,11 +56,21 @@ Instead of returning a list of search results, Pattern looks at what you
 need, checks real components against that need, and tells the agent
 whether to:
 
-- **Use an existing component** from shadcn/ui, 21st.dev, or ReUI
-- **Build a custom component**, using a real product reference from
-  Mobbin and/or Figma Community
+- **Use an existing component** — from your own registered design
+  system, in code or Figma, or from popular libraries like shadcn/ui,
+  21st.dev, and ReUI
+- **Build a custom component**, when nothing already covers the need
 
-Pattern is designed for agents to use **while they are building**.
+Scoring against your own registered design system gets an extra safety
+net: a free, automatic check compares a `custom_build` verdict against
+every registered candidate's real name, props, and description, and
+flags any real overlap it finds, so a wrong "build it from scratch"
+doesn't pass by silently.
+
+Pattern is designed for agents to use **while they are building**. An
+opt-in enforcement boundary can make the check required instead of
+optional, and every decision it leads to lands in an auditable ledger
+you can verify later.
 
 It exposes twelve tools. Three are on by default -- the ones the
 install → recommend → enforce → build path actually needs -- and the
