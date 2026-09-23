@@ -1,7 +1,7 @@
 {
   "name": "pattern-mcp",
-  "version": "0.17.0",
-  "description": "MCP server that turns your design guidance into a checkable process -- evaluates UI components from external libraries (shadcn/ui, 21st.dev, ReUI) or your own registered design system against a requirements checklist, then tells the agent whether to reuse an existing component or build one from a concrete design reference.",
+  "version": "0.17.1",
+  "description": "Pattern checks a coding agent's UI decisions against real evidence before it builds, whether that means your own design system in code or Figma, or components from popular libraries. It helps the agent choose what the product actually needs without overbuilding. An opt-in enforcement boundary can make that check required, and every decision is recorded in an auditable ledger you can verify later.",
   "type": "module",
   "main": "dist/index.js",
   "bin": {

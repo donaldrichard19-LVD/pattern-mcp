@@ -5,37 +5,28 @@
 [![npm downloads](https://img.shields.io/npm/dt/pattern-mcp.svg)](https://www.npmjs.com/package/pattern-mcp)
 [![MIT license](https://img.shields.io/badge/license-MIT-111111.svg)](./LICENSE)
 
-Pattern solves a simple problem: agents don't always follow your design
-guidance. Instead of relying on the agent to interpret and follow
-instructions, Pattern turns that guidance into a checkable process. It
-evaluates UI components from external libraries, your own codebase, or a
-Figma file against a requirements checklist, then tells the agent
-whether to use an existing component or build one from scratch using a
-concrete design reference.
-
-Your design system doesn't have to be code yet. Register a Figma file
-directly and Pattern scores against the actual designs -- rendered and
-read, not guessed from layer names -- so the check works before a
-component has ever been built.
+Pattern checks a coding agent's UI decisions against real evidence
+before it builds, whether that means your own design system in code or
+Figma, or components from popular libraries. It helps the agent choose
+what the product actually needs without overbuilding. An opt-in
+enforcement boundary can make that check required, and every decision
+is recorded in an auditable ledger you can verify later.
 
 [Website](https://usepattern.sh) · [npm](https://www.npmjs.com/package/pattern-mcp) · [Report an issue](https://github.com/donaldrichard19-LVD/pattern-mcp/issues/new/choose)
 
-**Current release: v0.17.0** — `register_design_system` now takes a
-Figma file directly (`figma_json_path` or `figma_file_key`), scored as
-component sets grouped by page or, for files with no real Figma
-components, as plain frames and groups; an opt-in Claude vision caption
-of each rendered design (`summarize: true`) closes the gap where layer
-names alone don't say what's actually drawn. Validated on three real
-files, from a small 24-set UI kit (22/22 right, 7/7 nothing-fits) up to
-the 15.5k-component shadcn/ui design system (41-42/46 right) — no
-longer marked experimental, and both this README and the landing page
-now cover it as part of the core "your own design system" story rather
-than a separate pitch. Previously: v0.16.0 made a skip-list component
-request (`button`, `input`, ...) succeed with no `ANTHROPIC_API_KEY` at
-all instead of failing before it reached that free, local check, gave
-missing-key errors two concrete fixes instead of just naming the
-problem, and carried the connect wizard's entered API key into Codex
-CLI's connect instructions as a ready-to-run shell export. See
+**Current release: v0.17.1** — this README's opening pitch and the npm
+package description are rewritten to state plainly what Pattern does
+now: checks a coding agent's UI decisions against real evidence,
+whether that's your own design system in code or Figma, or components
+from popular libraries, with an opt-in enforcement boundary and an
+auditable ledger behind every decision. Copy only, no behavior change.
+Previously: v0.17.0 made `register_design_system` take a Figma file
+directly (`figma_json_path` or `figma_file_key`), scored as component
+sets grouped by page or, for files with no real Figma components, as
+plain frames and groups, plus an opt-in Claude vision caption of each
+rendered design (`summarize: true`) for when layer names alone don't
+say what's actually drawn -- validated on three real files and no
+longer marked experimental. See
 [Connect Pattern to your MCP client](#connect-pattern-to-your-mcp-client)
 for more details.
 
