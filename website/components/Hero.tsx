@@ -153,7 +153,7 @@ export function Hero() {
               }}
             >
               Your agent is about to pick a UI component.{" "}
-              <span style={{ color: "var(--text-accent)" }}>Pattern checks it first.</span>
+              <span style={{ color: "var(--text-accent)" }}>Pattern makes sure it&apos;s the right one.</span>
             </h1>
           </Reveal>
           <Reveal delay={60}>
