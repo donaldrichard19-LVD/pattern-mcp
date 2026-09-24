@@ -1,19 +1,15 @@
 "use client";
 
-import { Figma, Info, Terminal } from "lucide-react";
-import { StepStrip } from "./StepStrip";
-import { BODY, H2, LABEL, MONO, PANEL, SECTION } from "./tokens";
-import { CopyBlock, Reveal } from "./ui";
+import { useState, type CSSProperties } from "react";
+import { BODY, H2, MONO, PANEL, SECTION } from "./tokens";
+import { Button, Chip, CopyBlock, Reveal } from "./ui";
 
-const CALL_LINES = [
-  "recommend_component({",
-  '  component_need: "price breakdown with fees and taxes",',
-  '  domain: "Airbnb-style rental marketplace",',
-  '  framework: "React + Tailwind",',
-  '  existing_stack: "already using shadcn/ui",',
-  '  project_id: "my-booking-app"',
-  "})",
-];
+// `init --yes` (not the bare server command) so this is safe for a coding
+// agent to run non-interactively -- bare `npx pattern-mcp` starts a real
+// process that just sits on stdin waiting for a client, which would hang
+// an agent's shell tool call instead of completing. `init --yes` detects
+// and connects every supported client and exits, no prompts.
+const INSTALL_LINES = ["npx pattern-mcp init --yes"];
 
 const VERDICT_LINES = [
   "{",
@@ -34,48 +30,95 @@ const VERDICT_LINES = [
   "}",
 ];
 
-// `init --yes` (not the bare server command) so this is safe for a coding
-// agent to run non-interactively -- bare `npx pattern-mcp` starts a real
-// process that just sits on stdin waiting for a client, which would hang
-// an agent's shell tool call instead of completing. `init --yes` detects
-// and connects every supported client and exits, no prompts.
-const INSTALL_LINES = ["npx pattern-mcp init --yes"];
-const ENFORCEMENT_INIT_LINES = ["npx pattern-check-gate init"];
+const REQS_MET = 2;
+const REQS_TOTAL = 8;
 
-const AGENT_PROMPT =
-  "Use recommend_component before picking a UI component: pass the specific need, my domain, and framework, then act on the verdict. Install what it recommends, or build from the reference it returns";
+function tabStyle(active: boolean): CSSProperties {
+  return {
+    flex: 1,
+    padding: "11px 14px",
+    fontSize: "var(--text-body-sm)",
+    fontWeight: 500,
+    color: active ? "var(--text-primary)" : "var(--text-tertiary)",
+    background: "transparent",
+    border: "none",
+    borderBottom: active ? "2px solid var(--blue-500)" : "2px solid transparent",
+    cursor: "pointer",
+  };
+}
 
-const FIGMA_AGENT_PROMPT =
-  "Our design system lives in Figma, not code. Register it first: call register_design_system with figma_file_key (or a saved figma_json_path) and project_id set to this project. Then use recommend_component the same way for every UI decision after that, with the same project_id, so it scores against our real designs instead of shadcn/ui, 21st.dev, or ReUI";
-
-const PILL_ROWS: { widths: [number, number]; colors: [string, string]; opacities: [number, number] }[] = [
-  { widths: [150, 104], colors: ["var(--blue-500)", "var(--green-500)"], opacities: [1, 0.85] },
-  { widths: [104, 150], colors: ["var(--amber-500)", "var(--blue-500)"], opacities: [1, 0.55] },
-  { widths: [176, 78], colors: ["var(--green-500)", "var(--amber-500)"], opacities: [1, 0.7] },
-];
-
-function PillStack() {
+function ReadableVerdict() {
   return (
-    <div style={{ display: "grid", gap: 5, maxWidth: 520 }} aria-hidden="true">
-      {PILL_ROWS.map((row, ri) => (
-        <div key={ri} style={{ display: "flex", gap: 5 }}>
-          {row.widths.map((w, ci) => (
+    <div style={{ display: "grid", gap: 12 }}>
+      <div style={{ fontSize: "var(--text-caption)", color: "var(--text-tertiary)", ...MONO }}>The agent asks</div>
+      <div style={{ display: "grid", gap: 2 }}>
+        <span style={{ fontSize: "var(--text-body-md)", color: "var(--text-primary)" }}>Price breakdown with fees and taxes</span>
+        <span style={{ fontSize: "var(--text-caption)", color: "var(--text-tertiary)" }}>Airbnb-style rental &middot; React + Tailwind</span>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <span style={{ fontSize: "var(--text-body-md)", fontWeight: 500, color: "var(--text-primary)" }}>Build custom</span>
+        <Chip tone="warning">confidence: high</Chip>
+      </div>
+      <div style={{ display: "grid", gap: 4 }}>
+        <div style={{ display: "flex", gap: 3 }} aria-hidden="true">
+          {Array.from({ length: REQS_TOTAL }, (_, i) => (
             <span
-              key={ci}
+              key={i}
               style={{
-                width: w,
-                height: 11,
-                borderRadius: 7,
-                background: row.colors[ci],
-                opacity: row.opacities[ci],
-                transformOrigin: "left",
-                animation: "pt-breathe 5.2s ease-in-out infinite",
-                animationDelay: `${(ri * 2 + ci) * 0.5}s`,
+                flex: 1,
+                height: 5,
+                borderRadius: 3,
+                background: i < REQS_MET ? "var(--blue-500)" : "var(--border-subtle)",
               }}
             />
           ))}
         </div>
-      ))}
+        <span style={{ fontSize: "var(--text-caption)", color: "var(--text-tertiary)" }}>{REQS_MET} of {REQS_TOTAL} requirements met</span>
+      </div>
+      <div style={{ display: "flex", gap: 10, alignItems: "center", ...PANEL, padding: 10 }}>
+        <div
+          aria-hidden="true"
+          style={{
+            width: 44,
+            height: 44,
+            borderRadius: "var(--radius-sm)",
+            flexShrink: 0,
+            backgroundImage: "repeating-linear-gradient(135deg, var(--border-subtle), var(--border-subtle) 4px, #fff 4px, #fff 8px)",
+          }}
+        />
+        <div style={{ display: "grid", gap: 3, minWidth: 0 }}>
+          <span style={{ fontSize: "var(--text-body-sm)", color: "var(--text-primary)" }}>Mobbin &middot; &quot;Booking, price details&quot;</span>
+          <Chip tone="success">verified direct link</Chip>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function VerdictCard() {
+  const [tab, setTab] = useState<"you" | "agent">("you");
+  return (
+    <div style={{ ...PANEL, background: "#fff", overflow: "hidden" }}>
+      <div style={{ display: "flex", borderBottom: "1px solid var(--border-subtle)" }}>
+        <button onClick={() => setTab("you")} style={tabStyle(tab === "you")}>
+          For you
+        </button>
+        <button onClick={() => setTab("agent")} style={tabStyle(tab === "agent")}>
+          For your agent
+        </button>
+      </div>
+      <div className="pt-scroll-x" style={{ padding: 16 }}>
+        {tab === "you" ? (
+          <ReadableVerdict />
+        ) : (
+          <pre className="pt-json" style={{ margin: 0, ...MONO, fontSize: 12, lineHeight: 1.65, color: "var(--text-primary)" }}>
+            {VERDICT_LINES.join("\n")}
+          </pre>
+        )}
+      </div>
+      <div style={{ padding: "9px 16px", borderTop: "1px solid var(--border-subtle)", ...MONO, fontSize: 11, color: "var(--text-tertiary)" }}>
+        3 libraries checked &middot; 11s &middot; $0.19
+      </div>
     </div>
   );
 }
@@ -86,150 +129,57 @@ export function Hero() {
       id="top"
       className="pt-pad-y"
       style={{
-        padding: "72px 0 24px",
+        padding: "72px 0",
         backgroundImage:
-          "radial-gradient(760px 300px at 88% -6%, rgba(26,115,232,.13), transparent 70%), radial-gradient(520px 260px at 8% 4%, rgba(14,159,110,.10), transparent 70%), radial-gradient(420px 220px at 60% 30%, rgba(199,125,10,.08), transparent 70%)",
+          "radial-gradient(760px 300px at 88% -6%, rgba(26,115,232,.13), transparent 70%), radial-gradient(520px 260px at 8% 4%, rgba(14,159,110,.10), transparent 70%)",
       }}
     >
-      <div className="pt-sec" style={{ ...SECTION, display: "grid", gap: 28 }}>
-        <Reveal>
-          <PillStack />
-        </Reveal>
-        <Reveal delay={60}>
-          <h1
-            style={{
-              margin: 0,
-              maxWidth: 900,
-              fontWeight: 500,
-              fontSize: "clamp(32px, 5.4vw, var(--text-display-md))",
-              lineHeight: "var(--leading-display)",
-              letterSpacing: "var(--tracking-display)",
-              color: "var(--text-primary)",
-              textWrap: "pretty",
-            }}
-          >
-            Make design guidance for agents{" "}
-            <span style={{ backgroundImage: "linear-gradient(transparent 62%, rgba(199,125,10,.32) 62%)" }}>
-              enforceable
-            </span>
-            , decisions{" "}
-            <span style={{ backgroundImage: "linear-gradient(transparent 62%, rgba(199,125,10,.32) 62%)" }}>
-              auditable
-            </span>
-            , and feature costs{" "}
-            <span style={{ backgroundImage: "linear-gradient(transparent 62%, rgba(199,125,10,.32) 62%)" }}>
-              visible
-            </span>
-            .
-          </h1>
-        </Reveal>
-        <Reveal delay={120}>
-          <p style={{ ...BODY, maxWidth: 700, fontSize: "var(--text-body-lg)" }}>
-            Install Pattern, and your agent calls it to recommend a component before it builds. An opt-in
-            enforcement boundary can require that call instead of leaving it up to the agent. Every decision it
-            leads to gets built against a concrete reference, and lands in a ledger you can verify afterward — what
-            was checked, how it scored, and whether the file it produced still holds up.
-          </p>
-        </Reveal>
-        <Reveal delay={150}>
-          <StepStrip />
-        </Reveal>
-        <Reveal delay={190}>
-          <h2 id="install" style={H2}>
-            Install
-          </h2>
-        </Reveal>
-        <Reveal delay={220}>
-          <div className="pt-cols-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, alignItems: "start" }}>
-            <CopyBlock label="install command" lines={INSTALL_LINES} />
-            <div style={{ ...PANEL, padding: 14, display: "grid", gap: 8 }}>
-              <span style={{ display: "flex", alignItems: "center", gap: 7, fontSize: "var(--text-body-sm)", color: "var(--text-primary)" }}>
-                <Terminal size={16} /> Tell your coding agent
-              </span>
-              <p style={{ ...MONO, margin: 0, fontSize: 12, lineHeight: 1.6, color: "var(--text-secondary)" }}>{AGENT_PROMPT}</p>
-            </div>
-          </div>
-        </Reveal>
-        <Reveal delay={235}>
-          <div style={{ ...PANEL, padding: 14, display: "grid", gap: 8 }}>
-            <span style={{ display: "flex", alignItems: "center", gap: 7, fontSize: "var(--text-body-sm)", color: "var(--text-primary)" }}>
-              <Figma size={16} /> Design system in Figma, not code? Tell your agent this instead
-            </span>
-            <p style={{ ...MONO, margin: 0, fontSize: 12, lineHeight: 1.6, color: "var(--text-secondary)" }}>{FIGMA_AGENT_PROMPT}</p>
-          </div>
-        </Reveal>
-        <Reveal delay={250}>
-          <h2 style={H2}>Recommend</h2>
-        </Reveal>
-        <Reveal delay={280}>
-          <div style={{ ...PANEL, background: "#fff", overflow: "hidden" }}>
-            <div
+      <div
+        className="pt-cols-2"
+        style={{ ...SECTION, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 48, alignItems: "start" }}
+      >
+        <div style={{ display: "grid", gap: 22 }}>
+          <Reveal>
+            <h1
               style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 12,
-                padding: "10px 14px",
-                borderBottom: "1px solid var(--border-subtle)",
-                flexWrap: "wrap",
+                margin: 0,
+                maxWidth: 560,
+                fontWeight: 500,
+                fontSize: "clamp(30px, 5vw, var(--text-display-md))",
+                lineHeight: "var(--leading-display)",
+                letterSpacing: "var(--tracking-display)",
+                color: "var(--text-primary)",
+                textWrap: "pretty",
               }}
             >
-              <span style={{ ...MONO, fontSize: 11, color: "var(--text-tertiary)" }}>one call, mid-build</span>
-            </div>
-            <div className="pt-cols-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr" }}>
-              <div className="pt-scroll-x" style={{ padding: 16, borderRight: "1px solid var(--border-subtle)" }}>
-                <div style={{ ...LABEL, marginBottom: 8 }}>The agent asks</div>
-                <pre className="pt-json" style={{ margin: 0, ...MONO, fontSize: 12, lineHeight: 1.65, color: "var(--text-primary)" }}>
-                  {CALL_LINES.join("\n")}
-                </pre>
-              </div>
-              <div className="pt-scroll-x" style={{ padding: 16, background: "var(--surface-sunken)" }}>
-                <div style={{ ...LABEL, marginBottom: 8 }}>Pattern answers</div>
-                <pre className="pt-json" style={{ margin: 0, ...MONO, fontSize: 12, lineHeight: 1.65, color: "var(--text-primary)" }}>
-                  {VERDICT_LINES.join("\n")}
-                </pre>
-              </div>
-            </div>
-          </div>
-        </Reveal>
-        <Reveal delay={310}>
-          <h2 id="enforce" style={H2}>
-            Enforce (optional)
-          </h2>
-        </Reveal>
-        <Reveal delay={340}>
-          <div className="pt-cols-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, alignItems: "start" }}>
-            <CopyBlock label="enforcement setup" lines={ENFORCEMENT_INIT_LINES} />
-            <div style={{ ...PANEL, padding: 14 }}>
-              <p style={{ ...BODY, margin: 0, fontSize: "var(--text-body-sm)", color: "var(--text-secondary)" }}>
-                pattern-mcp already tells you about this. The first time you run it, you&apos;ll see a one-time
-                note about the enforcement boundary, with the option to set it up right from your terminal. Or run
-                the command above whenever you&apos;re ready. It sets up a local hook that blocks a new component
-                from being written until Pattern has judged it, plus a CI check that fails the pull request if
-                that decision wasn&apos;t recorded.
-              </p>
-            </div>
-          </div>
-        </Reveal>
-        <Reveal delay={370}>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "flex-start",
-              gap: 10,
-              padding: "12px 14px",
-              borderRadius: "var(--radius-md)",
-              border: "1px solid color-mix(in oklab, var(--blue-500) 40%, transparent)",
-              background: "color-mix(in oklab, var(--blue-500) 8%, transparent)",
-            }}
-          >
-            <Info size={16} style={{ flexShrink: 0, marginTop: 2, color: "var(--blue-500)" }} />
-            <p style={{ ...BODY, margin: 0, fontSize: "var(--text-body-sm)", color: "var(--text-primary)" }}>
-              Pattern uses your own Anthropic API key, not a Claude subscription. Calls are billed directly to your
-              Anthropic account. Depending on how much analysis is needed, a call can cost anywhere from about half
-              a cent to just over $1, but most calls cost well under $0.30.
+              Your agent is about to pick a UI component.{" "}
+              <span style={{ color: "var(--text-accent)" }}>Pattern checks it first.</span>
+            </h1>
+          </Reveal>
+          <Reveal delay={60}>
+            <p style={{ ...BODY, maxWidth: 520, fontSize: "var(--text-body-lg)" }}>
+              Pattern checks UI decisions against real components, your design system, and real product
+              references before your agent builds. It tells your agent what to use, what to build, and why.
             </p>
-          </div>
+          </Reveal>
+          <Reveal delay={100}>
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+              <Button href="#install" size="lg">
+                Get started &rarr;
+              </Button>
+              <Button href="#step-01" variant="secondary" size="lg">
+                See how it works &darr;
+              </Button>
+            </div>
+          </Reveal>
+          <Reveal delay={140}>
+            <div id="install">
+              <CopyBlock label="install command" lines={INSTALL_LINES} />
+            </div>
+          </Reveal>
+        </div>
+        <Reveal delay={120}>
+          <VerdictCard />
         </Reveal>
       </div>
     </section>

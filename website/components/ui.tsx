@@ -99,7 +99,7 @@ export function Chip({ children, tone = "neutral" }: { children: ReactNode; tone
       style={{
         ...MONO,
         fontSize: 11,
-        padding: "3px 9px",
+        padding: "5px 11px",
         borderRadius: 999,
         color: map.c,
         border: "1px solid " + map.b,
@@ -115,12 +115,13 @@ export function Chip({ children, tone = "neutral" }: { children: ReactNode; tone
 type ButtonProps = {
   children: ReactNode;
   onClick?: () => void;
+  href?: string;
   variant?: "primary" | "secondary";
   size?: "sm" | "md" | "lg";
   style?: CSSProperties;
 };
 
-export function Button({ children, onClick, variant = "primary", size = "md", style }: ButtonProps) {
+export function Button({ children, onClick, href, variant = "primary", size = "md", style }: ButtonProps) {
   const sizes = {
     sm: { padding: "7px 14px", fontSize: "var(--text-body-sm)" },
     md: { padding: "10px 18px", fontSize: "var(--text-body-md)" },
@@ -128,25 +129,32 @@ export function Button({ children, onClick, variant = "primary", size = "md", st
   }[size];
   const variants =
     variant === "primary"
-      ? { background: "var(--text-primary)", color: "#fff", border: "1px solid var(--text-primary)" }
+      ? { background: "var(--blue-500)", color: "#fff", border: "1px solid var(--blue-500)" }
       : { background: "#fff", color: "var(--text-primary)", border: "1px solid var(--border-subtle)" };
+  const shared: CSSProperties = {
+    ...sizes,
+    ...variants,
+    borderRadius: "var(--radius-md)",
+    cursor: "pointer",
+    fontWeight: 500,
+    minHeight: 44,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    textDecoration: "none",
+    ...style,
+  };
+  const className = variant === "primary" ? "pt-btn-primary" : "pt-btn-secondary";
+  if (href) {
+    return (
+      <a href={href} onClick={onClick} className={className} style={shared}>
+        {children}
+      </a>
+    );
+  }
   return (
-    <button
-      onClick={onClick}
-      style={{
-        ...sizes,
-        ...variants,
-        borderRadius: "var(--radius-sm)",
-        cursor: "pointer",
-        fontWeight: 500,
-        minHeight: 44,
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        gap: 8,
-        ...style,
-      }}
-    >
+    <button onClick={onClick} className={className} style={shared}>
       {children}
     </button>
   );

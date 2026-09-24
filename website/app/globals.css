@@ -13,7 +13,7 @@
 
   /* ---- accent palette (mark, chips, progress) ---- */
   --blue-500: #1a73e8;
-  --blue-700: #0e4da4;
+  --blue-700: #0f4c9e;
   --green-500: #0e9f6e;
   --amber-500: #c77d0a;
   --red-500: #d93025;
@@ -83,6 +83,69 @@ a:hover {
 
 button {
   font-family: inherit;
+}
+
+.pt-btn-primary:hover {
+  background: var(--text-accent) !important;
+  border-color: var(--text-accent) !important;
+}
+.pt-btn-secondary:hover {
+  background: var(--surface-sunken) !important;
+}
+
+/* "assemble" -- staggered slide-in, used once above the closing CTA.
+   "cascade" -- grow pulse, used next to "coverage scoring" while a
+   checklist animates. Both named per the v2 design spec; apply via
+   .pt-assemble / .pt-cascade on the mark's child rects or wrapper. */
+@keyframes pt-assemble {
+  0% {
+    transform: translateY(10px) scaleX(0.4);
+    opacity: 0;
+  }
+  100% {
+    transform: none;
+    opacity: 1;
+  }
+}
+@keyframes pt-cascade {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.12);
+  }
+}
+.pt-assemble > * {
+  animation: pt-assemble 2.4s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.pt-assemble > *:nth-child(2) {
+  animation-delay: 0.08s;
+}
+.pt-assemble > *:nth-child(3) {
+  animation-delay: 0.16s;
+}
+.pt-assemble > *:nth-child(4) {
+  animation-delay: 0.24s;
+}
+.pt-assemble > *:nth-child(5) {
+  animation-delay: 0.32s;
+}
+.pt-assemble > *:nth-child(6) {
+  animation-delay: 0.4s;
+}
+.pt-cascade {
+  animation: pt-cascade 2.2s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .pt-assemble > * {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+  .pt-cascade {
+    animation: none;
+  }
 }
 
 @keyframes pt-breathe {

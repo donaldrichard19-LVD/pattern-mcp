@@ -1,26 +1,24 @@
-import { AvoidsMistakes } from "@/components/AvoidsMistakes";
+import { AskBeforeBuilding } from "@/components/AskBeforeBuilding";
 import { Close } from "@/components/Close";
-import { DesignSource } from "@/components/DesignSource";
-import { Guidance } from "@/components/Guidance";
+import { FounderNote } from "@/components/FounderNote";
 import { Hero } from "@/components/Hero";
-import { Reference } from "@/components/Reference";
-import { SavesTime } from "@/components/SavesTime";
-import { ScrollDemo } from "@/components/ScrollDemo";
+import { IntegrationsStrip } from "@/components/IntegrationsStrip";
+import { MakeItRequired } from "@/components/MakeItRequired";
+import { ReceiptLedger } from "@/components/ReceiptLedger";
 import { TopBar } from "@/components/TopBar";
-import { TracksDecisions } from "@/components/TracksDecisions";
+import { TrustGrid } from "@/components/TrustGrid";
 
 export default function Home() {
   return (
     <div style={{ background: "#fff" }}>
       <TopBar />
       <Hero />
-      <ScrollDemo />
-      <SavesTime />
-      <AvoidsMistakes />
-      <DesignSource />
-      <TracksDecisions />
-      <Reference />
-      <Guidance />
+      <IntegrationsStrip />
+      <AskBeforeBuilding />
+      <MakeItRequired />
+      <ReceiptLedger />
+      <TrustGrid />
+      <FounderNote />
       <Close />
     </div>
   );
