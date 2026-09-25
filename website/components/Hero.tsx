@@ -164,9 +164,6 @@ export function Hero() {
           </Reveal>
           <Reveal delay={100}>
             <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-              <Button href="#install" size="lg">
-                Get started &rarr;
-              </Button>
               <Button href="#step-01" variant="secondary" size="lg">
                 See how it works &darr;
               </Button>
