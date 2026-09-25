@@ -12,3 +12,4 @@ eval/*.json
 !eval/figma-eval-set.json
 !eval/figma-shadcn-eval-set.json
 !eval/figma-uikit-eval-set.json
+*.tsbuildinfo
