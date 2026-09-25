@@ -81,7 +81,7 @@ function ChecklistPanel() {
           ))}
         </div>
         <span style={{ ...MONO, fontSize: 11, color: "var(--text-tertiary)" }}>
-          {MET_COUNT} of {CHECKLIST.length} met &middot; build custom from Mobbin reference
+          {MET_COUNT} of {CHECKLIST.length} met &middot; build the missing pieces
         </span>
       </div>
     </div>
@@ -102,8 +102,8 @@ export function AskBeforeBuilding() {
               Ask before building. <span style={{ color: "var(--text-accent)" }}>Get a verdict, not a guess.</span>
             </h2>
             <p style={{ ...BODY, fontSize: "var(--text-body-md)" }}>
-              Pattern turns a vague need into a checklist, checks real components against it, and returns one
-              answer: use this, or build from this reference.
+              Pattern turns a vague need into a checklist, checks your design system against it, and returns one
+              answer: use this, or build what's missing.
             </p>
             <p style={{ ...BODY, fontSize: "var(--text-body-md)" }}>
               Buttons, inputs and other basics are answered locally, for free.

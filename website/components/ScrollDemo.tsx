@@ -12,29 +12,29 @@ const BEATS = [
     body: [
       "This happens in the middle of a real build.",
       "Your agent needs to choose a component, but nothing has checked whether it's actually the right fit. It can pick something loosely related, or build something generic because it never found a better option.",
-      "Pattern checks the decision against real evidence before the agent commits to it.",
+      "Pattern checks the decision against your design system before the agent commits to it.",
     ],
     label: "recommend_component",
   },
   {
     title: "Judgment against requirements, not keywords",
     body: [
-      "Pattern turns each component need into a requirements checklist. It searches shadcn/ui, 21st.dev, and ReUI, then checks each requirement against the evidence it finds.",
+      "Pattern turns each component need into a requirements checklist, then checks each requirement against the components in your registered design system.",
       "The server calculates coverage from the checklist itself instead of trusting a percentage the model reports. This isn't a keyword search or a similarity score. It's a check against what the component actually supports.",
     ],
     label: "coverage scoring",
   },
   {
-    title: "If a real component fits, use it",
+    title: "If a component you already have fits, use it",
     body: [
-      "A use_existing verdict includes the source, install command, and a description of what the component actually does.",
-      "Pattern evaluates the component before recommending it. Your agent shows you the install command before running it.",
+      "A use_existing verdict names the component in your design system and describes what it actually does.",
+      "Pattern evaluates the component against your checklist before recommending it, and lists any requirements it doesn't cover.",
     ],
     label: "verdict: use_existing",
   },
   {
-    title: "If nothing fits, build from a real reference",
-    body: "A custom_build verdict returns the requirements checklist along with a grounded reference from Mobbin or Figma Community, so your agent gets a concrete starting point instead of inventing the interaction from scratch. Direct links are verified before they're returned. When only a browse page exists, Pattern says so.",
+    title: "If nothing fits, build only the gap",
+    body: "A custom_build verdict returns the requirements checklist showing exactly what your closest components don't cover, so your agent reuses what exists and builds only what's missing instead of inventing the whole thing from scratch.",
     label: "verdict: custom_build",
   },
   {
@@ -49,7 +49,7 @@ const BEATS = [
     title: "It remembers what this project already decided",
     body: [
       "record_component_decision saves the component decisions an agent actually acted on, organized by project.",
-      "Later, the agent can use similar past decisions as a signal when making a new decision. But past decisions never become rules. The agent still searches for current options and scores them against the requirements every time.",
+      "Later, the agent can use similar past decisions as a signal when making a new decision. But past decisions never become rules. The agent still scores current options against the requirements every time.",
       "This gives the agent useful project context without locking it into an old choice.",
     ],
     label: "record_component_decision",
@@ -102,13 +102,13 @@ function rowsForBeat(beat: number): Row[] {
     rows.push({ k: "call", text: 'recommend_component({ component_need: "price breakdown with fees and taxes", … })' });
   }
   if (beat === 1) {
-    rows.push({ k: "work", text: "Searching shadcn/ui, 21st.dev, and ReUI · 3-search budget" });
+    rows.push({ k: "work", text: "Scoring against your registered design system · 95 components" });
   }
   if (beat === 2) {
-    rows.push({ k: "ok", text: "6/8 (75%) covered by 21st.dev pricing-detail block" });
+    rows.push({ k: "ok", text: "6/8 (75%) covered by your Alert Dialog components" });
   }
   if (beat === 3) {
-    rows.push({ k: "warn", text: "2/8 (25%), no candidate covers the itemized fee logic" });
+    rows.push({ k: "warn", text: "2/8 (25%), no component covers the itemized fee logic" });
   }
   if (beat === 4) {
     rows.push({ k: "user", text: "Also need a button for the confirm step." });
@@ -171,8 +171,8 @@ function VerdictPanel({ beat, sub, compact }: { beat: number; sub: number; compa
       }}
     >
       <span style={{ ...MONO, fontSize: 11, color: "var(--text-tertiary)" }}>{BEATS[beat].label}</span>
-      {beat === 2 && <Chip tone="success">use_existing · high</Chip>}
-      {beat === 3 && <Chip tone="warning">custom_build · high</Chip>}
+      {beat === 2 && <Chip tone="success">use_existing · design system</Chip>}
+      {beat === 3 && <Chip tone="warning">custom_build · medium</Chip>}
       {beat === 4 && <Chip>skip_list · $0</Chip>}
       {beat === 5 && <Chip tone="accent">memory · signal only</Chip>}
       {beat === 6 && <Chip tone="warning">blocked → allowed</Chip>}
@@ -211,18 +211,18 @@ function VerdictPanel({ beat, sub, compact }: { beat: number; sub: number; compa
         {beat === 2 && (
           <div style={{ display: "grid", gap: 10 }}>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <Chip tone="accent">source: 21st.dev</Chip>
+              <Chip tone="accent">source: design_system</Chip>
               <Chip tone="success">coverage 6/8 (75%)</Chip>
             </div>
             <div style={{ ...PANEL, padding: 10 }}>
               <span style={{ ...MONO, fontSize: 11.5, color: "var(--text-primary)", wordBreak: "break-all" }}>
-                npx shadcn@latest add &quot;https://21st.dev/r/pricing-detail-block&quot;
+                AlertDialogHeader · Alertdialogfooter · Alert Dialog
               </span>
             </div>
             {!compact && (
               <p style={{ ...BODY, fontSize: "var(--text-body-sm)" }}>
-                An itemized cost block with per-line labels, a subtotal, and an emphasized total row. Missing the collapsible fee explanation and the
-                mobile bottom-sheet layout, both listed as unmet, not hidden.
+                For a destructive-action confirmation, the Alert Dialog family covers the header, description, icon and footer. The cancel button slot
+                and focus handling are listed as unmet, not hidden.
               </p>
             )}
           </div>
@@ -234,17 +234,17 @@ function VerdictPanel({ beat, sub, compact }: { beat: number; sub: number; compa
               <Chip>source: null</Chip>
             </div>
             {[
-              { s: "Mobbin", t: "deep_link", d: "Booking, price details flow, itemized fees with an expandable service-fee row.", tone: "success" as const },
-              { s: "Figma Community", t: "entry_point", d: "Browse page, not the file itself, so you'll need to search it. Said plainly, not dressed up.", tone: "neutral" as const },
+              "Subtotal row before taxes and fees",
+              "Emphasized total row",
+              "Currency and locale formatting",
+              "Divider between subtotal and total",
+              "Fee tooltips",
             ]
-              .slice(0, compact ? 1 : 2)
-              .map((r) => (
-                <div key={r.s} style={{ ...PANEL, padding: 10, display: "grid", gap: 6 }}>
-                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                    <span style={{ fontSize: "var(--text-body-sm)", color: "var(--text-primary)" }}>{r.s}</span>
-                    <Chip tone={r.tone}>url_type: {r.t}</Chip>
-                  </div>
-                  <span style={{ fontSize: "var(--text-caption)", color: "var(--text-secondary)", lineHeight: "var(--leading-body)" }}>{r.d}</span>
+              .slice(0, compact ? 3 : 5)
+              .map((g) => (
+                <div key={g} style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: "var(--text-body-sm)", color: "var(--text-tertiary)" }}>
+                  <Minus size={15} style={{ flexShrink: 0, marginTop: 2 }} />
+                  <span>{g}</span>
                 </div>
               ))}
           </div>

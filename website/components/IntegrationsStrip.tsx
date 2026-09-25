@@ -4,7 +4,7 @@ import { H2, SECTION } from "./tokens";
 import { Chip, Reveal } from "./ui";
 
 const WORKS_WITH = ["Claude Code", "Cursor", "Codex", "Figma"];
-const CHECKS_AGAINST = ["shadcn/ui", "21st.dev", "ReUI", "Mobbin", "Figma Community"];
+const CHECKS_AGAINST = ["Figma files", "Component folders", "Storybook exports", "JSON manifests"];
 
 export function IntegrationsStrip() {
   return (
@@ -26,12 +26,11 @@ export function IntegrationsStrip() {
               </div>
             </div>
             <div style={{ display: "grid", gap: 8 }}>
-              <span style={{ fontSize: "var(--text-caption)", color: "var(--text-tertiary)" }}>Checks against</span>
+              <span style={{ fontSize: "var(--text-caption)", color: "var(--text-tertiary)" }}>Register your design system from</span>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 {CHECKS_AGAINST.map((c) => (
                   <Chip key={c}>{c}</Chip>
                 ))}
-                <Chip tone="accent">your design system</Chip>
               </div>
             </div>
           </div>

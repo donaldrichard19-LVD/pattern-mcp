@@ -32,7 +32,7 @@ const INITIAL_ROWS: LedgerRow[] = [
     status: "pending",
     resolvedStatus: "live",
     provenance:
-      "checklist: 8 requirements extracted\ncandidates_evaluated: 3 (shadcn/ui, 21st.dev, reui)\nverdict: custom_build, confidence high\nreason: no_candidates_found\nsnapshot_ref: a91f3c2 (2026-08-25)\nlast_verified_live: never — run the sweep to check this row",
+      "checklist: 8 requirements extracted\ncandidates_evaluated: 3 (Collapsible, Item, Table)\nverdict: custom_build, confidence high\nreason: no_candidates_found\nsnapshot_ref: a91f3c2 (2026-08-25)\nlast_verified_live: never — run the sweep to check this row",
   },
   {
     need: "host earnings dashboard",
@@ -41,7 +41,7 @@ const INITIAL_ROWS: LedgerRow[] = [
     status: "pending",
     resolvedStatus: "orphaned",
     provenance:
-      "checklist: 7 requirements extracted\ncandidates_evaluated: 1 (shadcn/ui data table)\nverdict: use_existing, confidence medium, coverage 5/7 (71%)\nsnapshot_ref: 8e21c40 (2026-08-25)\nlast_verified_live: never — run the sweep to check this row",
+      "checklist: 7 requirements extracted\ncandidates_evaluated: 1 (DataTable)\nverdict: use_existing, confidence medium, coverage 5/7 (71%)\nsnapshot_ref: 8e21c40 (2026-08-25)\nlast_verified_live: never — run the sweep to check this row",
   },
   {
     need: "cancellation policy display",
@@ -50,7 +50,7 @@ const INITIAL_ROWS: LedgerRow[] = [
     status: "pending",
     resolvedStatus: "live",
     provenance:
-      "checklist: 6 requirements extracted\ncandidates_evaluated: 2 (shadcn/ui, 21st.dev)\nverdict: custom_build, confidence high\nreason: scored, coverage 2/6 (33%)\nsnapshot_ref: 8e21c40 (2026-08-25)\nlast_verified_live: never — run the sweep to check this row",
+      "checklist: 6 requirements extracted\ncandidates_evaluated: 2 (Card, Accordion)\nverdict: custom_build, confidence high\nreason: scored, coverage 2/6 (33%)\nsnapshot_ref: 8e21c40 (2026-08-25)\nlast_verified_live: never — run the sweep to check this row",
   },
   {
     need: "host and guest messaging thread",

@@ -5,16 +5,28 @@
 [![npm downloads](https://img.shields.io/npm/dt/pattern-mcp.svg)](https://www.npmjs.com/package/pattern-mcp)
 [![MIT license](https://img.shields.io/badge/license-MIT-111111.svg)](./LICENSE)
 
-Pattern checks a coding agent's UI decisions against real evidence
-before it builds, whether that means your own design system in code or
-Figma, or components from popular libraries. It helps the agent choose
-what the product actually needs without overbuilding. An opt-in
+Pattern checks a coding agent's UI decisions against your own design
+system before it builds, whether that lives in code or in Figma. It helps
+the agent reuse what the product already has and build only what is
+actually missing. An opt-in
 enforcement boundary can make that check required, and every decision
 is recorded in an auditable ledger you can verify later.
 
 [Website](https://usepattern.sh) · [npm](https://www.npmjs.com/package/pattern-mcp) · [Report an issue](https://github.com/donaldrichard19-LVD/pattern-mcp/issues/new/choose)
 
-**Current release: v0.17.1** made `register_design_system` take a Figma file
+**Current release: v0.18.0** makes Pattern design-system-only.
+`recommend_component` now scores exclusively against a design system you
+register with `register_design_system`. It no longer searches shadcn/ui,
+21st.dev, ReUI, Mobbin, or Figma Community, and a `custom_build` verdict
+carries no external reference: the unmet requirements are the guidance.
+Calling it without a registered design system returns an error telling
+you to register one. `register_design_system` is now a core tool. The
+`PATTERN_SEARCH_BUDGET` and `PATTERN_FETCH_MAX_CONTENT_TOKENS` settings
+are gone. Sections below that describe web search, Mobbin or Figma
+Community references, or search budgets are historical and marked as
+such.
+
+v0.17.1 made `register_design_system` take a Figma file
 directly (`figma_json_path` or `figma_file_key`), scored as component
 sets grouped by page or, for files with no real Figma components, as
 plain frames and groups, plus an opt-in Claude vision caption of each
@@ -31,7 +43,7 @@ for more details.
 - **Core tools** (on by default -- see [Tool tiers](#tool-tiers)): [`recommend_component`](#tool-recommend_component) · [`extract_requirements`](#tool-extract_requirements) · [`record_component_decision`](#tool-record_component_decision)
 - **[Advanced tools](#advanced-tools)** (`PATTERN_TOOLS=full`): [`register_design_system`](#tool-register_design_system) · [`read_ledger`](#tool-read_ledger) · [`report_build_cost`](#tool-report_build_cost) · [`report_outcome_proxy`](#tool-report_outcome_proxy) · [Feature cost attribution](#feature-cost-attribution) · [Outcome proxies](#outcome-proxies) · [Per-project judgment ledger](#per-project-judgment-ledger) · [`check_ledger_liveness`](#tool-check_ledger_liveness) · [`sweep_ledger_liveness`](#tool-sweep_ledger_liveness) · [`export_ledger_provenance`](#tool-export_ledger_provenance) · [`backfill_ledger_snapshot_ref`](#tool-backfill_ledger_snapshot_ref) · [`post_ledger_provenance_to_github`](#tool-post_ledger_provenance_to_github) · [Ledger integrity and decision provenance](#ledger-integrity-and-decision-provenance)
 - [Per-project decision memory](#per-project-decision-memory) · [Security and privacy](#security-and-privacy) · [Telemetry](#telemetry)
-- **Cost:** [The `_meta` field](#the-_meta-field) · [Prompt caching](#prompt-caching) · [Measured cache and fetch behavior](#measured-cache-and-fetch-behavior) · [Search limits](#search-limits) · [Ensemble cost](#ensemble-cost-boundary-risk-cases-only) · [Session call cap](#session-call-cap)
+- **Cost:** [The `_meta` field](#the-_meta-field) · [Prompt caching](#prompt-caching) · [Measured cache and fetch behavior](#measured-cache-and-fetch-behavior-historical-pre-018) · [Search limits](#search-limits-removed-in-018) · [Ensemble cost](#ensemble-cost-boundary-risk-cases-only) · [Session call cap](#session-call-cap)
 - [Local call log](#local-call-log) · [Known limitations](#known-limitations)
 
 </details>
@@ -45,24 +57,25 @@ npx pattern-mcp init
 This is the only command you run yourself. It downloads Pattern,
 detects which MCP client(s) you have (Claude Code, Claude Desktop,
 Cursor, or Codex CLI), connects each one for you, and offers to add
-your Anthropic API key. See [Quick Start](#quick-start) below for what it
+your Anthropic API key. Then register your design system (see
+[`register_design_system`](#tool-register_design_system)) -- Pattern has
+nothing to judge against until you do. See [Quick Start](#quick-start) below for what it
 does step by step, or
 [Connect Pattern to your MCP client](#connect-pattern-to-your-mcp-client)
 if you'd rather connect a client by hand.
 
 ## What Pattern Does
 
-Instead of returning a list of search results, Pattern looks at what you
-need, checks real components against that need, and tells the agent
-whether to:
+Pattern looks at what you need, checks the components in your own
+registered design system (code or Figma) against that need, and tells the
+agent whether to:
 
-- **Use an existing component** — from your own registered design
-  system, in code or Figma, or from popular libraries like shadcn/ui,
-  21st.dev, and ReUI
-- **Build a custom component**, when nothing already covers the need
+- **Use an existing component** from your design system
+- **Build a custom component**, when nothing already covers the need. The
+  checklist shows which requirements the closest components miss, so the
+  agent builds only the gap
 
-Scoring against your own registered design system gets an extra safety
-net: a free, automatic check compares a `custom_build` verdict against
+A free, automatic check compares a `custom_build` verdict against
 every registered candidate's real name, props, and description, and
 flags any real overlap it finds, so a wrong "build it from scratch"
 doesn't pass by silently.
@@ -72,24 +85,27 @@ opt-in enforcement boundary can make the check required instead of
 optional, and every decision it leads to lands in an auditable ledger
 you can verify later.
 
-It exposes twelve tools. Three are on by default -- the ones the
+It exposes twelve tools. Four are on by default -- the ones the
 install → recommend → enforce → build path actually needs -- and the
 rest reveal themselves once you need them. See [Tool
 tiers](#tool-tiers).
 
 **Core, on by default.**
 
-- `recommend_component` — evaluates a UI component need and returns a
-  structured recommendation.
+- `register_design_system` — points Pattern at your design system (a
+  Figma file, a components folder, or a manifest). Required before
+  `recommend_component` can judge anything.
+- `recommend_component` — evaluates a UI component need against your
+  registered design system and returns a structured recommendation.
 - `extract_requirements` — runs just the requirement-extraction step on
   its own, so you can inspect or hand-edit the checklist before
-  `recommend_component` spends its search+score budget on it.
+  `recommend_component` scores against it.
 - `record_component_decision` — records what the agent actually did so
   future recommendations in the same project can take that decision into
   account.
 
-**[Advanced](#advanced-tools), behind `PATTERN_TOOLS=full`.** Pointing
-Pattern at your own design system, cost/outcome tracking, and ledger
+**[Advanced](#advanced-tools), behind `PATTERN_TOOLS=full`.**
+Cost/outcome tracking, and ledger
 provenance/liveness. See [Advanced tools](#advanced-tools) for the full
 list.
 
@@ -100,7 +116,7 @@ core tools above, so a first-time agent sees a small, obvious surface
 instead of all twelve at once. Every tool still works when called
 directly, tiering only changes what gets *advertised* -- so a script or
 an agent that already knows a tool's name (e.g. from this README) can
-still call `register_design_system` or `read_ledger` without setting
+still call `read_ledger` without setting
 anything. Set `PATTERN_TOOLS=full` in the server's environment to
 advertise all twelve tools immediately, e.g. for the "verify and export
 old decisions" or cost-tracking workflows described below.
@@ -111,18 +127,18 @@ old decisions" or cost-tracking workflows described below.
 
 For each `recommend_component` call, Pattern:
 
-1. Checks whether the need is a simple primitive that doesn't require a
-   search.
-2. Turns the request into a set of specific requirements, unless a
+1. Checks whether the need is a simple primitive that doesn't need
+   scoring.
+2. Requires a design system registered for the `project_id`; otherwise it
+   returns an error asking you to register one.
+3. Turns the request into a set of specific requirements, unless a
    checklist was already supplied (see [`checklist`](#checklist)).
-3. Searches for matching shadcn/ui, 21st.dev, and ReUI components.
-4. Checks each candidate against the requirements using evidence from the
-   actual component.
+4. Checks each registered candidate against the requirements using the
+   props, descriptions, and Figma data captured at registration.
 5. Calculates how much of the requirement is covered.
-6. Decides whether to use an existing component or build a custom one.
-7. If a custom build is needed, searches Mobbin and Figma Community for
-   real product examples.
-8. Returns the result as structured JSON the calling agent can act on.
+6. Decides whether to use an existing component or build a custom one. On
+   a custom build, the unmet requirements show what to build.
+7. Returns the result as structured JSON the calling agent can act on.
 
 Coverage is calculated by the server from the individual requirements it
 checked. It does not simply trust the percentage returned by the model.
@@ -199,28 +215,19 @@ These are handled locally without an API call:
 
 This keeps trivial requests fast and avoids unnecessary API usage.
 
-### What powers the search
-
-Pattern does not scrape shadcn/ui, 21st.dev, ReUI, Mobbin, or Figma Community
-itself.
+### What powers the judgment
 
 Each tool call makes one or more requests to the Anthropic Messages API,
-using `claude-sonnet-5` by default. The server enables Anthropic's
-`web_search` tool and provides a system prompt that defines the full
-decision process.
+using `claude-sonnet-5` by default, with a system prompt that defines the
+full decision process. No web search or fetch tools are enabled: the
+candidate pool is your registered design system, passed inline.
 
 That process includes:
 
 - Skip-list checks
 - Requirement extraction
-- Component search
-- Evidence-based coverage scoring
+- Evidence-based coverage scoring against your registered candidates
 - Decision thresholds
-- Mobbin and Figma Community reference searches when a custom build is
-  needed
-
-Figma Community does not require a Figma API key. Pattern uses the same
-web search mechanism for Figma Community as it does for the other sources.
 
 The model returns structured JSON. Pattern then applies important checks
 itself, including recalculating coverage and applying the decision
@@ -407,19 +414,12 @@ Give your agent a specific UI need, for example:
 
 The agent should use the result to make the next decision:
 
-- Install or use the recommended component, or
-- Start a custom build using the returned requirements and product
-  references.
+- Use the recommended component from the design system, or
+- Start a custom build that covers the requirements in
+  `requirements_checked` marked `met: false`.
 
-Pattern returns useful descriptions for both paths.
-
-- For an existing component, `component_description` explains what the
-  component does and looks like before the agent installs it.
-- For a custom build, `reference_description` explains what each Mobbin
-  or Figma Community reference actually shows.
-
-These descriptions are grounded in what Pattern found during the search
-rather than generic descriptions.
+For an existing component, `component_description` explains what it does,
+grounded in the data captured when you registered the design system.
 
 ## Validation examples
 
@@ -663,17 +663,10 @@ reference the checklist's content.
   ],
   "coverage": "5/7 (71%)",
   "recommendation": {
-    "source": "21st.dev | shadcn | reui | null",
+    "source": "design_system | null",
     "install_command": "string | null",
     "component_description": "string | null",
-    "reference": {
-      "source": "Mobbin | Figma Community",
-      "url": "...",
-      "flow_name": "...",
-      "file_name": "...",
-      "reference_description": "...",
-      "url_type": "deep_link | entry_point"
-    }
+    "reference": null
   },
   "ensemble": {
     "triggered": false
@@ -681,7 +674,7 @@ reference the checklist's content.
   "checklist_source": "extracted | provided",
   "_meta": {
     "total_ms": 41516,
-    "breakdown_ms": { "extract": 5006, "search": 3114, "score": 33396 },
+    "breakdown_ms": { "extract": 5006, "search": 0, "score": 33396 },
     "tokens_used": { "input": 8400, "output": 620 },
     "estimated_cost_usd": 0.14
   }
@@ -699,38 +692,12 @@ you passed one in via `checklist`.
 how `breakdown_ms` is measured, and what it means when the ensemble
 triggers.
 
-### Reference links
+### Custom builds
 
-When Pattern recommends a custom build, it may return references from
-Mobbin, Figma Community, or both.
-
-The `reference` field can be:
-
-- An array when both sources returned useful results.
-- A single object when only one source returned a useful result.
-- `null` when neither source produced a grounded reference.
-
-#### Deep links vs. entry points
-
-Pattern tells you whether a reference URL points directly to the
-identified screen or flow.
-
-`"url_type": "deep_link"` means Pattern verified that the URL points to
-the specific reference.
-
-`"url_type": "entry_point"` means the URL is a search or browse page. The
-agent may need to find the specific screen or flow from there.
-
-For Mobbin, Pattern fetches the search result page and looks for a more
-specific link to the screen or flow it identified.
-
-For Figma Community, URLs containing `/community/file/` are already
-specific to a file and are treated as deep links. Other Figma URLs are
-checked like Mobbin URLs.
-
-Pattern never invents a URL. If it cannot verify a specific link, it
-keeps the real search result URL and clearly identifies it as an entry
-point.
+`recommendation.reference` is always `null`. Pattern no longer searches
+Mobbin or Figma Community. On a `custom_build` verdict, read
+`requirements_checked`: the items with `met: false` are what the closest
+registered candidates do not cover, and the evidence text says why.
 
 ### Installation commands are not trusted
 
@@ -840,7 +807,7 @@ Anthropic API call.
 - `project_id` is required and should be stable. A project directory
   path or project name works well.
 - `action` must be `"installed"` or `"custom_built"`.
-- `source` can be `"shadcn"`, `"21st.dev"`, `"reui"`, or `"custom"`.
+- `source` can be `"design_system"` or `"custom"`.
 - `timestamp` is optional. If omitted, Pattern uses the current time.
 - `time_saved_minutes` is optional -- the calling agent's own estimate,
   in minutes, of how much time this decision saved by having Pattern's
@@ -868,14 +835,13 @@ Not advertised by default -- set `PATTERN_TOOLS=full` to see these in `tools/lis
 
 ## Tool: `register_design_system`
 
-Points `recommend_component` at *this project's own* design system instead
-of shadcn/ui, 21st.dev, and ReUI -- for a solo dev with their own component
-library or design spec who wants Pattern's coverage scoring against
-candidates they'll actually use, not external libraries they won't. This is
-the Solo Dev architecture from `pattern-solo-design-system-architecture.md`:
-local, per-project, one-or-the-other -- registering a design system for a
-`project_id` **replaces** external-library scoring for that project
-entirely, it does not add to it. There's no shared/remote ledger, no
+Registers *this project's own* design system as the candidate pool
+`recommend_component` scores against. **Required**: without a registration
+for the `project_id`, `recommend_component` returns an error asking you to
+register one. Works for your own component library, a Figma file, or a
+design spec (shadcn/ui itself can be registered as one). Local and
+per-project: registering for a `project_id` **replaces** any prior
+registration for it. There's no shared/remote ledger, no
 multi-user attribution, and no team auth in this scope -- those are
 deliberately deferred to a team phase, only if this use case proves out.
 
@@ -937,10 +903,8 @@ server's working directory) -- never an absolute path.
 Registering overwrites (does not merge with) any prior registration for the
 same `project_id`. Once registered, `recommend_component` scores ONLY
 against these candidates for calls with this `project_id` -- no separate
-flag needed, it's automatic based on `project_id` alone, and step 3's live
-web search is skipped entirely (`web_search` is still available, but
-reserved for a `custom_build` verdict's Mobbin/Figma Community reference
-grounding, same as the external-library path). A `use_existing` verdict
+flag needed, it's automatic based on `project_id` alone, and no web tools
+are enabled for the call. A `use_existing` verdict
 scored this way always carries `"source": "design_system"` on the
 resulting ledger entry, set server-side regardless of what the model wrote,
 so `read_ledger` and `export_ledger_provenance` can match on it reliably.
@@ -1544,9 +1508,7 @@ real but belongs to a different project, since entries are always scoped
 per `project_id`.
 
 For a `custom_build` verdict, the candidates section explains that gap in
-prose instead of an empty table -- Pattern doesn't persist the
-custom-build reference (Mobbin/Figma) to the ledger (see
-[`distillCandidate`](#data-minimization)), so it can't reproduce it here.
+prose instead of an empty table.
 A `null` `snapshot_ref` (project root wasn't a git repository at judgment
 time) renders as prose too, not the literal word `null`.
 
@@ -1967,8 +1929,9 @@ flagged (`served_from_ledger: true`) when it happens — see
 
 ## Security and privacy
 
-Pattern uses the Anthropic API and web search to make its
-recommendations.
+Pattern uses the Anthropic API to make its recommendations, sending your
+component need and your registered design system's candidate data (names,
+props, descriptions, Figma data). It does not use web search.
 
 Local project memory and the local call log are stored on the machine
 running Pattern. They are not sent anywhere by Pattern itself.
@@ -2126,7 +2089,7 @@ bookkeeping.
 - `breakdown_ms` -- how `total_ms` splits across `recommend_component`'s
   three internal phases.
 - `scoring_fetch` -- whether step 4's single candidate-verification fetch
-  (see [Fetch-grounded scoring](#fetch-grounded-scoring-and-reference-verification)
+  (see [Fetch-grounded scoring](#search-limits-removed-in-018)
   below) actually happened for this response. `url` is `null` when
   `attempted` is `false` (no real candidate to verify, e.g. `reason:
   "no_candidates_found"` or `"skip_list"`). This is a diagnostic only --
@@ -2135,24 +2098,11 @@ bookkeeping.
   call the way there is for a reference URL.
 
 **How `breakdown_ms` is measured, and its one real caveat.** The bundled
-call runs extraction, search, and scoring inside a single model turn
-(search/fetch happen server-side, not as separate requests this code
-makes), so there's no natural place for three separate stopwatches.
-Pattern gets a real per-phase split by streaming the response and timing
-content-block boundaries instead: `extract` ends the moment the first
-search call starts, and `search` ends when that first wave of search
-calls and results finishes. This was checked against real traces (not
-assumed) across both `use_existing` and `custom_build` cases before
-shipping, and both boundaries land cleanly and consistently.
-
-The one place this needs a caveat: for a `custom_build` verdict, step 6's
-Mobbin/Figma reference search and its deep-link verification fetch happen
-*after* the coverage-scoring reasoning that decided `custom_build` in the
-first place -- so `breakdown_ms.score`, for those cases, covers coverage
-scoring **and** reference-finding **and** the final write-up, not just
-"scoring" in the narrow step-4 sense. It's still a real, measured number;
-it's just a wider bucket for `custom_build` than for `use_existing`. This
-is disclosed here rather than presented as a narrower number than it is.
+call runs extraction and scoring inside a single model turn, with no
+tools, so there is no natural place for separate stopwatches. `_meta.breakdown_ms`
+reports `extract` (time until scoring starts), `search` (always `0` now that
+search is gone), and `score`. Before 0.18, `extract` ended when the first
+search call started; without search, the split is approximate.
 
 **When the ensemble triggers** (see below), `_meta` reports the sum
 across all reruns that actually happened -- total tokens and cost spent,
@@ -2174,7 +2124,7 @@ Pattern caches its system instructions using `cache_control: ephemeral`.
 The instructions are the same across calls, so repeated requests don't
 pay the full input cost for that block.
 
-### Measured cache and fetch behavior
+### Measured cache and fetch behavior (historical, pre-0.18)
 
 `_meta.tokens_used.input_breakdown` splits input tokens into `fresh`,
 `cache_write`, and `cache_read` (see [The `_meta`
@@ -2200,55 +2150,18 @@ findings so far:
   Mobbin *fetch* failed (`url_not_accessible`, 0 bytes returned). That
   rules out fetched-page content size as the driver for this cost --
   it's the extra Mobbin/Figma-restricted *search* calls themselves. This
-  is why [`PATTERN_FETCH_MAX_CONTENT_TOKENS`](#fetch-grounded-scoring-and-reference-verification)
+  is why [`PATTERN_FETCH_MAX_CONTENT_TOKENS`](#search-limits-removed-in-018)
   was trimmed (a fetch-content cap can't fix a search-call cost) rather
   than split per-step as originally considered, and why reducing
   Mobbin/Figma search overhead is tracked as its own, differently-scoped
   future item rather than folded into that change.
 
-### Search limits
+### Search limits (removed in 0.18)
 
-Pattern limits candidate discovery to 3 web searches -- one per source.
-
-If a custom build is needed, it reserves 2 additional searches for
-references:
-
-- 1 for Mobbin
-- 1 for Figma Community
-
-shadcn/ui, 21st.dev, and ReUI are searched in the same turn rather than
-sequentially, which reduces how much conversation context needs to be
-sent repeatedly.
-
-### Fetch-grounded scoring and reference verification
-
-Pattern allows up to 3 `web_fetch` calls per pass: 1 reserved for scoring,
-2 reserved for reference verification (1 for Mobbin, 1 for Figma
-Community).
-
-Before finalizing coverage, Pattern fetches the best-fitting candidate's
-own real docs/source page once and re-checks the checklist against that
-page, not just the search-result snippet it started with. This exists
-because search-result descriptions can both overstate a component's real
-capabilities and miss real ones it actually has -- both were observed in
-testing on the same case (an invented feature claim and a missed real
-one). If the fetch fails, or there's no confirmed URL to fetch, Pattern
-falls back to search-only evidence and says so in the affected items.
-
-Each result's `_meta.scoring_fetch` reports whether this fetch actually
-happened for that response (`{ attempted, succeeded, url }`) -- it's a
-diagnostic, not something Pattern uses to auto-correct individual
-requirement judgments. Unlike a reference URL (which has a safe fallback:
-the category page), there's no safe fallback for an unverified met/not-met
-call, so nothing is silently corrected -- `scoring_fetch` just tells you
-whether the grounding actually ran.
-
-A fetch can read up to `PATTERN_FETCH_MAX_CONTENT_TOKENS` content tokens
-(default 12,000 -- trimmed from 15,000 after a real instrumentation
-sample showed the largest actual fetched page was ~10.7k tokens, see
-[Measured cache and fetch behavior](#measured-cache-and-fetch-behavior)
-above). `web_fetch` has no separate per-call fee; the cost comes from the
-content added to the model's context.
+`PATTERN_SEARCH_BUDGET` and `PATTERN_FETCH_MAX_CONTENT_TOKENS` no longer
+exist. Pattern makes no web search or fetch calls, so there is nothing to
+cap. Older results in this README that mention search budgets, reference
+verification, or `_meta.scoring_fetch` describe the pre-0.18 behavior.
 
 ### Choosing a cheaper model
 
@@ -2414,7 +2327,6 @@ Each API call adds one JSON line, for example:
   "reason": "scored",
   "coverage": "2/8 (25%)",
   "ensemble_triggered": false,
-  "reference_sources_grounded": ["Mobbin", "Figma Community"],
   "checklist_source": "extracted",
   "total_ms": 44834,
   "estimated_cost_usd": 0.15
@@ -2424,8 +2336,6 @@ Each API call adds one JSON line, for example:
 Additional fields appear when relevant:
 
 - `ensemble_agreement` appears when the ensemble runs.
-- `reference_sources_grounded` appears for `custom_build` results and
-  lists only sources that produced a grounded reference.
 
 `checklist_source`, `total_ms`, and `estimated_cost_usd` mirror the
 call's `_meta` block (see [Cost](#cost)) -- `total_ms` and
@@ -2580,9 +2490,6 @@ Pattern requires outbound access to:
 ```
 api.anthropic.com
 ```
-
-It also depends on whatever external sites the model's `web_search` tool
-can reach.
 
 If you opt in to `PATTERN_SCORER=jev`, candidate evidence (component
 names, descriptions and props, which may reflect real product or UI text) is

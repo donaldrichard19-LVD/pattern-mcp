@@ -308,7 +308,15 @@ export async function runConnect(root: string, options: ConnectOptions): Promise
     closeRl();
   }
 
-  console.log("\nDone. Ask your agent to list its MCP tools and look for recommend_component.");
+  console.log(
+    "\nDone. Ask your agent to list its MCP tools and look for recommend_component.\n" +
+      "\nNext: Pattern judges components against YOUR design system, so register one first.\n" +
+      "Ask your agent to call register_design_system with one of:\n" +
+      "  figma_file_key      a Figma file (needs FIGMA_ACCESS_TOKEN)\n" +
+      "  directory_path      your components folder\n" +
+      "  manifest_path       a JSON manifest or Storybook index\n" +
+      "Until one is registered for your project_id, recommend_component returns an error saying so.",
+  );
 }
 
 // Option 1/#1 from the activation-funnel discussion: piggybacks on the

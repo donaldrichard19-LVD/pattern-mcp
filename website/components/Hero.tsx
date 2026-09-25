@@ -14,17 +14,13 @@ const INSTALL_LINES = ["npx pattern-mcp init --yes"];
 const VERDICT_LINES = [
   "{",
   '  "verdict": "custom_build",',
-  '  "confidence": "high",',
+  '  "confidence": "medium",',
   '  "reason": "scored",',
   '  "coverage": "2/8 (25%)",',
   '  "computed_at": "2026-08-25",',
   '  "recommendation": {',
   '    "source": null,',
-  '    "reference": {',
-  '      "source": "Mobbin",',
-  '      "url_type": "deep_link",',
-  '      "flow_name": "Booking, price details"',
-  "    }",
+  '    "reference": null',
   "  },",
   '  "ensemble": { "triggered": false }',
   "}",
@@ -57,7 +53,7 @@ function ReadableVerdict() {
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <span style={{ fontSize: "var(--text-body-md)", fontWeight: 500, color: "var(--text-primary)" }}>Build custom</span>
-        <Chip tone="warning">confidence: high</Chip>
+        <Chip tone="warning">confidence: medium</Chip>
       </div>
       <div style={{ display: "grid", gap: 4 }}>
         <div style={{ display: "flex", gap: 3 }} aria-hidden="true">
@@ -75,21 +71,11 @@ function ReadableVerdict() {
         </div>
         <span style={{ fontSize: "var(--text-caption)", color: "var(--text-tertiary)" }}>{REQS_MET} of {REQS_TOTAL} requirements met</span>
       </div>
-      <div style={{ display: "flex", gap: 10, alignItems: "center", ...PANEL, padding: 10 }}>
-        <div
-          aria-hidden="true"
-          style={{
-            width: 44,
-            height: 44,
-            borderRadius: "var(--radius-sm)",
-            flexShrink: 0,
-            backgroundImage: "repeating-linear-gradient(135deg, var(--border-subtle), var(--border-subtle) 4px, #fff 4px, #fff 8px)",
-          }}
-        />
-        <div style={{ display: "grid", gap: 3, minWidth: 0 }}>
-          <span style={{ fontSize: "var(--text-body-sm)", color: "var(--text-primary)" }}>Mobbin &middot; &quot;Booking, price details&quot;</span>
-          <Chip tone="success">verified direct link</Chip>
-        </div>
+      <div style={{ display: "grid", gap: 6, ...PANEL, padding: 10 }}>
+        <span style={{ fontSize: "var(--text-caption)", color: "var(--text-tertiary)", ...MONO }}>Your design system is missing</span>
+        <span style={{ fontSize: "var(--text-body-sm)", color: "var(--text-primary)" }}>
+          A total row, currency formatting, a divider, fee tooltips, and discount lines. Closest match: Collapsible.
+        </span>
       </div>
     </div>
   );
@@ -117,7 +103,7 @@ function VerdictCard() {
         )}
       </div>
       <div style={{ padding: "9px 16px", borderTop: "1px solid var(--border-subtle)", ...MONO, fontSize: 11, color: "var(--text-tertiary)" }}>
-        3 libraries checked &middot; 11s &middot; $0.19
+        your design system &middot; 35s &middot; $0.05
       </div>
     </div>
   );
@@ -158,8 +144,8 @@ export function Hero() {
           </Reveal>
           <Reveal delay={60}>
             <p style={{ ...BODY, maxWidth: 520, fontSize: "var(--text-body-lg)" }}>
-              Pattern checks UI decisions against real components, your design system, and real product
-              references before your agent builds. It tells your agent what to use, what to build, and why.
+              Pattern checks UI decisions against your design system before your agent builds. It tells
+              your agent what to reuse, what to build, and why.
             </p>
           </Reveal>
           <Reveal delay={100}>

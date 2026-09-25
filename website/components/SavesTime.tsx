@@ -16,9 +16,9 @@ const CAPS: { icon: ReactNode; h: string; p: [string, string] }[] = [
   },
   {
     icon: <Search size={18} />,
-    h: "Finds and checks real components",
+    h: "Checks your real components",
     p: [
-      "Pattern searches real component libraries and checks each requirement against the evidence it finds.",
+      "Pattern checks each requirement against the evidence captured from your design system.",
       "It returns a decision your agent can act on immediately: use an existing component or build something custom.",
     ],
   },
@@ -29,10 +29,10 @@ const CAPS: { icon: ReactNode; h: string; p: [string, string] }[] = [
   },
   {
     icon: <BookOpen size={18} />,
-    h: "Gives custom builds a real starting point",
+    h: "Shows custom builds exactly what's missing",
     p: [
-      "When nothing fits, Pattern returns a grounded reference from Mobbin or Figma Community.",
-      "Your agent builds from a real example instead of starting from a blank page.",
+      "When nothing fits, Pattern lists which requirements your closest components don't cover.",
+      "Your agent builds the gap and reuses the rest, instead of starting from a blank page.",
     ],
   },
   {
@@ -45,10 +45,10 @@ const CAPS: { icon: ReactNode; h: string; p: [string, string] }[] = [
   },
   {
     icon: <Blocks size={18} />,
-    h: "Works against your own design system too",
+    h: "Checks your own design system",
     p: [
-      "Point Pattern at a real directory of your own components, a hand-authored manifest, a Storybook export, or a Figma file, and it scores against those instead of shadcn/ui, 21st.dev, and ReUI.",
-      "Same checklist, same evidence-based scoring, same verdict shape — just checked against components you'll actually reuse, not a library you don't have.",
+      "Point Pattern at a real directory of your own components, a hand-authored manifest, a Storybook export, or a Figma file, and every call scores against those components.",
+      "Same checklist, same evidence-based scoring, same verdict shape, checked against components you'll actually reuse.",
     ],
   },
 ];
