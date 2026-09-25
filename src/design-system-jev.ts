@@ -170,3 +170,83 @@ export async function rankWithJev(
   ranked.sort((a, b) => b.score - a.score);
   return { ranked, usage, batches: batches.length };
 }
+
+/** Same 0.5 default as score-jev.ts's MET_THRESHOLD -- kept as its own env
+ * var rather than reused directly, since this checklist path scores
+ * design-system pool entries, not externally-searched candidates, and the
+ * two may want to be tuned independently. */
+export const CHECKLIST_MET_THRESHOLD = Number(process.env.PATTERN_JEV_MET_THRESHOLD ?? 0.5);
+
+const checklistKey = (i: number): string => `req_${i}`;
+
+export interface ChecklistCandidateScore {
+  entry: JevPoolEntry;
+  coverage_fraction: number;
+  /** Keyed by the checklist item's own text, like score-jev.ts's probabilities. */
+  probabilities: Record<string, number>;
+}
+
+export interface JevChecklistResult {
+  ranked: ChecklistCandidateScore[];
+  usage: { input_tokens: number; output_tokens: number };
+}
+
+const avgProbability = (r: ChecklistCandidateScore): number => {
+  const values = Object.values(r.probabilities);
+  return values.length === 0 ? 0 : values.reduce((sum, p) => sum + p, 0) / values.length;
+};
+
+/**
+ * Score a checklist -- hand-written, or produced by extract_requirements --
+ * against every pool entry, instead of the single "can this fully satisfy
+ * the need" question rankWithJev asks. One Jev call per entry (mirrors
+ * score-jev.ts's per-candidate scoreOneCandidate, just against a
+ * design-system pool entry's evidence instead of a searched candidate's
+ * description), with one noul question per checklist item, run in parallel.
+ *
+ * This is what lets Jev-scored design-system mode return the same
+ * requirements_checked/coverage shape as the Anthropic path, instead of a
+ * single opaque score -- at the cost of one Jev call per candidate rather
+ * than one call (or a few, batched) per whole pool.
+ */
+export async function scoreChecklistWithJev(
+  componentNeed: string,
+  checklist: string[],
+  pool: JevPoolEntry[]
+): Promise<JevChecklistResult> {
+  const usage = { input_tokens: 0, output_tokens: 0 };
+  const ranked = await Promise.all(
+    pool.map(async (entry): Promise<ChecklistCandidateScore> => {
+      const questions: Record<string, NoulQuestion> = {};
+      checklist.forEach((item, i) => {
+        questions[checklistKey(i)] = {
+          type: "noul",
+          instructions: `Candidate (${entry.components.join(", ")}${entry.file ? `, ${entry.file}` : ""}) satisfies this checklist item as-is, without being rebuilt: ${item}`,
+        };
+      });
+      const res = await callJev({
+        state: {
+          component_need: componentNeed,
+          candidate: { file: entry.file, components: entry.components, evidence: entry.evidence },
+        },
+        questions,
+      });
+      usage.input_tokens += res.usage?.input_tokens ?? 0;
+      usage.output_tokens += res.usage?.output_tokens ?? 0;
+      const probabilities: Record<string, number> = {};
+      let met = 0;
+      checklist.forEach((item, i) => {
+        const p = res.answers[checklistKey(i)]?.noul ?? 0;
+        probabilities[item] = p;
+        if (p >= CHECKLIST_MET_THRESHOLD) met += 1;
+      });
+      return { entry, coverage_fraction: checklist.length === 0 ? 0 : met / checklist.length, probabilities };
+    })
+  );
+  // Rank by coverage first (this is what the caller's verdict threshold
+  // reads), average per-item probability as the tiebreak -- two entries
+  // meeting the same count of items are ranked by how confidently, not
+  // arbitrarily by pool order.
+  ranked.sort((a, b) => (b.coverage_fraction !== a.coverage_fraction ? b.coverage_fraction - a.coverage_fraction : avgProbability(b) - avgProbability(a)));
+  return { ranked, usage };
+}

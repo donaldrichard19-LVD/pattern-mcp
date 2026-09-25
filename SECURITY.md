@@ -216,8 +216,12 @@ two places:
   component names, re-exported names, doc comments and any stored summary.
   Prop lists are not sent and source files are not sent whole, but doc comments
   and summaries are text from your codebase. No Anthropic call is made on this
-  path. "Local-only" here means your files are read locally; the evidence text
-  above still leaves your machine.
+  path -- unless you pass your own `checklist`, which does not itself call
+  Anthropic either (a checklist you wrote yourself, or already have from an
+  earlier `extract_requirements` call, needs no fresh call here), but sends
+  each checklist item's text to TypeSafe too, once per registered file
+  instead of once for the whole pool. "Local-only" here means your files
+  are read locally; the evidence text above still leaves your machine.
 
 Leave `PATTERN_SCORER` unset and no data goes to TypeSafe.
 

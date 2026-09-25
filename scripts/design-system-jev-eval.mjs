@@ -21,12 +21,21 @@
  *   R3B  R3 (Haiku summary) with prop names dropped;  R3A / R3AB likewise
  * Requires ANTHROPIC_API_KEY (.env ok) and TYPESAFE_API_KEY (env).
  * Usage: node scripts/design-system-jev-eval.mjs [--no-sonnet]
+ *
+ * --checklist runs a DIFFERENT mode instead of the variant sweep above:
+ * extract_requirements's own 8-item-checklist prompt (Sonnet) generates a
+ * checklist for each need, then the REAL scoreChecklistWithJev (imported
+ * from dist/design-system-jev.js -- run `npm run build` first) scores it
+ * per-item against the R3B pool, one Jev call per candidate file. Measures
+ * the "Jev scores an extracted checklist" path (PATTERN_SCORER=jev +
+ * recommend_component's checklist input), not the whole-file scoring the
+ * rest of this file measures. Writes eval/design-system-jev-checklist-log.json.
  */
 import { readFileSync, writeFileSync, readdirSync, existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { join, resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -195,6 +204,65 @@ async function scoreSonnet(need, pool) {
   let match = null; try { match = JSON.parse(r.text.match(/\{[\s\S]*\}/)[0]).match; if (typeof match === "string") match = match.match(/[\w.\/-]+\.(?:tsx?|jsx?)/)?.[0] ?? null; } catch {}
   return { match, usage: r.usage };
 }
+
+// ---------- checklist mode (option 1: extract_requirements produces the
+// checklist, Jev scores it per-item against the R3B pool -- same evidence
+// shape production's collapseForJev builds) ----------
+// Imports the REAL compiled scoreChecklistWithJev (dist/design-system-jev.js)
+// rather than re-implementing it here, so this measures the shipped code
+// path, not a re-description of it. Requires `npm run build` first.
+async function runChecklistEval() {
+  const { scoreChecklistWithJev, CHECKLIST_MET_THRESHOLD } = await import(pathToFileURL(join(root, "dist/design-system-jev.js")).href);
+  console.log(`Checklist mode: R3B pool, CHECKLIST_MET_THRESHOLD=${CHECKLIST_MET_THRESHOLD}`);
+  const pool = {}; for (const sys of Object.keys(pools)) pool[sys] = await buildPool(sys, "R3B");
+  console.log(Object.entries(pool).map(([s, p]) => `${s}:${p.length}/${pools[s].length} files`).join("  "));
+
+  let extractIn = 0, extractOut = 0;
+  const rows = [];
+  for (let i = 0; i < evalSet.cases.length; i += 4) {
+    const batch = evalSet.cases.slice(i, i + 4);
+    rows.push(...await Promise.all(batch.map(async (c) => {
+      const p = pool[c.system];
+      const row = { id: c.id, gold: c.gold, goldInPool: c.gold.length === 0 || c.gold.some((g) => p.some((x) => x.file === g)) };
+      try {
+        const t0 = Date.now();
+        const extraction = await anthropic("claude-sonnet-5",
+          `You are the requirement-extraction step of a UI component judgment tool. Given a component need and a product domain, produce a checklist of concrete elements the component must contain.\n\nTurn the component need + domain into a concrete checklist of elements the component must contain -- specific enough to check against real code, not a vibe. Ground it in the stated domain, not the component name alone. Extract exactly 8 checklist items, ranked by importance to the component's core function (most important first) -- a fixed count, not a range, so coverage = met/total isn't itself a moving target across runs.\n\nRespond with ONLY a single JSON object, no prose before or after, no markdown code fences, matching this exact shape:\n\n{\n  "checklist": ["string", "string", "..."]\n}\n\nNEED: ${c.need}\nDOMAIN: ${c.system} design system component`, 500);
+        extractIn += extraction.usage.input_tokens; extractOut += extraction.usage.output_tokens;
+        const checklist = JSON.parse(extraction.text.match(/\{[\s\S]*\}/)[0]).checklist;
+        row.checklist = checklist;
+        const pool2 = p.map((x, i) => ({ key: `c${i}`, file: x.file, components: [x.file], evidence: x.evidence }));
+        const { ranked, usage } = await scoreChecklistWithJev(c.need, checklist, pool2);
+        const top = ranked[0];
+        row.checklistJev = {
+          ms: Date.now() - t0,
+          usage,
+          top1: top?.entry.file ?? null,
+          coverage: top ? top.coverage_fraction : 0,
+          found: !!top && top.coverage_fraction * 100 >= 40, // same 40% floor as runDesignSystemJevChecklistPass
+        };
+      } catch (e) { row.checklistJev = { error: e.message }; }
+      return row;
+    })));
+    process.stdout.write(".");
+  }
+
+  let top1 = 0, pos = 0, neg = 0, negOk = 0, errors = 0;
+  for (const r of rows) {
+    const s = r.checklistJev; if (!s || s.error) { errors++; continue; }
+    if (r.gold.length) { pos++; if (s.found && r.gold.includes(s.top1)) top1++; }
+    else { neg++; if (!s.found) negOk++; }
+  }
+  const totalIn = rows.reduce((a, r) => a + (r.checklistJev?.usage?.input_tokens ?? 0), 0);
+  const totalOut = rows.reduce((a, r) => a + (r.checklistJev?.usage?.output_tokens ?? 0), 0);
+  console.log(`\n\n=== Checklist-mode results (Jev scoring an extracted checklist, R3B pool) ===`);
+  console.log(JSON.stringify({ top1: `${top1}/${pos}`, negCorrectlyNone: `${negOk}/${neg}`, overall: `${top1 + negOk}/${pos + neg}`, errors,
+    extraction_tokens: { input: extractIn, output: extractOut }, jev_tokens: { input: totalIn, output: totalOut } }, null, 2));
+  writeFileSync(join(root, "eval/design-system-jev-checklist-log.json"),
+    JSON.stringify({ generated_at: new Date().toISOString(), threshold: "40% coverage (matches runDesignSystemJevChecklistPass)", rows }, null, 1));
+  console.log("Wrote eval/design-system-jev-checklist-log.json");
+}
+if (process.argv.includes("--checklist")) { await runChecklistEval(); process.exit(0); }
 
 // ---------- run ----------
 const VARIANTS = (process.env.VARIANTS ?? "E0,E1,E2,E3,R,R2").split(","), THRESH = 0.5;

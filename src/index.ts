@@ -53,7 +53,7 @@ import {
 } from "./telemetry.js";
 import { offerEnforcementSetupOnce } from "./init-enforcement.js";
 import { connectInstructionsText, offerClientConnectSetupOnce, runConnect } from "./client-connect.js";
-import { collapseForJev, rankWithJev } from "./design-system-jev.js";
+import { collapseForJev, rankWithJev, scoreChecklistWithJev, CHECKLIST_MET_THRESHOLD } from "./design-system-jev.js";
 import { describeFigma, fetchFigmaFile, parseFigmaFile, type FigmaCandidateInfo } from "./design-system-figma.js";
 import { captionFigmaDesigns, carryOverCaptions } from "./design-system-figma-captions.js";
 import {
@@ -1330,6 +1330,119 @@ async function runDesignSystemJevPass(
   return { ok: true, result };
 }
 
+// Design-system mode scored by Jev, against a CALLER-SUPPLIED checklist
+// (from extract_requirements, or hand-written) instead of rankWithJev's
+// single "fully satisfies the need" question. Jev writes no prose and
+// can't extract a checklist itself -- getting one still means an Anthropic
+// call to extract_requirements first -- but once a checklist exists, this
+// path scores it against the registered design system with Jev, at Jev's
+// speed and without a further Anthropic call. Same coverage-percent verdict
+// thresholds as the Anthropic path (enforceVerdictThreshold's 80/40 split),
+// computed here rather than shared with it since Jev's confidence must
+// never reach "high" -- its scores are uncalibrated, same as
+// runDesignSystemJevPass above.
+async function runDesignSystemJevChecklistPass(
+  input: { component_need: string; domain: string; project_id?: string; checklist: string[] },
+  designSystem: DesignSystemRegistration,
+  passStartMs: number
+): Promise<SinglePassResult> {
+  const pool = collapseForJev(designSystem.candidates);
+  const { ranked, usage } = await scoreChecklistWithJev(input.component_need, input.checklist, pool);
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+  const shape = (r: (typeof ranked)[number]) => ({
+    file: r.entry.file,
+    components: r.entry.components,
+    score: round2(Object.values(r.probabilities).reduce((s, p) => s + p, 0) / Math.max(1, Object.values(r.probabilities).length)),
+  });
+  const elapsed = Math.max(1, Date.now() - passStartMs);
+
+  const rated = JEV_USD_PER_MTOK_IN !== undefined && JEV_USD_PER_MTOK_OUT !== undefined;
+  const cost = rated
+    ? (usage.input_tokens * Number(JEV_USD_PER_MTOK_IN) + usage.output_tokens * Number(JEV_USD_PER_MTOK_OUT)) / 1_000_000
+    : 0;
+  const meta: NonNullable<JudgmentResult["_meta"]> = {
+    total_ms: elapsed,
+    breakdown_ms: { extract: 0, search: 0, score: elapsed },
+    tokens_used: { input: usage.input_tokens, output: usage.output_tokens },
+    estimated_cost_usd: cost,
+    ...(rated ? {} : { cost_note: "Jev scorer: cost unknown (set PATTERN_JEV_USD_PER_MTOK_IN/OUT to estimate); 0 here does not mean free." }),
+  };
+  const base = {
+    scorer: "jev" as const,
+    computed_at: new Date().toISOString().slice(0, 10),
+    checklist_source: "provided" as const,
+    ensemble: { triggered: false },
+    _meta: meta,
+  };
+
+  const top = ranked[0];
+  if (!top || input.checklist.length === 0) {
+    return {
+      ok: true,
+      result: {
+        ...base,
+        verdict: "custom_build",
+        confidence: "low",
+        reason: "no_candidates_found",
+        requirements_checked: null,
+        coverage: null,
+        recommendation: null,
+        not_found_message: !top
+          ? `The registered design system has no components to score (checked ${designSystem.candidate_count} components in 0 entries).`
+          : `An empty checklist was supplied -- nothing to score against the registered design system.`,
+      },
+    };
+  }
+
+  const metCount = Math.round(top.coverage_fraction * input.checklist.length);
+  const coveragePct = (metCount / input.checklist.length) * 100;
+  const coverage = `${metCount}/${input.checklist.length} (${coveragePct % 1 === 0 ? coveragePct : coveragePct.toFixed(1)}%)`;
+  const requirements_checked: NonNullable<JudgmentResult["requirements_checked"]> = input.checklist.map((item) => {
+    const p = top.probabilities[item];
+    return { requirement: item, met: p >= CHECKLIST_MET_THRESHOLD, evidence: `Jev noul probability: ${p.toFixed(3)}` };
+  });
+  const label = `${top.entry.components.join(", ")}${top.entry.file ? ` (${top.entry.file})` : ""}`;
+  const matchShape = { ...shape(top), alternatives: ranked.slice(1, 4).map(shape), candidates_considered: pool.length };
+
+  // Same 80/40 coverage-percent split as enforceVerdictThreshold (the
+  // Anthropic path), but confidence caps at "medium" -- never "high" --
+  // since Jev's per-item probabilities aren't calibrated. See
+  // runDesignSystemJevPass's identical note on the whole-file score.
+  if (coveragePct >= 40) {
+    return {
+      ok: true,
+      result: {
+        ...base,
+        verdict: "use_existing",
+        confidence: coveragePct >= 80 ? "medium" : "low",
+        reason: "scored",
+        requirements_checked,
+        coverage,
+        recommendation: { source: "design_system", install_command: null, component_description: label, reference: null },
+        design_system_match: matchShape,
+      },
+    };
+  }
+
+  return {
+    ok: true,
+    result: {
+      ...base,
+      verdict: "custom_build",
+      confidence: "low",
+      reason: "scored",
+      requirements_checked,
+      coverage,
+      recommendation: null,
+      design_system_match: matchShape,
+      not_found_message:
+        `No registered component covered enough of the provided checklist (best: ${label}, ${coverage}). ` +
+        `Web search is not used in design-system mode with the Jev scorer, so no outside library was searched. ` +
+        `Build it custom, or add a suitable component to the design system and re-register it.`,
+    },
+  };
+}
+
 async function runSinglePass(input: {
   component_need: string;
   domain: string;
@@ -1381,12 +1494,24 @@ async function runSinglePass(input: {
     };
   }
 
-  // Jev design-system path: needs no Anthropic key. A caller-supplied
-  // checklist opts out (Jev scores whole files, not per-requirement items),
-  // falling through to the normal Anthropic path below.
-  if (DESIGN_SYSTEM_JEV_ENABLED && input.project_id && !(input.checklist && input.checklist.length > 0)) {
+  // Jev design-system path: needs no Anthropic key by itself. A
+  // caller-supplied checklist (hand-written, or from an earlier
+  // extract_requirements call -- itself an Anthropic call, just not this
+  // one) is scored per-item with runDesignSystemJevChecklistPass instead
+  // of rankWithJev's single whole-file question; no checklist falls back
+  // to that whole-file score.
+  if (DESIGN_SYSTEM_JEV_ENABLED && input.project_id) {
     const jevDesignSystem = getRegisteredDesignSystem(input.project_id);
-    if (jevDesignSystem) return runDesignSystemJevPass(input, jevDesignSystem, passStartMs);
+    if (jevDesignSystem) {
+      if (input.checklist && input.checklist.length > 0) {
+        return runDesignSystemJevChecklistPass(
+          { component_need: input.component_need, domain: input.domain, project_id: input.project_id, checklist: input.checklist },
+          jevDesignSystem,
+          passStartMs
+        );
+      }
+      return runDesignSystemJevPass(input, jevDesignSystem, passStartMs);
+    }
   }
 
   // Pattern judges against a project's own registered design system only.
@@ -1692,8 +1817,12 @@ export const BOUNDARY_RISK_MET_COUNTS_FOR_8_ITEMS = new Set([3, 4, 6, 7]);
 
 export function isBoundaryRisk(result: JudgmentResult): boolean {
   if (result.reason !== "scored") return false;
-  // The Jev design-system path has no 8-item checklist to be "malformed"
-  // about, and a re-run would only re-call Jev.
+  // Jev design-system results (whole-file rankWithJev, or a
+  // caller-supplied checklist scored per-item) are excluded regardless of
+  // whether requirements_checked is present: there's no 8-item fixed-count
+  // checklist for the boundary table to apply to, and a re-run would only
+  // re-call Jev, not swap in a different judge the way the Anthropic
+  // ensemble does.
   if (result.scorer === "jev") return false;
 
   const items = result.requirements_checked;
@@ -3753,8 +3882,11 @@ export interface JudgmentResult {
   confidence: string;
   reason: string;
   // Set to "jev" when the design-system Jev path produced this result
-  // (PATTERN_SCORER=jev). No requirements checklist exists on that path, so
-  // isBoundaryRisk never re-runs it.
+  // (PATTERN_SCORER=jev) -- either the whole-file score (checklist_source
+  // "extracted", requirements_checked null) or a caller-supplied checklist
+  // scored per-item against the design system (checklist_source
+  // "provided", requirements_checked populated). Either way isBoundaryRisk
+  // never re-runs it: see its own comment.
   scorer?: "jev";
   // Jev path only: the best-ranked file and the runners-up. `score` is Jev's
   // raw per-candidate probability -- a ranking signal, NOT calibrated.

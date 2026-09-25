@@ -23,7 +23,13 @@ const serverEntry = resolve(dirname(fileURLToPath(import.meta.url)), "..", "dist
 let failures = 0;
 const check = (label, ok) => { if (ok) console.log(`  ok: ${label}`); else { console.error(`  FAIL: ${label}`); failures++; } };
 
-// ---- stub Jev: score 0.9 when the candidate evidence mentions the need's keyword, else 0.05 ----
+// ---- stub Jev ----
+// Two request shapes reach this stub: rankWithJev's whole-pool "candidates"
+// array (scored by whether the NEED's first word is in the evidence), and
+// scoreChecklistWithJev's one-candidate-per-call "candidate" object (scored
+// per question by whether THAT checklist item's first word is in the
+// evidence -- read from the question's own instructions text, not the need,
+// since each call only ever sees one candidate and many items).
 const requests = [];
 const stub = createServer((req, res) => {
   let raw = "";
@@ -33,9 +39,18 @@ const stub = createServer((req, res) => {
     requests.push({ auth: req.headers.authorization, body });
     const need = body.state.component_need;
     if (need.includes("boom")) { res.writeHead(500); res.end("stub failure"); return; }
-    const keyword = need.split(" ")[0].toLowerCase();
     const answers = {};
-    for (const c of body.state.candidates) answers[c.id] = { type: "noul", noul: c.evidence.toLowerCase().includes(keyword) ? 0.9 : 0.05 };
+    if (Array.isArray(body.state.candidates)) {
+      const keyword = need.split(" ")[0].toLowerCase();
+      for (const c of body.state.candidates) answers[c.id] = { type: "noul", noul: c.evidence.toLowerCase().includes(keyword) ? 0.9 : 0.05 };
+    } else {
+      const evidence = body.state.candidate.evidence.toLowerCase();
+      for (const [key, q] of Object.entries(body.questions)) {
+        const item = q.instructions.split("as-is, without being rebuilt: ").pop();
+        const keyword = item.trim().split(/\s+/)[0].toLowerCase();
+        answers[key] = { type: "noul", noul: evidence.includes(keyword) ? 0.9 : 0.05 };
+      }
+    }
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify({ model: "stub", answers, usage: { input_tokens: 100, output_tokens: 10 } }));
   });
@@ -118,14 +133,34 @@ console.log("\n=== 3. Large library is batched under the token budget ===");
   await c2.close();
 }
 
-console.log("\n=== 4. Opt-outs and failures ===");
+console.log("\n=== 4. A supplied checklist is scored per-item with Jev (no Anthropic call) ===");
+{
+  requests.length = 0;
+  const checklist = [
+    "Tabbed switching between named sections",
+    "Keyboard arrow-key navigation between tabs",
+    "Panel content displayed below the active tab",
+  ];
+  const { isError, body } = parse(await recommend(client, "tabs for switching panel sections", "p1", { checklist }));
+  check("no error (no Anthropic key needed for this path either)", !isError);
+  check("verdict use_existing, reason scored, scorer jev, checklist_source provided", body?.verdict === "use_existing" && body?.reason === "scored" && body?.scorer === "jev" && body?.checklist_source === "provided");
+  check("confidence is never 'high'", body?.confidence !== "high");
+  check("coverage is 2/3 (66.7%): the item mentioning keyboard nav isn't in Tabs.tsx's evidence", body?.coverage === "2/3 (66.7%)");
+  check("requirements_checked has one entry per checklist item, in order, each with a Jev probability", Array.isArray(body?.requirements_checked) && body.requirements_checked.length === 3 && body.requirements_checked[0].requirement === checklist[0] && /Jev noul probability/.test(body.requirements_checked[0].evidence ?? ""));
+  check("the keyboard-nav item is correctly marked not met", body?.requirements_checked?.[1]?.met === false);
+  check("design_system_match still names the best file (Tabs.tsx over Dialog.tsx/Spinner.jsx)", body?.design_system_match?.file === "Tabs.tsx");
+  check("one Jev call per pool entry (3 files), not one shared ranking call", requests.length === 3 && requests.every((r) => !!r.body.state.candidate));
+  check("each call carries all 3 checklist items as separate questions", requests.every((r) => Object.keys(r.body.questions).length === 3));
+}
+
+console.log("\n=== 5. Failures ===");
 {
   const skip = parse(await recommend(client, "button", "unregistered-project"));
   check("unregistered project + skip-list need takes the normal free path", skip.body?.reason === "skip_list");
-  const withChecklist = parse(await recommend(client, "tabs for switching panels", "p1", { checklist: ["a", "b", "c", "d", "e", "f", "g", "h"] }));
-  check("a supplied checklist opts out of Jev (falls to Anthropic path, which errors with no key)", withChecklist.isError === true);
   const boom = parse(await recommend(client, "boom tabs", "p1"));
   check("a Jev API failure surfaces as an error, no silent fallback", boom.isError === true && /TypeSafe API error 500/.test(boom.text));
+  const boomChecklist = parse(await recommend(client, "boom tabs", "p1", { checklist: ["a", "b"] }));
+  check("same for the checklist path", boomChecklist.isError === true && /TypeSafe API error 500/.test(boomChecklist.text));
 }
 
 await client.close();

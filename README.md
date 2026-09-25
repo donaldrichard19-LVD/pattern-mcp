@@ -1098,18 +1098,39 @@ Anthropic: no Anthropic call, no web search, sub-second. Needs
   one). Prop lists are intentionally not sent -- in the eval they misled the
   scorer. Large libraries are split into batches
   (`PATTERN_JEV_BATCH_TOKENS`, default 18000).
-- **Not used when** you pass your own `checklist` (Jev scores whole files, not
-  checklist items) -- that call takes the normal Anthropic path.
+- **A supplied `checklist` is scored per-item, not skipped.** Jev writes no
+  prose -- it can't extract a checklist itself -- but if you pass one
+  (hand-written, or from an `extract_requirements` call), it's scored
+  against every design-system file with Jev instead of falling through to
+  the Anthropic path: one Jev call per file, one noul question per
+  checklist item, still no Anthropic call and no web search. The result
+  carries the same `requirements_checked`/`coverage` shape as the Anthropic
+  path (per-item `met` + a `Jev noul probability: N.NNN` reason string) and
+  `checklist_source: "provided"`, with the same 80%/40% coverage
+  thresholds deciding `verdict` -- confidence still caps at `medium`, never
+  `high`. This is the way to get a checklist out of a Jev-scored call:
+  Jev can't write one, but once `extract_requirements` (an Anthropic call)
+  has produced one, everything after that -- scoring it against your
+  design system -- stays on Jev.
 - **Cost:** reported as `0` with a `cost_note` unless you set
   `PATTERN_JEV_USD_PER_MTOK_IN` / `PATTERN_JEV_USD_PER_MTOK_OUT`.
 - **Data boundary:** your `component_need` text and the evidence above go to
-  `api.typesafe.ai`. Your source files are read locally and never sent whole.
-  See [SECURITY.md](./SECURITY.md).
+  `api.typesafe.ai`; with a supplied checklist, the checklist items go too,
+  one Jev call per candidate file instead of one call for the whole pool.
+  Your source files are read locally and never sent whole. See
+  [SECURITY.md](./SECURITY.md).
 
 The threshold and the collapse/no-props choices came from
 `scripts/design-system-jev-eval.mjs` on 38 needs over two libraries, so they
 are a first guess -- re-run the eval on your own design system before
-trusting them.
+trusting them. The checklist-scoring path above is deterministic and
+covered by `scripts/verify-design-system-jev.mjs` (a stub Jev server, no
+real API calls); it has not yet been run through an accuracy eval against
+real Jev and real checklists the way the whole-file path has -- that would
+need `ANTHROPIC_API_KEY` (to extract checklists) and `TYPESAFE_API_KEY`
+(to score them), neither of which this environment has. If you have both,
+`scripts/design-system-jev-eval.mjs` is the template to extend with a
+checklist variant.
 
 ## Tool: `read_ledger`
 
