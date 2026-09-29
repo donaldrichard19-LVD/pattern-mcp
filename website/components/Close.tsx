@@ -23,13 +23,18 @@ export function Close() {
           </h2>
         </Reveal>
         <Reveal delay={100}>
-          <div style={{ display: "flex", gap: 14, flexWrap: "wrap", justifyContent: "center", alignItems: "center" }}>
-            <Button href="#install" size="lg">
-              Get started &rarr;
-            </Button>
-            <div style={{ width: 260 }}>
-              <CopyBlock label="install command" lines={INSTALL_LINES} />
+          <div style={{ display: "grid", gap: 14, justifyItems: "center" }}>
+            <div style={{ display: "flex", gap: 14, flexWrap: "wrap", justifyContent: "center", alignItems: "center" }}>
+              <Button href="#install" size="lg">
+                Get started &rarr;
+              </Button>
+              <div style={{ width: 260 }}>
+                <CopyBlock label="install command" lines={INSTALL_LINES} />
+              </div>
             </div>
+            <span style={{ fontSize: "var(--text-caption)", color: "var(--text-tertiary)" }}>
+              Free &amp; MIT &middot; Bring your own Anthropic key &middot; Most calls under $0.30
+            </span>
           </div>
         </Reveal>
       </div>

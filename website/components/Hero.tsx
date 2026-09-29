@@ -1,8 +1,25 @@
 "use client";
 
-import { useState, type CSSProperties } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import { BODY, H2, MONO, PANEL, SECTION } from "./tokens";
 import { Button, Chip, CopyBlock, Reveal } from "./ui";
+
+function useMonthlyInstalls(): number | null {
+  const [n, setN] = useState<number | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch("https://api.npmjs.org/downloads/point/last-month/pattern-mcp")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!cancelled && d && typeof d.downloads === "number" && d.downloads > 0) setN(d.downloads);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return n;
+}
 
 // `init --yes` (not the bare server command) so this is safe for a coding
 // agent to run non-interactively -- bare `npx pattern-mcp` starts a real
@@ -14,13 +31,17 @@ const INSTALL_LINES = ["npx pattern-mcp init --yes"];
 const VERDICT_LINES = [
   "{",
   '  "verdict": "custom_build",',
-  '  "confidence": "medium",',
+  '  "confidence": "high",',
   '  "reason": "scored",',
   '  "coverage": "2/8 (25%)",',
   '  "computed_at": "2026-08-25",',
   '  "recommendation": {',
   '    "source": null,',
-  '    "reference": null',
+  '    "reference": {',
+  '      "source": "Mobbin",',
+  '      "url_type": "deep_link",',
+  '      "flow_name": "Booking, price details"',
+  "    }",
   "  },",
   '  "ensemble": { "triggered": false }',
   "}",
@@ -53,7 +74,7 @@ function ReadableVerdict() {
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <span style={{ fontSize: "var(--text-body-md)", fontWeight: 500, color: "var(--text-primary)" }}>Build custom</span>
-        <Chip tone="warning">confidence: medium</Chip>
+        <Chip tone="accent">confidence: high</Chip>
       </div>
       <div style={{ display: "grid", gap: 4 }}>
         <div style={{ display: "flex", gap: 3 }} aria-hidden="true">
@@ -72,10 +93,13 @@ function ReadableVerdict() {
         <span style={{ fontSize: "var(--text-caption)", color: "var(--text-tertiary)" }}>{REQS_MET} of {REQS_TOTAL} requirements met</span>
       </div>
       <div style={{ display: "grid", gap: 6, ...PANEL, padding: 10 }}>
-        <span style={{ fontSize: "var(--text-caption)", color: "var(--text-tertiary)", ...MONO }}>Your design system is missing</span>
-        <span style={{ fontSize: "var(--text-body-sm)", color: "var(--text-primary)" }}>
-          A total row, currency formatting, a divider, fee tooltips, and discount lines. Closest match: Collapsible.
-        </span>
+        <span style={{ fontSize: "var(--text-caption)", color: "var(--text-tertiary)", ...MONO }}>Reference</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <span style={{ fontSize: "var(--text-body-sm)", color: "var(--text-primary)" }}>
+            Mobbin &middot; &ldquo;Booking, price details&rdquo;
+          </span>
+          <Chip tone="success">verified direct link</Chip>
+        </div>
       </div>
     </div>
   );
@@ -103,13 +127,14 @@ function VerdictCard() {
         )}
       </div>
       <div style={{ padding: "9px 16px", borderTop: "1px solid var(--border-subtle)", ...MONO, fontSize: 11, color: "var(--text-tertiary)" }}>
-        your design system &middot; 35s &middot; $0.05
+        3 libraries checked &middot; 11s &middot; $0.19
       </div>
     </div>
   );
 }
 
 export function Hero() {
+  const installs = useMonthlyInstalls();
   return (
     <section
       id="top"
@@ -139,25 +164,36 @@ export function Hero() {
               }}
             >
               Your agent is about to pick a UI component.{" "}
-              <span style={{ color: "var(--text-accent)" }}>Pattern makes sure it&apos;s the right one.</span>
+              <span style={{ color: "var(--text-accent)" }}>Pattern checks it first.</span>
             </h1>
           </Reveal>
           <Reveal delay={60}>
             <p style={{ ...BODY, maxWidth: 520, fontSize: "var(--text-body-lg)" }}>
-              Pattern checks UI decisions against your design system before your agent builds. It tells
-              your agent what to reuse, what to build, and why.
+              Pattern checks every UI decision against real components and real references, so your agent
+              builds the right thing the first time.
             </p>
           </Reveal>
           <Reveal delay={100}>
             <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+              <Button href="#install" size="lg">
+                Get started &rarr;
+              </Button>
               <Button href="#step-01" variant="secondary" size="lg">
                 See how it works &darr;
               </Button>
             </div>
           </Reveal>
           <Reveal delay={140}>
-            <div id="install">
+            <div id="install" style={{ display: "grid", gap: 10 }}>
               <CopyBlock label="install command" lines={INSTALL_LINES} />
+              <span style={{ fontSize: "var(--text-caption)", color: "var(--text-tertiary)" }}>
+                Free &amp; MIT &middot; Bring your own Anthropic key &middot; Most calls under $0.30
+              </span>
+              {installs !== null && (
+                <span style={{ fontSize: "var(--text-caption)", color: "var(--text-tertiary)" }}>
+                  {installs.toLocaleString()} npm installs in the last 30 days
+                </span>
+              )}
             </div>
           </Reveal>
         </div>
