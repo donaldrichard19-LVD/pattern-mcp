@@ -1,10 +1,10 @@
 "use client";
 
-import { H2, SECTION } from "./tokens";
+import { H2, MONO, SECTION } from "./tokens";
 import { Chip, Reveal } from "./ui";
 
-const WORKS_WITH = ["Claude Code", "Cursor", "Codex", "Figma"];
-const CHECKS_AGAINST = ["Figma files", "Component folders", "Storybook exports", "JSON manifests"];
+const WORKS_WITH = ["Claude Code", "Cursor", "Codex"];
+const CHECKS_AGAINST = ["shadcn/ui", "21st.dev", "ReUI", "Mobbin", "Figma Community", "your design system"];
 
 export function IntegrationsStrip() {
   return (
@@ -24,12 +24,13 @@ export function IntegrationsStrip() {
                   <Chip key={w}>{w}</Chip>
                 ))}
               </div>
+              <span style={{ ...MONO, fontSize: 11, color: "var(--text-tertiary)" }}>Required-check hook: Claude Code only</span>
             </div>
             <div style={{ display: "grid", gap: 8 }}>
-              <span style={{ fontSize: "var(--text-caption)", color: "var(--text-tertiary)" }}>Register your design system from</span>
+              <span style={{ fontSize: "var(--text-caption)", color: "var(--text-tertiary)" }}>Checks against</span>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 {CHECKS_AGAINST.map((c) => (
-                  <Chip key={c}>{c}</Chip>
+                  <Chip key={c} tone={c === "your design system" ? "accent" : "neutral"}>{c}</Chip>
                 ))}
               </div>
             </div>
