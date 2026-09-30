@@ -10,14 +10,14 @@ import { Mark, Reveal } from "./ui";
 const ROWS: { need: string; verdict: string; file: string; cost: string; stillIn: string }[] = [
   {
     need: "Price breakdown with fees and taxes",
-    verdict: "Build custom",
+    verdict: "Build new",
     file: "app/checkout/PriceBreakdown.tsx",
     cost: "$0.19",
     stillIn: "Yes",
   },
   {
     need: "Host earnings dashboard",
-    verdict: "Use existing",
+    verdict: "Reuse",
     file: "app/host/Earnings.tsx",
     cost: "$0.24",
     stillIn: "Yes",
@@ -62,8 +62,8 @@ export function ReceiptLedger() {
                   <span style={{ ...LABEL, color: "rgba(255,255,255,.55)" }}>03</span>
                 </div>
                 <h2 style={{ margin: 0, fontSize: "clamp(22px, 3.4vw, 28px)", fontWeight: 500, color: "#fff", lineHeight: 1.15 }}>
-                  Every decision leaves a receipt.{" "}
-                  <span style={{ color: "#6ca6ff" }}>What was checked, what it cost, and whether it&apos;s still in the code.</span>
+                  Keep a record of why,{" "}
+                  <span style={{ color: "#6ca6ff" }}>so the next person doesn&apos;t have to guess.</span>
                 </h2>
               </div>
               <button
@@ -102,7 +102,7 @@ export function ReceiptLedger() {
                   }}
                 >
                   <span>Component need</span>
-                  <span>Verdict</span>
+                  <span>Decision</span>
                   <span>File</span>
                   <span>Cost</span>
                   <span>Still in the code?</span>
@@ -134,7 +134,10 @@ export function ReceiptLedger() {
             </div>
 
             <p style={{ margin: 0, fontSize: "var(--text-caption)", color: "rgba(255,255,255,.5)" }}>
-              Each decision is pinned to a commit and can be exported as a shareable receipt on the PR.
+              Every decision is saved with what was checked, what was decided, what it cost, and whether the
+              component is still in your code today. Each one is tied to a specific version of your code and
+              can be attached to a pull request, so reviewers get the reasoning along with the code. A file
+              shows as &ldquo;not recorded&rdquo; when the agent answered before any file was written.
             </p>
           </div>
         </Reveal>

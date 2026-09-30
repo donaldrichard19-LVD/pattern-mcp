@@ -8,18 +8,18 @@ import { Reveal } from "./ui";
 const ITEMS: { glyph: string; h: string; p: string }[] = [
   {
     glyph: "?",
-    h: "It says when it's unsure",
-    p: "Close calls are re-checked. If the checks disagree, you get low confidence, not a confident wrong answer.",
+    h: "It tells you when it isn't sure",
+    p: "Close calls get a second look. If the checks disagree, you see low confidence instead of a confident wrong answer.",
   },
   {
     glyph: "↗",
-    h: "Links are verified",
-    p: "A direct link means Pattern opened the actual screen. Otherwise it tells you it's only a browse page.",
+    h: "Its links are real",
+    p: "A direct link means Pattern opened that exact screen. Otherwise it tells you the link only goes to a browse page.",
   },
   {
     glyph: "$",
-    h: "You see the cost of every call",
-    p: "Time, tokens and dollars are shown per decision, not buried in a usage budget.",
+    h: "You see what each call costs",
+    p: "Time, tokens, and dollars appear next to every decision instead of sitting in a monthly usage total.",
   },
 ];
 
@@ -54,7 +54,7 @@ export function TrustGrid() {
           <div style={{ display: "grid", gap: 10 }}>
             <span style={LABEL}>Why you can trust it</span>
             <h2 style={{ ...H2, fontSize: "clamp(24px, 3.6vw, 30px)", maxWidth: 620 }}>
-              Built to be trusted. <span style={{ color: "var(--text-accent)" }}>It shows its work.</span>
+              You should be able to check Pattern&apos;s work, <span style={{ color: "var(--text-accent)" }}>so it shows it.</span>
             </h2>
           </div>
         </Reveal>
@@ -71,9 +71,9 @@ export function TrustGrid() {
         </div>
         <Reveal delay={220}>
           <p style={{ ...BODY, fontSize: "var(--text-body-md)", margin: 0 }}>
-            Works with your own design system, in code or straight from Figma.{" "}
+            Pattern works with your own design system, whether it lives in code or in Figma.{" "}
             <a href={DOCS} target="_blank" rel="noreferrer" style={{ fontWeight: 500 }}>
-              Learn how &rarr;
+              See how to connect yours &rarr;
             </a>
           </p>
         </Reveal>

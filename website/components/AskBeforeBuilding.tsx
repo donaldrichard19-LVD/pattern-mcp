@@ -37,8 +37,8 @@ function ChecklistPanel() {
           borderBottom: "1px solid var(--border-subtle)",
         }}
       >
-        <span style={{ ...MONO, fontSize: 11, color: "var(--text-tertiary)" }}>coverage scoring</span>
-        <Chip tone={done ? "warning" : "accent"}>{done ? "custom_build · high" : "scoring"}</Chip>
+        <span style={{ ...MONO, fontSize: 11, color: "var(--text-tertiary)" }}>checking against requirements</span>
+        <Chip tone={done ? "warning" : "accent"}>{done ? "build new · high" : "scoring"}</Chip>
       </div>
       <div style={{ padding: 14, display: "grid", gap: 10 }}>
         <p style={{ ...BODY, fontSize: "var(--text-body-sm)", margin: 0 }}>
@@ -81,7 +81,7 @@ function ChecklistPanel() {
           ))}
         </div>
         <span style={{ ...MONO, fontSize: 11, color: "var(--text-tertiary)" }}>
-          {MET_COUNT} of {CHECKLIST.length} met &middot; build custom from Mobbin reference
+          {MET_COUNT} of {CHECKLIST.length} met &middot; build new recommended
         </span>
       </div>
     </div>
@@ -99,19 +99,24 @@ export function AskBeforeBuilding() {
           <div style={{ display: "grid", gap: 14 }}>
             <span style={LABEL}>01</span>
             <h2 style={{ ...H2, fontSize: "clamp(24px, 3.6vw, 30px)" }}>
-              Ask before building. <span style={{ color: "var(--text-accent)" }}>Get a verdict, not a guess.</span>
+              Ask first, <span style={{ color: "var(--text-accent)" }}>so the agent isn&apos;t guessing.</span>
             </h2>
             <p style={{ ...BODY, fontSize: "var(--text-body-md)" }}>
-              Pattern turns a vague need into a checklist, checks real components against it, and returns one
-              answer: use this, or build from this reference.
+              Pattern breaks a vague request into a checklist of what the component needs to do, then compares
+              that list to what your design system has. The agent gets a plain answer: use this one, or build
+              these specific missing pieces.
             </p>
             <p style={{ ...BODY, fontSize: "var(--text-body-md)" }}>
-              Buttons, inputs and other basics are answered locally, for free.
+              Common basics like buttons and inputs are answered on your machine at no cost.
             </p>
           </div>
         </Reveal>
         <Reveal delay={80}>
           <ChecklistPanel />
+          <p style={{ ...BODY, fontSize: "var(--text-caption)", color: "var(--text-tertiary)", marginTop: 10 }}>
+            The agent asked for a price breakdown. Your design system covered 2 of the 8 things it needs, so
+            Pattern recommended building a new one and listed what was missing.
+          </p>
         </Reveal>
       </div>
     </section>

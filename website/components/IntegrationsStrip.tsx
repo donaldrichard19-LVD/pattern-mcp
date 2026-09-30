@@ -3,8 +3,8 @@
 import { H2, MONO, SECTION } from "./tokens";
 import { Chip, Reveal } from "./ui";
 
-const WORKS_WITH = ["Claude Code", "Cursor", "Codex"];
-const CHECKS_AGAINST = ["shadcn/ui", "21st.dev", "ReUI", "Mobbin", "Figma Community", "your design system"];
+const WORKS_WITH = ["Claude Code", "Cursor", "Codex", "Figma"];
+const CONNECT_FROM = ["Figma files", "Component folders", "Storybook exports", "JSON manifests"];
 
 export function IntegrationsStrip() {
   return (
@@ -12,8 +12,15 @@ export function IntegrationsStrip() {
       <div className="pt-sec" style={{ ...SECTION, display: "grid", gap: 28 }}>
         <Reveal>
           <h2 style={{ ...H2, fontSize: "clamp(22px, 3.2vw, 26px)", maxWidth: 640 }}>
-            Connect once. <span style={{ color: "var(--text-accent)" }}>Works where you build.</span>
+            Pattern is a check between the need and the code.{" "}
+            <span style={{ color: "var(--text-accent)" }}>It works where you build.</span>
           </h2>
+        </Reveal>
+        <Reveal delay={30}>
+          <p style={{ margin: 0, maxWidth: 640, fontSize: "var(--text-body-md)", lineHeight: "var(--leading-body)", color: "var(--text-secondary)" }}>
+            Before your agent builds a component, Pattern looks at what your design system already offers and
+            tells the agent whether to reuse something or build what&apos;s missing, along with the reason.
+          </p>
         </Reveal>
         <Reveal delay={60}>
           <div style={{ display: "grid", gap: 20 }}>
@@ -24,13 +31,13 @@ export function IntegrationsStrip() {
                   <Chip key={w}>{w}</Chip>
                 ))}
               </div>
-              <span style={{ ...MONO, fontSize: 11, color: "var(--text-tertiary)" }}>Required-check hook: Claude Code only</span>
+              <span style={{ ...MONO, fontSize: 11, color: "var(--text-tertiary)" }}>Required check on your machine: Claude Code only</span>
             </div>
             <div style={{ display: "grid", gap: 8 }}>
-              <span style={{ fontSize: "var(--text-caption)", color: "var(--text-tertiary)" }}>Checks against</span>
+              <span style={{ fontSize: "var(--text-caption)", color: "var(--text-tertiary)" }}>Connect from</span>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                {CHECKS_AGAINST.map((c) => (
-                  <Chip key={c} tone={c === "your design system" ? "accent" : "neutral"}>{c}</Chip>
+                {CONNECT_FROM.map((c) => (
+                  <Chip key={c}>{c}</Chip>
                 ))}
               </div>
             </div>

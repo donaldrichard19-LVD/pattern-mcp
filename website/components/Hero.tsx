@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type CSSProperties } from "react";
-import { BODY, H2, MONO, PANEL, SECTION } from "./tokens";
+import { BODY, LABEL, MONO, PANEL, SECTION } from "./tokens";
 import { Button, Chip, CopyBlock, Reveal } from "./ui";
 
 function useMonthlyInstalls(): number | null {
@@ -73,7 +73,7 @@ function ReadableVerdict() {
         <span style={{ fontSize: "var(--text-caption)", color: "var(--text-tertiary)" }}>Airbnb-style rental &middot; React + Tailwind</span>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        <span style={{ fontSize: "var(--text-body-md)", fontWeight: 500, color: "var(--text-primary)" }}>Build custom</span>
+        <span style={{ fontSize: "var(--text-body-md)", fontWeight: 500, color: "var(--text-primary)" }}>Build new</span>
         <Chip tone="accent">confidence: high</Chip>
       </div>
       <div style={{ display: "grid", gap: 4 }}>
@@ -151,6 +151,9 @@ export function Hero() {
       >
         <div style={{ display: "grid", gap: 22 }}>
           <Reveal>
+            <span style={LABEL}>For teams building UI with AI agents</span>
+          </Reveal>
+          <Reveal>
             <h1
               style={{
                 margin: 0,
@@ -163,14 +166,16 @@ export function Hero() {
                 textWrap: "pretty",
               }}
             >
-              Your agent is about to pick a UI component.{" "}
-              <span style={{ color: "var(--text-accent)" }}>Pattern checks it first.</span>
+              Your agent keeps building{" "}
+              <span style={{ color: "var(--text-accent)" }}>components you already have.</span>
             </h1>
           </Reveal>
           <Reveal delay={60}>
             <p style={{ ...BODY, maxWidth: 520, fontSize: "var(--text-body-lg)" }}>
-              Pattern checks every UI decision against real components and real references, so your agent
-              builds the right thing the first time.
+              Ask for a price breakdown and it will usually write one from scratch, even when your design
+              system has something close. You find out in code review, or months later when there are three
+              versions of the same thing. Pattern checks before the agent builds, so the answer is already on
+              the table when it starts writing code.
             </p>
           </Reveal>
           <Reveal delay={100}>

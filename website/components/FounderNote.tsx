@@ -33,9 +33,9 @@ export function FounderNote() {
         </Reveal>
         <Reveal delay={60}>
           <blockquote style={{ margin: 0, ...BODY, fontSize: "var(--text-body-lg)", color: "var(--text-primary)", fontStyle: "normal" }}>
-            &ldquo;I kept watching agents hand-build a price table when a good one already existed, or reach for a
-            generic card when the flow deserved real thought. Pattern is the check I wanted between the need and
-            the code: specific, honest about what it doesn&apos;t know, and cheap enough to run every time.&rdquo;
+            &ldquo;I kept watching agents hand-build a price table when a good one already existed, and reach for a
+            plain card when the flow deserved real thought. I wanted a check between the need and the code that
+            was specific, honest about what it didn&apos;t know, and cheap enough to run every time.&rdquo;
           </blockquote>
         </Reveal>
         <Reveal delay={100}>

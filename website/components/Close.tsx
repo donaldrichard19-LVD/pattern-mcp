@@ -18,8 +18,8 @@ export function Close() {
         </Reveal>
         <Reveal delay={60}>
           <h2 style={{ ...H2, fontSize: "clamp(26px, 4.4vw, 36px)", maxWidth: 640 }}>
-            Agents will keep picking components.{" "}
-            <span style={{ color: "var(--text-accent)" }}>Make sure they pick the right one.</span>
+            Your agent is going to keep choosing components.{" "}
+            <span style={{ color: "var(--text-accent)" }}>Let&apos;s make sure it chooses well.</span>
           </h2>
         </Reveal>
         <Reveal delay={100}>

@@ -3,6 +3,7 @@ import { Close } from "@/components/Close";
 import { FounderNote } from "@/components/FounderNote";
 import { Hero } from "@/components/Hero";
 import { IntegrationsStrip } from "@/components/IntegrationsStrip";
+import { Problem } from "@/components/Problem";
 import { MakeItRequired } from "@/components/MakeItRequired";
 import { ReceiptLedger } from "@/components/ReceiptLedger";
 import { TopBar } from "@/components/TopBar";
@@ -13,6 +14,7 @@ export default function Home() {
     <div style={{ background: "#fff" }}>
       <TopBar />
       <Hero />
+      <Problem />
       <IntegrationsStrip />
       <AskBeforeBuilding />
       <MakeItRequired />

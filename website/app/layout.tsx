@@ -23,9 +23,9 @@ const nunito = Nunito({
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://usepattern.sh"),
-  title: "Pattern: catch the wrong UI decision before your agent builds it",
+  title: "Pattern: stop your AI agent from rebuilding components you already have",
   description:
-    "Pattern checks a UI component need against real, current evidence before your agent commits to it. It finds a component that fits or shows you when nothing does, so you find out before it's built, not after.",
+    "Your agent doesn't know what's in your design system, so it often builds something new when a good one exists. Pattern checks first and tells the agent what to reuse and what's worth building.",
   twitter: {
     card: "summary_large_image",
   },
