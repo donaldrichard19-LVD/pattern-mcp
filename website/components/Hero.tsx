@@ -20,11 +20,7 @@ const VERDICT_LINES = [
   '  "computed_at": "2026-08-25",',
   '  "recommendation": {',
   '    "source": null,',
-  '    "reference": {',
-  '      "source": "Mobbin",',
-  '      "url_type": "deep_link",',
-  '      "flow_name": "Booking, price details"',
-  "    }",
+  '    "reference": null',
   "  },",
   '  "ensemble": { "triggered": false }',
   "}",
@@ -76,13 +72,10 @@ function ReadableVerdict() {
         <span style={{ fontSize: "var(--text-caption)", color: "var(--text-tertiary)" }}>{REQS_MET} of {REQS_TOTAL} requirements met</span>
       </div>
       <div style={{ display: "grid", gap: 6, ...PANEL, padding: 10 }}>
-        <span style={{ fontSize: "var(--text-caption)", color: "var(--text-tertiary)", ...MONO }}>Reference</span>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <span style={{ fontSize: "var(--text-body-sm)", color: "var(--text-primary)" }}>
-            Mobbin &middot; &ldquo;Booking, price details&rdquo;
-          </span>
-          <Chip tone="success">verified direct link</Chip>
-        </div>
+        <span style={{ fontSize: "var(--text-caption)", color: "var(--text-tertiary)", ...MONO }}>Missing from your design system</span>
+        <span style={{ fontSize: "var(--text-body-sm)", color: "var(--text-primary)" }}>
+          Collapsible fee explanation, currency formatting, total row, discount line, fee tooltip, mobile layout
+        </span>
       </div>
     </div>
   );
@@ -110,7 +103,7 @@ function VerdictCard() {
         )}
       </div>
       <div style={{ padding: "9px 16px", borderTop: "1px solid var(--border-subtle)", ...MONO, fontSize: 11, color: "var(--text-tertiary)" }}>
-        3 libraries checked &middot; 11s &middot; $0.19
+        Checked against your design system &middot; 11s &middot; $0.19
       </div>
     </div>
   );
