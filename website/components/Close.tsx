@@ -32,9 +32,6 @@ export function Close() {
                 <CopyBlock label="install command" lines={INSTALL_LINES} />
               </div>
             </div>
-            <span style={{ fontSize: "var(--text-caption)", color: "var(--text-tertiary)" }}>
-              Free &amp; MIT &middot; Bring your own Anthropic key &middot; Most calls under $0.30
-            </span>
           </div>
         </Reveal>
       </div>

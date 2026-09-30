@@ -1,25 +1,8 @@
 "use client";
 
-import { useEffect, useState, type CSSProperties } from "react";
+import { useState, type CSSProperties } from "react";
 import { BODY, LABEL, MONO, PANEL, SECTION } from "./tokens";
 import { Button, Chip, CopyBlock, Reveal } from "./ui";
-
-function useMonthlyInstalls(): number | null {
-  const [n, setN] = useState<number | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    fetch("https://api.npmjs.org/downloads/point/last-month/pattern-mcp")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (!cancelled && d && typeof d.downloads === "number" && d.downloads > 0) setN(d.downloads);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-  return n;
-}
 
 // `init --yes` (not the bare server command) so this is safe for a coding
 // agent to run non-interactively -- bare `npx pattern-mcp` starts a real
@@ -134,7 +117,6 @@ function VerdictCard() {
 }
 
 export function Hero() {
-  const installs = useMonthlyInstalls();
   return (
     <section
       id="top"
@@ -188,14 +170,6 @@ export function Hero() {
           <Reveal delay={140}>
             <div id="install" style={{ display: "grid", gap: 10 }}>
               <CopyBlock label="install command" lines={INSTALL_LINES} />
-              <span style={{ fontSize: "var(--text-caption)", color: "var(--text-tertiary)" }}>
-                Free &amp; MIT &middot; Bring your own Anthropic key &middot; Most calls under $0.30
-              </span>
-              {installs !== null && (
-                <span style={{ fontSize: "var(--text-caption)", color: "var(--text-tertiary)" }}>
-                  {installs.toLocaleString()} npm installs in the last 30 days
-                </span>
-              )}
             </div>
           </Reveal>
         </div>
