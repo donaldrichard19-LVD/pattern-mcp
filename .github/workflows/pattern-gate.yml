@@ -1,0 +1,42 @@
+name: Pattern gate
+
+# Required-check template for the enforcement boundary (see BACKLOG.md's
+# "Enforcement boundary: hook + CI gate" entry). Copy this into your own
+# repo's .github/workflows/ and mark the "pattern-gate" job required in
+# branch protection. Opt-in -- pattern-mcp never installs this for you.
+#
+# Deliberately does NOT need a GITHUB_TOKEN or any secret: it only reads
+# the receipt files already committed in this PR's diff
+# (.pattern/receipts/*.json), which were written locally by the
+# PreToolUse hook (see ../hooks/check-gate-hook.mjs) when the gate
+# passed. It never touches ~/.pattern/ledger.jsonl, which isn't reachable
+# from a CI runner at all -- see gate-receipt.ts for why the receipt file
+# is the artifact of record here, not a posted PR comment.
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  pattern-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+      - name: Compute added files
+        id: diff
+        run: |
+          ADDED=$(git diff --name-only --diff-filter=A "origin/${{ github.base_ref }}...HEAD")
+          echo "files<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$ADDED" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+      - name: Run pattern-check-gate verify
+        if: steps.diff.outputs.files != ''
+        run: npx --yes pattern-check-gate verify --files ${{ steps.diff.outputs.files }} --project-root "$PWD"
