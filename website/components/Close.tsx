@@ -26,7 +26,7 @@ export function Close() {
           <div style={{ display: "grid", gap: 14, justifyItems: "center" }}>
             <div style={{ display: "flex", gap: 14, flexWrap: "wrap", justifyContent: "center", alignItems: "center" }}>
               <Button href="#install" size="lg">
-                Get started &rarr;
+                Get started
               </Button>
               <div style={{ width: 260 }}>
                 <CopyBlock label="install command" lines={INSTALL_LINES} />
