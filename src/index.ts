@@ -1501,9 +1501,10 @@ async function runSinglePass(input: {
   // Phase 4b: for the few candidates that look most relevant, append the raw
   // Figma facts captured at registration (size, padding, gap, nested
   // components...). Every candidate is still listed above; this only adds
-  // detail for the top-k. PATTERN_FIGMA_EVIDENCE_TOPK=0 (default) is off.
+  // detail for the top-k. Default 3; PATTERN_FIGMA_EVIDENCE_TOPK=0 turns it off.
   let evidenceBlock = "";
-  const evidenceTopK = Number.parseInt(process.env.PATTERN_FIGMA_EVIDENCE_TOPK ?? "0", 10) || 0;
+  const topKRaw = Number.parseInt(process.env.PATTERN_FIGMA_EVIDENCE_TOPK ?? "3", 10);
+  const evidenceTopK = Number.isFinite(topKRaw) && topKRaw >= 0 ? topKRaw : 3;
   let evidenceNames: string[] = [];
   if (evidenceTopK > 0 && designSystem.source_kind === "figma") {
     const stored = readFigmaEvidence(designSystem.project_id);
