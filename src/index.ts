@@ -709,6 +709,19 @@ async function streamAnthropicMessage(body: Record<string, unknown>): Promise<St
   };
 }
 
+// Phase 3b experiment knobs for the design-system scoring pass. Unset =
+// API defaults (adaptive thinking, effort "high" on claude-sonnet-5), i.e.
+// no behavior change. PATTERN_SCORE_EFFORT=low|medium|high|xhigh|max sets
+// output_config.effort; PATTERN_SCORE_THINKING=disabled turns thinking off
+// (accepted on claude-sonnet-5; 400s on newer models that can't disable it).
+function scoringThinkingParams(): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  const effort = process.env.PATTERN_SCORE_EFFORT;
+  if (effort && ["low", "medium", "high", "xhigh", "max"].includes(effort)) out.output_config = { effort };
+  if (process.env.PATTERN_SCORE_THINKING === "disabled") out.thinking = { type: "disabled" };
+  return out;
+}
+
 const TOOL_NAME = "recommend_component";
 const RECORD_DECISION_TOOL_NAME = "record_component_decision";
 const EXTRACT_REQUIREMENTS_TOOL_NAME = "extract_requirements";
@@ -1499,6 +1512,7 @@ existing_stack: ${input.existing_stack ?? "(not specified)"}${checklistBlock}${p
     // on, so a higher ceiling adds no timeout risk and costs nothing unless
     // the model actually uses it.
     max_tokens: 16384,
+    ...scoringThinkingParams(),
     // System prompt is identical on every call, so mark it cacheable --
     // cache reads cost roughly a tenth of fresh input tokens.
     system: [
