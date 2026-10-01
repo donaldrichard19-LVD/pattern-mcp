@@ -851,6 +851,11 @@ const EXTRACT_REQUIREMENTS_INPUT_SCHEMA = {
       type: "string",
       description: "Same field as recommend_component's input -- the product type/domain. Extraction is grounded in this, not the component name alone.",
     },
+    project_id: {
+      type: "string",
+      description:
+        "Optional. The project_id a Figma design system was registered under. When it has stored Figma evidence, the most relevant components' exact sizes, spacing and structure are shown to the extractor so the checklist uses real values, and each item is tagged figma-evidenced / inferred / general-practice. Same project_id you pass to recommend_component.",
+    },
   },
   required: ["component_need", "domain"],
 } as const;
@@ -1282,10 +1287,16 @@ function buildExtractionSystemPrompt(): string {
 
 ${EXTRACTION_INSTRUCTIONS}
 
+If the user message includes a "Detailed Figma evidence" section, those are exact values read from this project's own design file for the most relevant components. Use them: when a requirement rests on a stated fact (a size, spacing, a nested component, literal text), write it with that exact value. Tag every item with its basis:
+- "figma-evidenced": the item rests on a fact stated in that evidence section. Put the fact in "evidence" (quote it).
+- "inferred": derived from the component need and domain, not stated in any evidence.
+- "general-practice": expected behavior a design file cannot show (accessibility roles, keyboard handling, focus management, error states).
+Never mark an item "figma-evidenced" without a quoted fact, and never invent values the evidence does not give. When there is no evidence section, use only "inferred" or "general-practice".
+
 Respond with ONLY a single JSON object, no prose before or after, no markdown code fences, matching this exact shape:
 
 {
-  "checklist": ["string", "string", "..."]
+  "checklist_items": [ { "item": "string", "basis": "figma-evidenced" | "inferred" | "general-practice", "evidence": "string, figma-evidenced only" } ]
 }`;
 }
 
@@ -1502,29 +1513,8 @@ async function runSinglePass(input: {
   // Figma facts captured at registration (size, padding, gap, nested
   // components...). Every candidate is still listed above; this only adds
   // detail for the top-k. Default 3; PATTERN_FIGMA_EVIDENCE_TOPK=0 turns it off.
-  let evidenceBlock = "";
-  const topKRaw = Number.parseInt(process.env.PATTERN_FIGMA_EVIDENCE_TOPK ?? "3", 10);
-  const evidenceTopK = Number.isFinite(topKRaw) && topKRaw >= 0 ? topKRaw : 3;
-  let evidenceNames: string[] = [];
-  if (evidenceTopK > 0 && designSystem.source_kind === "figma") {
-    const stored = readFigmaEvidence(designSystem.project_id);
-    if (stored) {
-      const idx = rankFigmaCandidates(designSystem.candidates, input.component_need, input.checklist, evidenceTopK);
-      const lines: string[] = [];
-      for (const i of idx) {
-        const c = designSystem.candidates[i];
-        const ev = c.figma ? stored.evidence[c.figma.node_id] : undefined;
-        if (ev) {
-          lines.push(`- ${c.name}: ${formatFigmaEvidence(ev)}`);
-          evidenceNames.push(c.name);
-        }
-      }
-      if (lines.length > 0) {
-        evidenceBlock = `\n\nDetailed Figma evidence for the ${lines.length} most relevant candidates (exact values read from the design file; use them to judge size, spacing and composition requirements instead of assuming they are unknown):\n${lines.join("\n")}`;
-      }
-    }
-    console.error(JSON.stringify({ diagnostic: "figma_evidence_topk", k: evidenceTopK, stored: !!stored, candidates: evidenceNames }));
-  }
+  const evidence = buildFigmaEvidenceBlock(designSystem, input.component_need, input.checklist);
+  const evidenceBlock = evidence.block;
 
   const userMessage = `component_need: ${input.component_need}
 domain: ${input.domain}
@@ -1691,8 +1681,58 @@ existing_stack: ${input.existing_stack ?? "(not specified)"}${checklistBlock}${p
   return { ok: true, result: parsed };
 }
 
+// Shared by the scoring pass and extract_requirements (Phase 4b/4c): the
+// stored Figma facts for the top-k lexically best-matching candidates of a
+// Figma-sourced registration, as a prompt section. Empty block when the
+// registration isn't Figma, has no stored evidence, or top-k is 0.
+function figmaEvidenceTopK(): number {
+  const raw = Number.parseInt(process.env.PATTERN_FIGMA_EVIDENCE_TOPK ?? "3", 10);
+  return Number.isFinite(raw) && raw >= 0 ? raw : 3;
+}
+
+function buildFigmaEvidenceBlock(
+  designSystem: DesignSystemRegistration,
+  need: string,
+  checklist: string[] | undefined
+): { block: string; names: string[] } {
+  const k = figmaEvidenceTopK();
+  const names: string[] = [];
+  if (k <= 0 || designSystem.source_kind !== "figma") return { block: "", names };
+  const stored = readFigmaEvidence(designSystem.project_id);
+  const lines: string[] = [];
+  if (stored) {
+    for (const i of rankFigmaCandidates(designSystem.candidates, need, checklist, k)) {
+      const c = designSystem.candidates[i];
+      const ev = c.figma ? stored.evidence[c.figma.node_id] : undefined;
+      if (ev) {
+        lines.push(`- ${c.name}: ${formatFigmaEvidence(ev)}`);
+        names.push(c.name);
+      }
+    }
+  }
+  console.error(JSON.stringify({ diagnostic: "figma_evidence_topk", k, stored: !!stored, candidates: names }));
+  const block =
+    lines.length > 0
+      ? `\n\nDetailed Figma evidence for the ${lines.length} most relevant candidates (exact values read from the design file; use them to judge size, spacing and composition requirements instead of assuming they are unknown):\n${lines.join("\n")}`
+      : "";
+  return { block, names };
+}
+
+export type ChecklistBasis = "figma-evidenced" | "inferred" | "general-practice";
+
+export interface ChecklistItem {
+  item: string;
+  basis: ChecklistBasis;
+  /** figma-evidenced only: the stated fact from the design file the item rests on. */
+  evidence?: string;
+}
+
 export interface ExtractionResult {
   checklist: string[];
+  /** Same items as `checklist`, each tagged with what it rests on. */
+  checklist_items: ChecklistItem[];
+  /** Set when stored Figma evidence for this project was shown to the extractor. */
+  grounded_in: { project_id: string; candidates: string[] } | null;
   extraction_confidence: "high" | "medium" | "low";
   _meta: NonNullable<JudgmentResult["_meta"]>;
 }
@@ -1706,7 +1746,7 @@ type ExtractionOutcome = { ok: true; result: ExtractionResult } | { ok: false; r
 // applies the same local skip-list short-circuit as recommend_component,
 // for the same reason (trivial primitives shouldn't cost an API call here
 // either).
-async function runExtraction(input: { component_need: string; domain: string }): Promise<ExtractionOutcome> {
+async function runExtraction(input: { component_need: string; domain: string; project_id?: string }): Promise<ExtractionOutcome> {
   const startMs = Date.now();
 
   if (isSkipListMatch(input.component_need)) {
@@ -1715,6 +1755,8 @@ async function runExtraction(input: { component_need: string; domain: string }):
       ok: true,
       result: {
         checklist: [],
+        checklist_items: [],
+        grounded_in: null,
         extraction_confidence: "high",
         _meta: {
           total_ms: elapsedMs,
@@ -1730,11 +1772,16 @@ async function runExtraction(input: { component_need: string; domain: string }):
     throw new Error(MISSING_API_KEY_MESSAGE);
   }
 
-  const userMessage = `component_need: ${input.component_need}\ndomain: ${input.domain}`;
+  // 4c: ground the checklist in what the project's Figma file actually says.
+  const registration = input.project_id ? getRegisteredDesignSystem(input.project_id) : null;
+  const evidence = registration ? buildFigmaEvidenceBlock(registration, input.component_need, undefined) : { block: "", names: [] as string[] };
+  const grounded = evidence.names.length > 0;
+  const userMessage = `component_need: ${input.component_need}\ndomain: ${input.domain}${evidence.block}`;
 
   const data = await streamAnthropicMessage({
     model: MODEL,
-    max_tokens: 1024,
+    // Ceiling only; thinking counts against it (see the scoring pass).
+    max_tokens: 4096,
     system: [
       {
         type: "text",
@@ -1764,7 +1811,7 @@ async function runExtraction(input: { component_need: string; domain: string }):
   }
 
   const extracted = extractJson(finalText);
-  let parsed: { checklist?: unknown };
+  let parsed: { checklist?: unknown; checklist_items?: unknown };
   try {
     parsed = JSON.parse(extracted);
   } catch {
@@ -1772,12 +1819,30 @@ async function runExtraction(input: { component_need: string; domain: string }):
     return { ok: false, raw: extracted };
   }
 
-  const checklist = Array.isArray(parsed.checklist) ? parsed.checklist.filter((item): item is string => typeof item === "string") : [];
+  // Accept the tagged shape, or a plain string list (older prompt/model drift).
+  const BASES = new Set<ChecklistBasis>(["figma-evidenced", "inferred", "general-practice"]);
+  const items: ChecklistItem[] = [];
+  if (Array.isArray(parsed.checklist_items)) {
+    for (const raw of parsed.checklist_items as Array<Record<string, unknown>>) {
+      if (!raw || typeof raw.item !== "string" || !raw.item.trim()) continue;
+      let basis = BASES.has(raw.basis as ChecklistBasis) ? (raw.basis as ChecklistBasis) : "inferred";
+      const evidenceText = typeof raw.evidence === "string" ? raw.evidence.trim() : "";
+      // Server-side, not trusted from the model: "figma-evidenced" is only
+      // credible when Figma evidence was actually in the prompt and the item
+      // cites the fact it rests on.
+      if (basis === "figma-evidenced" && (!grounded || !evidenceText)) basis = "inferred";
+      items.push({ item: raw.item.trim(), basis, ...(basis === "figma-evidenced" ? { evidence: evidenceText } : {}) });
+    }
+  } else if (Array.isArray(parsed.checklist)) {
+    for (const t of parsed.checklist) if (typeof t === "string" && t.trim()) items.push({ item: t.trim(), basis: "inferred" });
+  }
 
   return {
     ok: true,
     result: {
-      checklist,
+      checklist: items.map((i) => i.item),
+      checklist_items: items,
+      grounded_in: grounded && input.project_id ? { project_id: input.project_id, candidates: evidence.names } : null,
       extraction_confidence: estimateExtractionConfidence(input.component_need),
       _meta: buildMeta(data.timings, data.usage),
     },
@@ -4861,7 +4926,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   }
 
   if (request.params.name === EXTRACT_REQUIREMENTS_TOOL_NAME) {
-    const args = request.params.arguments as { component_need: string; domain: string };
+    const args = request.params.arguments as { component_need: string; domain: string; project_id?: string };
 
     // Same session-cap protection as recommend_component, extended to
     // this tool since it's a real API call too (skip-list hits excluded,
