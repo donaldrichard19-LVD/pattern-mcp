@@ -807,7 +807,8 @@ const INPUT_SCHEMA = {
         "the file existing. When provided, it's stored on the resulting " +
         "ledger entry and check_ledger_liveness can later confirm the file " +
         "still exists and still references chosen_candidate. Omit if unknown; " +
-        "it cannot currently be attached to an entry after the fact.",
+        "it can still be attached later, without re-scoring, by passing " +
+        "file_path to record_component_decision.",
     },
   },
   required: ["component_need", "domain", "framework"],
@@ -867,6 +868,22 @@ const RECORD_DECISION_INPUT_SCHEMA = {
         "This is self-reported by the calling agent -- Pattern has no way to measure a counterfactual, " +
         "so it never computes this itself (unlike _meta, which is Pattern's own real cost/latency). " +
         "Omit if you don't have a meaningful estimate; never guess a number just to fill the field.",
+    },
+    file_path: {
+      type: "string",
+      description:
+        "Optional. Path (relative to the project root, staying inside it) of the file you " +
+        "implemented this decision in. When given, it is attached to the most recent " +
+        "recommend_component ledger entry for this project_id and component_need (or the " +
+        "entry with the given feature_id) WITHOUT re-scoring, so the enforcement gate " +
+        "(pattern-check-gate) can match it. The gate reads the ledger, not this decision " +
+        "log: if no ledger entry exists yet, the response says so and nothing is attached.",
+    },
+    feature_id: {
+      type: "string",
+      description:
+        "Optional, only used with file_path. The feature_id of the recommend_component call " +
+        "to attach file_path to, when several ledger entries share the same component_need.",
     },
   },
   required: ["project_id", "component_need", "action", "source"],
@@ -2610,6 +2627,90 @@ function withLatestLiveness(entry: LedgerEntry): LedgerEntry {
   return { ...entry, live_status: latest.live_status, last_verified_live: latest.timestamp };
 }
 
+// Overlay store for file_path attached to an existing ledger entry after
+// the fact (record_component_decision's file_path). Same append-only,
+// latest-wins-at-read-time convention as the liveness overlay above: the
+// ledger line itself ("file_path ... set once at write time") is never
+// mutated, a later attach is a new observation merged in by
+// readLedgerEntries, which is also the only thing the enforcement gate reads.
+const LEDGER_FILE_PATHS_PATH =
+  process.env.PATTERN_LEDGER_FILE_PATHS_PATH ?? join(homedir(), ".pattern", "ledger_file_paths.jsonl");
+
+export interface LedgerFilePathRecord {
+  id: string;
+  timestamp: string;
+  ledger_entry_id: string;
+  project_id: string;
+  file_path: string;
+}
+
+function appendLedgerFilePathRecord(record: LedgerFilePathRecord): void {
+  mkdirSync(dirname(LEDGER_FILE_PATHS_PATH), { recursive: true });
+  appendFileSync(LEDGER_FILE_PATHS_PATH, JSON.stringify(record) + "\n", "utf8");
+}
+
+// Read once per readLedgerEntries call (not per entry). Later lines win.
+function readLedgerFilePathOverlay(): Map<string, string> {
+  const overlay = new Map<string, string>();
+  let raw: string;
+  try {
+    raw = readFileSync(LEDGER_FILE_PATHS_PATH, "utf8");
+  } catch {
+    return overlay;
+  }
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const parsed = JSON.parse(line);
+      if (parsed && typeof parsed.ledger_entry_id === "string" && typeof parsed.file_path === "string") {
+        overlay.set(parsed.ledger_entry_id, parsed.file_path);
+      }
+    } catch {
+      // skip malformed line
+    }
+  }
+  return overlay;
+}
+
+export function normalizeRelPath(p: string): string {
+  return p.trim().replace(/\\/g, "/").replace(/^\.\//, "");
+}
+
+// Attaches file_path to the latest matching ledger entry without re-scoring.
+// Never throws on "no match": the caller reports it, because the decision
+// itself was still recorded and a missing ledger entry is guidance, not failure.
+export function attachFilePathToLedger(input: {
+  project_id: string;
+  component_need: string;
+  file_path: string;
+  feature_id?: string;
+}): { attached: true; ledger_entry_id: string; feature_id: string; file_path: string } | { attached: false; warning: string } {
+  const needLower = input.component_need.trim().toLowerCase();
+  const candidates = readLedgerEntries(input.project_id).filter((e) =>
+    input.feature_id ? e.feature_id === input.feature_id : e.component_need.trim().toLowerCase() === needLower
+  );
+  if (candidates.length === 0) {
+    return {
+      attached: false,
+      warning:
+        `No recommend_component ledger entry found for project_id="${input.project_id}" ` +
+        (input.feature_id ? `feature_id="${input.feature_id}"` : `component_need="${input.component_need}"`) +
+        `, so file_path was not attached and the enforcement gate will not match it. ` +
+        `The decision itself was recorded. Call recommend_component for this need (with file_path set) first.`,
+    };
+  }
+  const latest = candidates.reduce((a, b) => (new Date(b.timestamp).getTime() >= new Date(a.timestamp).getTime() ? b : a));
+  const relPath = normalizeRelPath(input.file_path);
+  appendLedgerFilePathRecord({
+    id: randomUUID(),
+    timestamp: new Date().toISOString(),
+    ledger_entry_id: latest.id,
+    project_id: input.project_id,
+    file_path: relPath,
+  });
+  return { attached: true, ledger_entry_id: latest.id, feature_id: latest.feature_id, file_path: relPath };
+}
+
 // Feature 2 P3's overlay -- same append-only/latest-wins convention as
 // ledger_liveness.jsonl above, kept as a fully separate file/function pair
 // rather than folded into the liveness overlay: these two overlays answer
@@ -2813,6 +2914,7 @@ export function readLedgerEntries(projectId: string): LedgerEntry[] {
     return [];
   }
   const entries: LedgerEntry[] = [];
+  const filePathOverlay = readLedgerFilePathOverlay();
   for (const line of raw.split("\n")) {
     if (!line.trim()) continue;
     try {
@@ -2825,7 +2927,7 @@ export function readLedgerEntries(projectId: string): LedgerEntry[] {
         const rawEntry = parsed as Partial<LedgerEntry>;
         const normalized: LedgerEntry = {
           ...(rawEntry as LedgerEntry),
-          file_path: rawEntry.file_path ?? null,
+          file_path: (rawEntry.id && filePathOverlay.get(rawEntry.id)) || (rawEntry.file_path ?? null),
           snapshot_ref: rawEntry.snapshot_ref ?? null,
           last_verified_live: rawEntry.last_verified_live ?? null,
           live_status: rawEntry.live_status ?? "unknown",
@@ -4362,7 +4464,10 @@ const ALL_TOOLS = [
         "grouped correctly and never mixed with another project's. Pass " +
         "time_saved_minutes (optional) if you have a genuine estimate of how " +
         "much time this decision saved you -- this is your own self-reported " +
-        "number, never computed or verified by Pattern.",
+        "number, never computed or verified by Pattern. Pass file_path (and, if " +
+        "needed, feature_id) to also attach the implementing file to the matching " +
+        "recommend_component ledger entry without re-scoring -- that is what the " +
+        "enforcement gate (pattern-check-gate) reads; the decision log itself is not.",
       inputSchema: RECORD_DECISION_INPUT_SCHEMA,
     },
     {
@@ -4609,15 +4714,33 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       source: string;
       timestamp?: string;
       time_saved_minutes?: number;
+      file_path?: string;
+      feature_id?: string;
     };
 
     try {
+      // Validate before writing anything, so a bad path never leaves a
+      // half-applied record behind.
+      if (args.file_path !== undefined && (!args.file_path.trim() || resolveWithinRoot(PROJECT_ROOT, normalizeRelPath(args.file_path)) === null)) {
+        throw new Error(
+          `file_path "${args.file_path}" must be a non-empty path relative to the project root (${PROJECT_ROOT}) that stays inside it. Nothing was recorded.`
+        );
+      }
       const entry = recordDecision(args);
+      const ledger =
+        args.file_path !== undefined
+          ? attachFilePathToLedger({
+              project_id: args.project_id,
+              component_need: args.component_need,
+              file_path: args.file_path,
+              feature_id: args.feature_id,
+            })
+          : undefined;
       return {
         content: [
           {
             type: "text",
-            text: JSON.stringify({ status: "recorded", project_id: args.project_id, entry }),
+            text: JSON.stringify({ status: "recorded", project_id: args.project_id, entry, ...(ledger ? { ledger } : {}) }),
           },
         ],
       };
