@@ -22,7 +22,8 @@ const check = (label, ok) => { if (ok) console.log(`  ok: ${label}`); else { con
 
 const FIXTURE = {
   name: "Demo",
-  components: { "9:1": { name: "Button", description: "" } },
+  components: { "9:1": { name: "Variant=Outline, Size=lg", componentSetId: "9:0", description: "" } },
+  componentSets: { "9:0": { name: "Button", description: "" } },
   document: { id: "0:0", type: "DOCUMENT", name: "Document", children: [
     { id: "0:1", type: "CANVAS", name: "Overlays", children: [
       { id: "1:1", type: "COMPONENT", name: "Button", children: [] },
@@ -68,12 +69,25 @@ check("found by case-insensitive name", !byName.isError && m?.name === "Alert Di
 check("size read from FIRST variant (320x224, not the RTL 999x999)", m?.size?.w === 320 && m?.size?.h === 224);
 check("auto-layout: vertical, gap 16, radius 10", m?.layout?.direction === "vertical" && m?.layout?.gap === 16 && m?.layout?.radius === 10);
 check("padding 24 all sides", JSON.stringify(m?.layout?.padding) === JSON.stringify({ top: 24, right: 24, bottom: 24, left: 24 }));
-check("dependency list names Button once", JSON.stringify(m?.instances) === JSON.stringify(["Button"]));
+check("dependency list uses the SET name (Button), once, not the variant name", JSON.stringify(m?.instances) === JSON.stringify(["Button"]));
 check("texts captured in order", JSON.stringify(m?.texts) === JSON.stringify(["Are you absolutely sure?", "This action cannot be undone."]));
 check("tree has Footer with 2 instances", m?.tree?.children?.find((c) => c.name === "Footer")?.children?.length === 2);
 
 const byId = await call("get_figma_evidence", { project_id: "p", node_id: "2:1" });
 check("found by node_id", !byId.isError && JSON.parse(byId.text).matches[0].name === "Alert Dialog");
+
+console.log("top-k ranking + scorer-facing format (Phase 4b)");
+const fm = await import("../dist/design-system-figma.js");
+const cands = [
+  { name: "Card", description: null, figma: { node_id: "a", page: "Card", section: null, variants: {}, properties: [] } },
+  { name: "Alert Dialog", description: null, figma: { node_id: "2:1", page: "Alert Dialog", section: null, variants: {}, properties: [] } },
+  { name: "Tooltip", description: null, figma: { node_id: "c", page: "Tooltip", section: null, variants: {}, properties: [] } },
+];
+check("dialog need ranks Alert Dialog first", fm.rankFigmaCandidates(cands, "Confirmation dialog before a destructive action", ["modal with title"], 2)[0] === 1);
+check("no overlap -> empty (never pads with arbitrary candidates)", fm.rankFigmaCandidates(cands, "zzz qqq", [], 3).length === 0);
+check("k=0 -> empty", fm.rankFigmaCandidates(cands, "dialog", [], 0).length === 0);
+const txt = fm.formatFigmaEvidence(m);
+check("format states size, gap, padding, radius, dependency", /size 320x224/.test(txt) && /gap 16/.test(txt) && /padding T24 R24 B24 L24/.test(txt) && /radius 10/.test(txt) && /uses components: Button/.test(txt));
 
 console.log("errors");
 check("unknown name -> isError", (await call("get_figma_evidence", { project_id: "p", name: "nope" })).isError);

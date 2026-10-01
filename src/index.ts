@@ -54,7 +54,7 @@ import {
 import { offerEnforcementSetupOnce } from "./init-enforcement.js";
 import { connectInstructionsText, offerClientConnectSetupOnce, runConnect } from "./client-connect.js";
 import { collapseForJev, rankWithJev } from "./design-system-jev.js";
-import { describeFigma, fetchFigmaFile, parseFigmaFile, type FigmaCandidateInfo, type FigmaEvidence } from "./design-system-figma.js";
+import { describeFigma, fetchFigmaFile, formatFigmaEvidence, parseFigmaFile, rankFigmaCandidates, type FigmaCandidateInfo, type FigmaEvidence } from "./design-system-figma.js";
 import { captionFigmaDesigns, carryOverCaptions } from "./design-system-figma-captions.js";
 import {
   SUMMARY_MODEL,
@@ -1498,10 +1498,37 @@ async function runSinglePass(input: {
         })
         .join("\n")}`;
 
+  // Phase 4b: for the few candidates that look most relevant, append the raw
+  // Figma facts captured at registration (size, padding, gap, nested
+  // components...). Every candidate is still listed above; this only adds
+  // detail for the top-k. PATTERN_FIGMA_EVIDENCE_TOPK=0 (default) is off.
+  let evidenceBlock = "";
+  const evidenceTopK = Number.parseInt(process.env.PATTERN_FIGMA_EVIDENCE_TOPK ?? "0", 10) || 0;
+  let evidenceNames: string[] = [];
+  if (evidenceTopK > 0 && designSystem.source_kind === "figma") {
+    const stored = readFigmaEvidence(designSystem.project_id);
+    if (stored) {
+      const idx = rankFigmaCandidates(designSystem.candidates, input.component_need, input.checklist, evidenceTopK);
+      const lines: string[] = [];
+      for (const i of idx) {
+        const c = designSystem.candidates[i];
+        const ev = c.figma ? stored.evidence[c.figma.node_id] : undefined;
+        if (ev) {
+          lines.push(`- ${c.name}: ${formatFigmaEvidence(ev)}`);
+          evidenceNames.push(c.name);
+        }
+      }
+      if (lines.length > 0) {
+        evidenceBlock = `\n\nDetailed Figma evidence for the ${lines.length} most relevant candidates (exact values read from the design file; use them to judge size, spacing and composition requirements instead of assuming they are unknown):\n${lines.join("\n")}`;
+      }
+    }
+    console.error(JSON.stringify({ diagnostic: "figma_evidence_topk", k: evidenceTopK, stored: !!stored, candidates: evidenceNames }));
+  }
+
   const userMessage = `component_need: ${input.component_need}
 domain: ${input.domain}
 framework: ${input.framework}
-existing_stack: ${input.existing_stack ?? "(not specified)"}${checklistBlock}${pastDecisionsBlock}${designSystemBlock}`;
+existing_stack: ${input.existing_stack ?? "(not specified)"}${checklistBlock}${pastDecisionsBlock}${designSystemBlock}${evidenceBlock}`;
 
   // Diagnostic only, same pattern as the other stderr diagnostics in this
   // file -- proves the memory lookup actually reached the prompt sent to

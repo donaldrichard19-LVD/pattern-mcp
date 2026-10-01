@@ -71,8 +71,8 @@ interface FigmaNode {
 
 interface FigmaFile {
   document?: FigmaNode;
-  components?: Record<string, { description?: string; name?: string }>;
-  componentSets?: Record<string, { description?: string }>;
+  components?: Record<string, { description?: string; name?: string; componentSetId?: string }>;
+  componentSets?: Record<string, { description?: string; name?: string }>;
 }
 
 const DESCRIPTION_CAP = 500;
@@ -146,7 +146,9 @@ const EVIDENCE_TEXT_CAP = 120;
 export function extractFigmaEvidence(
   node: FigmaNode,
   id: string,
-  componentNames: Record<string, { name?: string }> | undefined
+  // Resolves an INSTANCE's componentId to the name a designer would use: the
+  // parent set's name ("Button"), not the variant's ("Variant=Outline, Size=lg").
+  componentName: (componentId: string) => string | undefined
 ): FigmaEvidence {
   // A set's variants are its COMPONENT children; describe the first (the
   // default in Figma's ordering). A standalone component is its own source.
@@ -173,7 +175,7 @@ export function extractFigmaEvidence(
       }
     }
     if (n.type === "INSTANCE") {
-      const mainName = n.componentId ? componentNames?.[n.componentId]?.name : undefined;
+      const mainName = n.componentId ? componentName(n.componentId) : undefined;
       if (mainName) {
         out.instance_of = mainName;
         instances.add(mainName);
@@ -312,7 +314,10 @@ export function parseFigmaFile(
         file_path: null,
         figma: { node_id: id, page, section, variants, properties, size: sizeOf(node) },
       });
-      evidence[id] = extractFigmaEvidence(node, id, file.components);
+      evidence[id] = extractFigmaEvidence(node, id, (cid) => {
+        const comp = file.components?.[cid];
+        return (comp?.componentSetId ? file.componentSets?.[comp.componentSetId]?.name : undefined) ?? comp?.name;
+      });
       if (type === "COMPONENT_SET") stats.component_sets++;
       else stats.standalone_components++;
       continue; // never descend: a set's children are its variants
@@ -457,4 +462,67 @@ function parseFigmaFrames(file: FigmaFile, pageFilter: string[] | undefined, exc
     }
   }
   return out;
+}
+
+const STOPWORDS = new Set(["the","and","for","with","that","this","from","when","shown","before","after","into","only","not","are","has","have","its","any","per","can","e.g","eg","user","users","item","items","slot","state","states","variant","variants","using","used","use"]);
+const tokens = (text: string): string[] =>
+  [...new Set(text.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 3 && !STOPWORDS.has(w)))];
+
+/**
+ * Cheap lexical ranking of Figma candidates against a need + checklist. Used
+ * ONLY to choose which few candidates get their full stored evidence appended
+ * to the scoring prompt; every candidate still reaches the scorer, so a weak
+ * ranking costs some missed detail, never a missed match. Name hits weigh 3x.
+ */
+export function rankFigmaCandidates(
+  candidates: { name: string; description: string | null; figma?: FigmaCandidateInfo }[],
+  need: string,
+  checklist: string[] | undefined,
+  k: number
+): number[] {
+  if (k <= 0) return [];
+  const q = tokens([need, ...(checklist ?? [])].join(" "));
+  const scored = candidates.map((c, i) => {
+    const name = new Set(tokens(c.name));
+    const rest = new Set(tokens([c.description ?? "", c.figma?.page ?? "", c.figma?.section ?? "", ...(c.figma?.texts ?? [])].join(" ")));
+    let score = 0;
+    for (const w of q) {
+      // Prefix match both ways so "dialog" finds "Dialogs" and "tab" finds "Tabs".
+      if ([...name].some((n) => n === w || n.startsWith(w) || w.startsWith(n))) score += 3;
+      else if ([...rest].some((n) => n === w)) score += 1;
+    }
+    return { i, score };
+  });
+  return scored
+    .filter((x) => x.score > 0)
+    .sort((a, b) => b.score - a.score || a.i - b.i)
+    .slice(0, k)
+    .map((x) => x.i);
+}
+
+/** Compact, scorer-facing rendering of one stored evidence record (sizes, layout, dependencies, text, outline). */
+export function formatFigmaEvidence(e: FigmaEvidence): string {
+  const parts: string[] = [];
+  if (e.size) parts.push(`size ${e.size.w}x${e.size.h}`);
+  const l = e.layout;
+  if (l) {
+    const bits = [
+      l.direction ? `${l.direction} auto-layout` : null,
+      l.gap !== undefined ? `gap ${l.gap}` : null,
+      l.padding ? `padding T${l.padding.top} R${l.padding.right} B${l.padding.bottom} L${l.padding.left}` : null,
+      l.radius !== undefined ? `radius ${l.radius}` : null,
+    ].filter(Boolean);
+    if (bits.length > 0) parts.push(bits.join(", "));
+  }
+  if (e.instances.length > 0) parts.push(`uses components: ${e.instances.join(", ")}`);
+  if (e.texts.length > 0) parts.push(`text: ${e.texts.slice(0, 8).join(" | ")}`);
+  const outline = (n: FigmaEvidenceNode, depth: number): string => {
+    if (depth > 2) return "";
+    const label = n.instance_of ? `${n.name}<${n.instance_of}>` : n.name;
+    const kids = (n.children ?? []).map((c) => outline(c, depth + 1)).filter(Boolean);
+    return kids.length > 0 ? `${label}(${kids.join(", ")})` : label;
+  };
+  const tree = (e.tree.children ?? []).map((c) => outline(c, 1)).filter(Boolean).join(", ");
+  if (tree) parts.push(`layers: ${tree.slice(0, 400)}`);
+  return `FIGMA EVIDENCE (read from the first variant "${e.source_node}"): ${parts.join("; ")}`;
 }
