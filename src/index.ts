@@ -36,7 +36,7 @@ import {
 import { instrument } from "@posthog/mcp";
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -54,7 +54,7 @@ import {
 import { offerEnforcementSetupOnce } from "./init-enforcement.js";
 import { connectInstructionsText, offerClientConnectSetupOnce, runConnect } from "./client-connect.js";
 import { collapseForJev, rankWithJev } from "./design-system-jev.js";
-import { describeFigma, fetchFigmaFile, parseFigmaFile, type FigmaCandidateInfo } from "./design-system-figma.js";
+import { describeFigma, fetchFigmaFile, parseFigmaFile, type FigmaCandidateInfo, type FigmaEvidence } from "./design-system-figma.js";
 import { captionFigmaDesigns, carryOverCaptions } from "./design-system-figma-captions.js";
 import {
   SUMMARY_MODEL,
@@ -736,6 +736,17 @@ const POST_LEDGER_PROVENANCE_TOOL_NAME = "post_ledger_provenance_to_github";
 const SWEEP_LEDGER_LIVENESS_TOOL_NAME = "sweep_ledger_liveness";
 const BACKFILL_LEDGER_SNAPSHOT_REF_TOOL_NAME = "backfill_ledger_snapshot_ref";
 const REGISTER_DESIGN_SYSTEM_TOOL_NAME = "register_design_system";
+const GET_FIGMA_EVIDENCE_TOOL_NAME = "get_figma_evidence";
+
+const GET_FIGMA_EVIDENCE_INPUT_SCHEMA = {
+  type: "object",
+  properties: {
+    project_id: { type: "string", description: "The project_id the Figma design system was registered under." },
+    node_id: { type: "string", description: "Exact Figma node id of a registered candidate (from a recommendation's chosen candidate or register_design_system)." },
+    name: { type: "string", description: "Candidate name, matched case-insensitively (exact match first, then substring). Up to 5 results. Use instead of node_id." },
+  },
+  required: ["project_id"],
+};
 
 // See TOOL_TIER above. These four cover the install -> register a design
 // system -> recommend -> enforce -> build happy path (recommend_component
@@ -2028,6 +2039,37 @@ function writeDesignSystems(file: DesignSystemsFile): void {
   writeFileSync(DESIGN_SYSTEMS_PATH, JSON.stringify(file, null, 2), "utf8");
 }
 
+// Raw Figma facts (size, auto-layout, padding, gap, radius, nested instances,
+// text) captured at registration, one file per project, kept OUT of
+// design_systems.json so the scored candidate list stays small. Read back by
+// get_figma_evidence.
+const FIGMA_EVIDENCE_DIR = process.env.PATTERN_FIGMA_EVIDENCE_DIR ?? join(dirname(DESIGN_SYSTEMS_PATH), "figma_evidence");
+const figmaEvidencePath = (projectId: string) => join(FIGMA_EVIDENCE_DIR, `${projectId.replace(/[^A-Za-z0-9._-]/g, "_")}.json`);
+
+function writeFigmaEvidence(projectId: string, evidence: Record<string, FigmaEvidence> | null): void {
+  const path = figmaEvidencePath(projectId);
+  try {
+    if (!evidence || Object.keys(evidence).length === 0) {
+      // A re-registration replaces the old one entirely: never leave stale facts behind.
+      rmSync(path, { force: true });
+      return;
+    }
+    mkdirSync(FIGMA_EVIDENCE_DIR, { recursive: true });
+    writeFileSync(path, JSON.stringify({ project_id: projectId, captured_at: new Date().toISOString(), evidence }), "utf8");
+  } catch (err) {
+    console.error(JSON.stringify({ diagnostic: "figma_evidence_write_failed", message: String((err as Error)?.message ?? err) }));
+  }
+}
+
+function readFigmaEvidence(projectId: string): { captured_at: string; evidence: Record<string, FigmaEvidence> } | null {
+  try {
+    const parsed = JSON.parse(readFileSync(figmaEvidencePath(projectId), "utf8"));
+    return parsed && typeof parsed.evidence === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 // Read-only lookup used by runSinglePass. No project_id -> no lookup,
 // same "never fall back to a shared/global bucket" rule as
 // getPastDecisions above.
@@ -2409,6 +2451,7 @@ export function registerDesignSystem(input: {
   let sourceKind: "manifest" | "directory_scan" | "figma";
   let sourcePath: string;
   let candidates: DesignSystemCandidate[];
+  let figmaEvidence: Record<string, FigmaEvidence> | null = null;
 
   if (input.figma_json_path || input.figma_file !== undefined) {
     sourceKind = "figma";
@@ -2434,6 +2477,7 @@ export function registerDesignSystem(input: {
     }
     const parsed = parseFigmaFile(raw, sourcePath, { mode: input.figma_mode, pages: input.figma_pages, excludePages: input.figma_exclude_pages });
     candidates = parsed.candidates;
+    figmaEvidence = parsed.evidence;
     // A real design system can define tens of thousands of components (one
     // 135 MB file had 14,135 standalone ones -- icons -- against 95 real UI
     // components). Scoring that many is slow, costly and noisy, so refuse and
@@ -2513,6 +2557,7 @@ export function registerDesignSystem(input: {
   const file = readDesignSystems();
   file[input.project_id] = registration;
   writeDesignSystems(file);
+  writeFigmaEvidence(input.project_id, figmaEvidence);
   return registration;
 }
 
@@ -4711,6 +4756,18 @@ const ALL_TOOLS = [
       inputSchema: BACKFILL_LEDGER_SNAPSHOT_REF_INPUT_SCHEMA,
     },
     {
+      name: GET_FIGMA_EVIDENCE_TOOL_NAME,
+      description:
+        "Returns the raw Figma facts captured when a Figma design system was " +
+        "registered: size, auto-layout direction/gap/padding/radius, the " +
+        "nested component instances (dependencies), literal text, and a " +
+        "trimmed layer tree, read from the component's first variant. Local " +
+        "read only, no API call. Use it to ground a requirement in what the " +
+        "design actually says (e.g. exact dimensions) instead of a summary. " +
+        "Only available for components-mode registrations.",
+      inputSchema: GET_FIGMA_EVIDENCE_INPUT_SCHEMA,
+    },
+    {
       name: REGISTER_DESIGN_SYSTEM_TOOL_NAME,
       description:
         "Registers THIS project's own design system as the candidate pool " +
@@ -5030,6 +5087,29 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         isError: true,
       };
     }
+  }
+
+  if (request.params.name === GET_FIGMA_EVIDENCE_TOOL_NAME) {
+    const args = (request.params.arguments ?? {}) as { project_id?: string; node_id?: string; name?: string };
+    const fail = (message: string) => ({ content: [{ type: "text", text: message }], isError: true });
+    if (!args.project_id) return fail("project_id is required.");
+    if (!args.node_id && !args.name) return fail("Pass node_id or name.");
+    const stored = readFigmaEvidence(args.project_id);
+    if (!stored) {
+      return fail(
+        `No Figma evidence stored for project_id "${args.project_id}". It is captured when a Figma file is registered in components mode (frames mode and non-Figma sources have none); re-run register_design_system.`
+      );
+    }
+    const all = Object.values(stored.evidence);
+    let matches: FigmaEvidence[];
+    if (args.node_id) matches = all.filter((e) => e.node_id === args.node_id);
+    else {
+      const q = args.name!.trim().toLowerCase();
+      const exact = all.filter((e) => e.name.toLowerCase() === q);
+      matches = (exact.length > 0 ? exact : all.filter((e) => e.name.toLowerCase().includes(q))).slice(0, 5);
+    }
+    if (matches.length === 0) return fail(`No stored evidence matches ${args.node_id ? `node_id "${args.node_id}"` : `name "${args.name}"`} in project "${args.project_id}" (${all.length} components stored).`);
+    return { content: [{ type: "text", text: JSON.stringify({ captured_at: stored.captured_at, matches }, null, 2) }] };
   }
 
   if (request.params.name === REGISTER_DESIGN_SYSTEM_TOOL_NAME) {
