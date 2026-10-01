@@ -1775,10 +1775,23 @@ export function isBoundaryRisk(result: JudgmentResult): boolean {
   if (!Array.isArray(items) || items.length === 0) return true; // malformed -- be conservative
 
   const total = items.length;
-  if (total !== 8) return true; // extraction didn't follow the fixed-8 instruction -- the precomputed boundary table doesn't apply, so don't trust a single run
-
   const met = items.filter((item) => item.met === true).length;
-  return BOUNDARY_RISK_MET_COUNTS_FOR_8_ITEMS.has(met);
+  return isNearVerdictBoundary(met, total);
+}
+
+// Generalizes BOUNDARY_RISK_MET_COUNTS_FOR_8_ITEMS to any checklist size: a
+// single run is risky when one item's judgment flipping (met +/- 1) would
+// move coverage into a different band (<40% custom_build, 40-79% low-
+// confidence use_existing, >=80% high-confidence use_existing). For 8 items
+// this yields exactly {3, 4, 6, 7}. Before, any total other than 8 -- e.g. a
+// caller-provided 9-item checklist -- always paid for a 2nd pass.
+export function isNearVerdictBoundary(met: number, total: number): boolean {
+  const band = (m: number) => {
+    const c = m / total;
+    return c < 0.4 ? 0 : c < 0.8 ? 1 : 2;
+  };
+  const here = band(met);
+  return (met > 0 && band(met - 1) !== here) || (met < total && band(met + 1) !== here);
 }
 
 // One JSON line per call that reached the API. Never throws -- a logging
