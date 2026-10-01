@@ -40,7 +40,8 @@ interface ClaudeSettings {
   [key: string]: unknown;
 }
 
-async function setupClaudeSettings(root: string, projectIdOverride: string | null, options: InitOptions): Promise<void> {
+// "written" is the only outcome after which a Claude Code session needs a restart.
+async function setupClaudeSettings(root: string, projectIdOverride: string | null, options: InitOptions): Promise<"written" | "already" | "skipped"> {
   const settingsPath = join(root, ".claude", "settings.json");
   let settings: ClaudeSettings = {};
   let existed = false;
@@ -50,7 +51,7 @@ async function setupClaudeSettings(root: string, projectIdOverride: string | nul
       settings = JSON.parse(readFileSync(settingsPath, "utf8")) as ClaudeSettings;
     } catch {
       console.log("  .claude/settings.json exists but isn't valid JSON -- skipping, fix it manually first.");
-      return;
+      return "skipped";
     }
   }
 
@@ -60,7 +61,7 @@ async function setupClaudeSettings(root: string, projectIdOverride: string | nul
   );
   if (alreadyInstalled) {
     console.log("  .claude/settings.json: hook already configured, skipping.");
-    return;
+    return "already";
   }
 
   const command = projectIdOverride
@@ -82,7 +83,7 @@ async function setupClaudeSettings(root: string, projectIdOverride: string | nul
   const proceed = await confirm("  Write this?", options, true);
   if (!proceed) {
     console.log("  Skipped.");
-    return;
+    return "skipped";
   }
 
   const merged: ClaudeSettings = {
@@ -95,6 +96,7 @@ async function setupClaudeSettings(root: string, projectIdOverride: string | nul
   mkdirSync(dirname(settingsPath), { recursive: true });
   writeFileSync(settingsPath, JSON.stringify(merged, null, 2) + "\n", "utf8");
   console.log("  Written.");
+  return "written";
 }
 
 function isGitHubRepo(root: string): { owner: string; repo: string } | null {
@@ -289,8 +291,9 @@ export async function runInit(root: string, options: InitOptions): Promise<void>
   const projectId = await promptText("Project id", derivedId, options);
   const projectIdOverride = projectId !== derivedId ? projectId : null;
 
+  let hook: "written" | "already" | "skipped" = "skipped";
   try {
-    await setupClaudeSettings(root, projectIdOverride, options);
+    hook = await setupClaudeSettings(root, projectIdOverride, options);
     await setupWorkflowFile(root, options);
     await maybeSetupBranchProtection(root, options);
   } finally {
@@ -300,6 +303,27 @@ export async function runInit(root: string, options: InitOptions): Promise<void>
   }
 
   console.log("\nDone. Review the changes with `git status` / `git diff`, then commit when ready.");
+  for (const line of initFollowUpNotes(projectId, hook)) console.log(line);
+}
+
+// What init cannot make true by itself, said explicitly: the hook is only read
+// when a Claude Code session starts, and the gate matches ledger entries by
+// project_id, so callers must use the same one.
+export function initFollowUpNotes(projectId: string, hook: "written" | "already" | "skipped"): string[] {
+  const notes: string[] = [""];
+  if (hook === "written") {
+    notes.push("Restart Claude Code: hooks are read when a session starts, so this hook will NOT fire in the session you ran init from.");
+  } else if (hook === "already") {
+    notes.push("The hook was already configured; if you changed it, restart Claude Code so the change is picked up.");
+  }
+  notes.push(
+    `The gate matches ledger entries by project_id. Pass project_id "${projectId}" to recommend_component and record_component_decision,`,
+    `and set file_path on recommend_component (or on record_component_decision afterwards) so the gate can find the entry.`,
+  );
+  if (hook === "already") {
+    notes.push("(An existing hook keeps whatever PATTERN_PROJECT_ID, if any, is in its command; check it matches.)");
+  }
+  return notes;
 }
 
 // Option B from BACKLOG.md's "Enforcement boundary setup" entry: piggyback

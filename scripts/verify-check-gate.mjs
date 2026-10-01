@@ -360,6 +360,8 @@ console.log("11. pattern-check-gate init: fresh repo, no git, no existing settin
   check("hook command references pattern-check-gate-hook", command.includes("pattern-check-gate-hook"));
   check("no PATTERN_PROJECT_ID override when the derived id was accepted", !command.includes("PATTERN_PROJECT_ID"));
   check("no workflow file written (no git remote to detect GitHub from)", !existsSync(join(root, ".github/workflows/pattern-gate.yml")));
+  check("tells the user to restart Claude Code (hooks load at session start)", /Restart Claude Code/.test(result.stdout) && /will NOT fire in the session/.test(result.stdout));
+  check("tells the user which project_id to pass, and about file_path", /Pass project_id "[^"]+" to recommend_component and record_component_decision/.test(result.stdout) && /file_path/.test(result.stdout));
   rmSync(root, { recursive: true, force: true });
 }
 
@@ -565,6 +567,23 @@ function runInit(root, extraArgs, stdin) {
     timeout: 10000,
     env: { ...process.env, PATTERN_NO_AUTOSTART: "1" },
   });
+}
+
+console.log("13b. pattern-check-gate init: a hand-pinned hook is recognised, not duplicated");
+{
+  const root = mkdtempSync(join(tmpdir(), "pattern-check-gate-test-"));
+  mkdirSync(join(root, ".claude"), { recursive: true });
+  const pinned = "PATTERN_PROJECT_ID=website npx --yes pattern-check-gate-hook";
+  const existing = { hooks: { PreToolUse: [{ matcher: "Edit|Write", hooks: [{ type: "command", command: pinned, timeout: 60 }] }] } };
+  const before = JSON.stringify(existing, null, 2) + "\n";
+  writeFileSync(join(root, ".claude", "settings.json"), before, "utf8");
+  const result = runInit(root, ["--yes"]);
+  check("init exits 0", result.status === 0);
+  const after = readFileSync(join(root, ".claude", "settings.json"), "utf8");
+  check("settings.json is left byte-for-byte unchanged (no second entry)", after === before);
+  check("says the hook was already configured", /hook already configured/.test(result.stdout));
+  check("does not claim a restart is required for an untouched hook, but warns about its pinned id", !/will NOT fire in the session/.test(result.stdout) && /keeps whatever PATTERN_PROJECT_ID/.test(result.stdout));
+  rmSync(root, { recursive: true, force: true });
 }
 
 function runCheckGate(args, stdin, extraEnv = {}) {
