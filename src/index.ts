@@ -807,7 +807,8 @@ const INPUT_SCHEMA = {
         "the file existing. When provided, it's stored on the resulting " +
         "ledger entry and check_ledger_liveness can later confirm the file " +
         "still exists and still references chosen_candidate. Omit if unknown; " +
-        "it cannot currently be attached to an entry after the fact.",
+        "it can still be attached later, without re-scoring, by passing " +
+        "file_path to record_component_decision.",
     },
   },
   required: ["component_need", "domain", "framework"],
@@ -867,6 +868,22 @@ const RECORD_DECISION_INPUT_SCHEMA = {
         "This is self-reported by the calling agent -- Pattern has no way to measure a counterfactual, " +
         "so it never computes this itself (unlike _meta, which is Pattern's own real cost/latency). " +
         "Omit if you don't have a meaningful estimate; never guess a number just to fill the field.",
+    },
+    file_path: {
+      type: "string",
+      description:
+        "Optional. Path (relative to the project root, staying inside it) of the file you " +
+        "implemented this decision in. When given, it is attached to the most recent " +
+        "recommend_component ledger entry for this project_id and component_need (or the " +
+        "entry with the given feature_id) WITHOUT re-scoring, so the enforcement gate " +
+        "(pattern-check-gate) can match it. The gate reads the ledger, not this decision " +
+        "log: if no ledger entry exists yet, the response says so and nothing is attached.",
+    },
+    feature_id: {
+      type: "string",
+      description:
+        "Optional, only used with file_path. The feature_id of the recommend_component call " +
+        "to attach file_path to, when several ledger entries share the same component_need.",
     },
   },
   required: ["project_id", "component_need", "action", "source"],
@@ -1057,6 +1074,10 @@ const BACKFILL_LEDGER_SNAPSHOT_REF_INPUT_SCHEMA = {
   required: ["project_id"],
 } as const;
 
+// Registrations up to this many candidates are echoed in full by default;
+// larger ones get registrationResponseView's compact summary.
+export const REGISTER_FULL_LIST_MAX = 25;
+
 const REGISTER_DESIGN_SYSTEM_INPUT_SCHEMA = {
   type: "object",
   properties: {
@@ -1107,6 +1128,15 @@ const REGISTER_DESIGN_SYSTEM_INPUT_SCHEMA = {
       type: "boolean",
       description:
         "Two different things. (1) directory_path: ON BY DEFAULT when ANTHROPIC_API_KEY is set: writes a short (2-3 sentence) capability summary for each scanned file with Claude Haiku and stores it on the registration -- a big accuracy/confidence gain for the Jev design-system scorer (PATTERN_SCORER=jev) and harmless for the default one. This SENDS up to 8000 characters of each source file that needs a summary to api.anthropic.com; pass false (or set PATTERN_NO_SUMMARIES=1) to keep registration fully local. true refuses (leaving the previous registration untouched) when there is no key or no directory_path; unset never refuses, it just skips. Costs about 0.2 cents per file (capped at PATTERN_SUMMARY_MAX_FILES, default 200 files). Summaries are cached by file content: re-registering only pays for files that changed, and unchanged files keep their summary even with summarize: false. (2) figma_file_key: OPT-IN ONLY (summarize: true; never default) -- renders each registered design with Figma's images API and has Claude Haiku write a 2-sentence VISION caption of it (chart type, what is drawn, tooltips/legends/toggles), stored as the candidate's summary. Text and layer names can't say what is drawn, and on a real file this raised needs matched from ~17/27 to 23/27 with a clean score gap. It SENDS IMAGES OF YOUR DESIGNS to api.anthropic.com and asks Figma to render them with your token; needs ANTHROPIC_API_KEY and FIGMA_ACCESS_TOKEN; costs under a tenth of a cent per design; refused with figma_json_path (fully local).",
+    },
+    include_candidates: {
+      type: "boolean",
+      description:
+        "Optional. Whether the response carries the full registration.candidates list. Unset: the full list " +
+        "for small registrations (up to " + REGISTER_FULL_LIST_MAX + " candidates), and a compact summary for larger ones " +
+        "(candidate_count, a short name preview, per-page counts for Figma, plus warnings) -- a large Figma file " +
+        "otherwise puts ~10k tokens of candidates into the caller's context. true always returns the full list; " +
+        "false always returns the summary. The registration itself is stored in full either way.",
     },
   },
   required: ["project_id"],
@@ -1514,6 +1544,12 @@ existing_stack: ${input.existing_stack ?? "(not specified)"}${checklistBlock}${p
   enforceVerdictThreshold(parsed);
   enforceRecommendationConsistency(parsed);
 
+  // The model has no clock: JUDGMENT_RESPONSE_SHAPE asks it for "today's
+  // date" and it fills in a guess from its training data (observed live as
+  // 2025 dates). The Jev and skip-list paths already stamp the server
+  // clock, so do the same here instead of trusting the model's value.
+  parsed.computed_at = new Date().toISOString().slice(0, 10);
+
   // Set server-side, never trusted from the model's own "source" text --
   // same "server derives what it already knows deterministically" policy
   // as the other enforce* calls above. A design-system-scored use_existing
@@ -1866,6 +1902,42 @@ export interface DesignSystemCandidate {
   // its variant structure. Untested on real Figma files -- see
   // design-system-figma.ts.
   figma?: FigmaCandidateInfo;
+}
+
+// What register_design_system returns for `registration`: the full object, or
+// (for a large one) everything except the candidates list plus an overview. The
+// stored registration is untouched; this is only the response view.
+export function registrationResponseView(
+  registration: DesignSystemRegistration,
+  includeCandidates: boolean | undefined
+): Record<string, unknown> {
+  const full = includeCandidates ?? registration.candidates.length <= REGISTER_FULL_LIST_MAX;
+  const warnings: string[] = [];
+  if (registration.candidate_count === 0) {
+    warnings.push("0 candidates registered: recommend_component has nothing to score against.");
+  } else if (registration.source_kind !== "manifest" && registration.candidate_count < 5) {
+    warnings.push(
+      `Only ${registration.candidate_count} candidate(s) registered. If that is fewer than expected, check figma_pages / figma_exclude_pages or the directory_path.`
+    );
+  }
+  if (full) return warnings.length ? { ...registration, warnings } : { ...registration };
+  const { candidates, ...rest } = registration;
+  const pages: Record<string, number> = {};
+  for (const c of candidates) {
+    const page = c.figma?.page?.trim();
+    if (page) pages[page] = (pages[page] ?? 0) + 1;
+  }
+  return {
+    ...rest,
+    candidates_omitted: candidates.length,
+    candidates_preview: candidates.slice(0, 10).map((c) => (c.figma?.page ? `${c.name} (${c.figma.page.trim()})` : c.name)),
+    ...(Object.keys(pages).length ? { candidates_by_page: pages } : {}),
+    ...(warnings.length ? { warnings } : {}),
+    ...(registration.source_kind === "figma" && Object.keys(pages).length > 1
+      ? { figma_pages_hint: "Large Figma files are mostly sub-parts. Re-register with figma_pages: [<page names from candidates_by_page>] (or figma_exclude_pages) to score only the pages that hold real components." }
+      : {}),
+    hint: "Full candidate list omitted to save context; pass include_candidates: true to get it. The registration is stored in full.",
+  };
 }
 
 export interface DesignSystemRegistration {
@@ -2610,6 +2682,90 @@ function withLatestLiveness(entry: LedgerEntry): LedgerEntry {
   return { ...entry, live_status: latest.live_status, last_verified_live: latest.timestamp };
 }
 
+// Overlay store for file_path attached to an existing ledger entry after
+// the fact (record_component_decision's file_path). Same append-only,
+// latest-wins-at-read-time convention as the liveness overlay above: the
+// ledger line itself ("file_path ... set once at write time") is never
+// mutated, a later attach is a new observation merged in by
+// readLedgerEntries, which is also the only thing the enforcement gate reads.
+const LEDGER_FILE_PATHS_PATH =
+  process.env.PATTERN_LEDGER_FILE_PATHS_PATH ?? join(homedir(), ".pattern", "ledger_file_paths.jsonl");
+
+export interface LedgerFilePathRecord {
+  id: string;
+  timestamp: string;
+  ledger_entry_id: string;
+  project_id: string;
+  file_path: string;
+}
+
+function appendLedgerFilePathRecord(record: LedgerFilePathRecord): void {
+  mkdirSync(dirname(LEDGER_FILE_PATHS_PATH), { recursive: true });
+  appendFileSync(LEDGER_FILE_PATHS_PATH, JSON.stringify(record) + "\n", "utf8");
+}
+
+// Read once per readLedgerEntries call (not per entry). Later lines win.
+function readLedgerFilePathOverlay(): Map<string, string> {
+  const overlay = new Map<string, string>();
+  let raw: string;
+  try {
+    raw = readFileSync(LEDGER_FILE_PATHS_PATH, "utf8");
+  } catch {
+    return overlay;
+  }
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const parsed = JSON.parse(line);
+      if (parsed && typeof parsed.ledger_entry_id === "string" && typeof parsed.file_path === "string") {
+        overlay.set(parsed.ledger_entry_id, parsed.file_path);
+      }
+    } catch {
+      // skip malformed line
+    }
+  }
+  return overlay;
+}
+
+export function normalizeRelPath(p: string): string {
+  return p.trim().replace(/\\/g, "/").replace(/^\.\//, "");
+}
+
+// Attaches file_path to the latest matching ledger entry without re-scoring.
+// Never throws on "no match": the caller reports it, because the decision
+// itself was still recorded and a missing ledger entry is guidance, not failure.
+export function attachFilePathToLedger(input: {
+  project_id: string;
+  component_need: string;
+  file_path: string;
+  feature_id?: string;
+}): { attached: true; ledger_entry_id: string; feature_id: string; file_path: string } | { attached: false; warning: string } {
+  const needLower = input.component_need.trim().toLowerCase();
+  const candidates = readLedgerEntries(input.project_id).filter((e) =>
+    input.feature_id ? e.feature_id === input.feature_id : e.component_need.trim().toLowerCase() === needLower
+  );
+  if (candidates.length === 0) {
+    return {
+      attached: false,
+      warning:
+        `No recommend_component ledger entry found for project_id="${input.project_id}" ` +
+        (input.feature_id ? `feature_id="${input.feature_id}"` : `component_need="${input.component_need}"`) +
+        `, so file_path was not attached and the enforcement gate will not match it. ` +
+        `The decision itself was recorded. Call recommend_component for this need (with file_path set) first.`,
+    };
+  }
+  const latest = candidates.reduce((a, b) => (new Date(b.timestamp).getTime() >= new Date(a.timestamp).getTime() ? b : a));
+  const relPath = normalizeRelPath(input.file_path);
+  appendLedgerFilePathRecord({
+    id: randomUUID(),
+    timestamp: new Date().toISOString(),
+    ledger_entry_id: latest.id,
+    project_id: input.project_id,
+    file_path: relPath,
+  });
+  return { attached: true, ledger_entry_id: latest.id, feature_id: latest.feature_id, file_path: relPath };
+}
+
 // Feature 2 P3's overlay -- same append-only/latest-wins convention as
 // ledger_liveness.jsonl above, kept as a fully separate file/function pair
 // rather than folded into the liveness overlay: these two overlays answer
@@ -2813,6 +2969,7 @@ export function readLedgerEntries(projectId: string): LedgerEntry[] {
     return [];
   }
   const entries: LedgerEntry[] = [];
+  const filePathOverlay = readLedgerFilePathOverlay();
   for (const line of raw.split("\n")) {
     if (!line.trim()) continue;
     try {
@@ -2825,7 +2982,7 @@ export function readLedgerEntries(projectId: string): LedgerEntry[] {
         const rawEntry = parsed as Partial<LedgerEntry>;
         const normalized: LedgerEntry = {
           ...(rawEntry as LedgerEntry),
-          file_path: rawEntry.file_path ?? null,
+          file_path: (rawEntry.id && filePathOverlay.get(rawEntry.id)) || (rawEntry.file_path ?? null),
           snapshot_ref: rawEntry.snapshot_ref ?? null,
           last_verified_live: rawEntry.last_verified_live ?? null,
           live_status: rawEntry.live_status ?? "unknown",
@@ -4362,7 +4519,10 @@ const ALL_TOOLS = [
         "grouped correctly and never mixed with another project's. Pass " +
         "time_saved_minutes (optional) if you have a genuine estimate of how " +
         "much time this decision saved you -- this is your own self-reported " +
-        "number, never computed or verified by Pattern.",
+        "number, never computed or verified by Pattern. Pass file_path (and, if " +
+        "needed, feature_id) to also attach the implementing file to the matching " +
+        "recommend_component ledger entry without re-scoring -- that is what the " +
+        "enforcement gate (pattern-check-gate) reads; the decision log itself is not.",
       inputSchema: RECORD_DECISION_INPUT_SCHEMA,
     },
     {
@@ -4609,15 +4769,33 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       source: string;
       timestamp?: string;
       time_saved_minutes?: number;
+      file_path?: string;
+      feature_id?: string;
     };
 
     try {
+      // Validate before writing anything, so a bad path never leaves a
+      // half-applied record behind.
+      if (args.file_path !== undefined && (!args.file_path.trim() || resolveWithinRoot(PROJECT_ROOT, normalizeRelPath(args.file_path)) === null)) {
+        throw new Error(
+          `file_path "${args.file_path}" must be a non-empty path relative to the project root (${PROJECT_ROOT}) that stays inside it. Nothing was recorded.`
+        );
+      }
       const entry = recordDecision(args);
+      const ledger =
+        args.file_path !== undefined
+          ? attachFilePathToLedger({
+              project_id: args.project_id,
+              component_need: args.component_need,
+              file_path: args.file_path,
+              feature_id: args.feature_id,
+            })
+          : undefined;
       return {
         content: [
           {
             type: "text",
-            text: JSON.stringify({ status: "recorded", project_id: args.project_id, entry }),
+            text: JSON.stringify({ status: "recorded", project_id: args.project_id, entry, ...(ledger ? { ledger } : {}) }),
           },
         ],
       };
@@ -4813,6 +4991,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       figma_pages?: string[];
       figma_exclude_pages?: string[];
       summarize?: boolean;
+      include_candidates?: boolean;
     };
 
     try {
@@ -4843,7 +5022,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
         const token = process.env.FIGMA_ACCESS_TOKEN;
         if (!token) {
-          throw new Error("figma_file_key needs FIGMA_ACCESS_TOKEN set in the environment (a Figma personal access token that can read the file). Alternatively save the file's JSON and pass figma_json_path, which needs no token and makes no network call.");
+          throw new Error(
+            "figma_file_key needs FIGMA_ACCESS_TOKEN (a Figma personal access token that can read the file) in THIS server's own environment: " +
+              "the `env` block of its entry in your MCP client config (e.g. ~/.claude.json), then restart the client. " +
+              "A variable exported in your shell, or a project .env file, does not reach a server the client launched. " +
+              "Set it yourself; never paste the token into a chat. " +
+              "Alternatively save the file's JSON (GET https://api.figma.com/v1/files/<file_key>) and pass figma_json_path, which needs no token and makes no network call."
+          );
         }
         registerInput = {
           project_id: args.project_id,
@@ -4892,7 +5077,19 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
       }
       return {
-        content: [{ type: "text", text: JSON.stringify({ status: "registered", registration, ...(summaries ? { summaries } : {}) }) }],
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              status: "registered",
+              registration: registrationResponseView(registration, args.include_candidates),
+              // Where relative paths resolved from and where this registration lives:
+              // the server's root is often not the repo you are in.
+              resolved: { project_root: PROJECT_ROOT, design_systems_path: DESIGN_SYSTEMS_PATH },
+              ...(summaries ? { summaries } : {}),
+            }),
+          },
+        ],
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

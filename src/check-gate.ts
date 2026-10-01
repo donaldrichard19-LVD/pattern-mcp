@@ -155,9 +155,10 @@ async function runWrite(root: string, flags: Record<string, string | true>): Pro
         ok: false,
         gated: true,
         reason:
-          `No recommend_component/record_component_decision entry found with file_path="${relPath}" ` +
-          `for project_id="${projectId}". Call recommend_component with file_path set to this exact ` +
-          `path before creating it, or add \`// pattern-mcp:override reason="..."\` to the file.`,
+          `No ledger entry found with file_path="${relPath}" for project_id="${projectId}". ` +
+          `Call recommend_component with file_path set to this exact path before creating it; if the ` +
+          `need was already judged, call record_component_decision with file_path set to attach it ` +
+          `without re-scoring; or add \`// pattern-mcp:override reason="..."\` to the file.`,
       },
       false,
     );

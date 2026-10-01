@@ -78,8 +78,8 @@ async function runVariant(name) {
   const c = new Client({ name: "figma-shadcn-eval", version: "1" }, { capabilities: {} });
   await c.connect(t);
   const args = v.vision
-    ? { project_id: "sh", figma_file_key: FILE_KEY, figma_exclude_pages: EXCLUDE_PAGES, summarize: true }
-    : { project_id: "sh", figma_json_path: basename(jsonPath), figma_exclude_pages: EXCLUDE_PAGES };
+    ? { project_id: "sh", figma_file_key: FILE_KEY, figma_exclude_pages: EXCLUDE_PAGES, summarize: true, include_candidates: true }
+    : { project_id: "sh", figma_json_path: basename(jsonPath), figma_exclude_pages: EXCLUDE_PAGES, include_candidates: true };
   const reg = await c.callTool({ name: "register_design_system", arguments: args }, undefined, { timeout: 900_000 });
   if (reg.isError) throw new Error(reg.content[0].text);
   const body = JSON.parse(reg.content[0].text);

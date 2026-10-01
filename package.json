@@ -6,6 +6,7 @@
   "main": "dist/index.js",
   "bin": {
     "pattern-mcp": "dist/index.js",
+    "pattern": "dist/cli.js",
     "pattern-check-gate": "dist/check-gate.js",
     "pattern-check-gate-hook": "dist/check-gate-hook.js"
   },

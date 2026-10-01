@@ -896,9 +896,23 @@ server's working directory) -- never an absolute path.
     "candidates": [
       { "name": "ReferralBanner", "props": ["code", "bonusAmount"], "description": null, "usage_example": null, "file_path": "rewards/ReferralBanner.jsx" }
     ]
-  }
+  },
+  "resolved": { "project_root": "/home/me/my-booking-app", "design_systems_path": "/home/me/.pattern/design_systems.json" }
 }
 ```
+
+`resolved` echoes where relative paths were resolved from (the server's
+project root is often not the repo you are working in) and where the
+registration is stored.
+
+**Large registrations return a summary.** Up to 25 candidates the full
+`candidates` list is returned as above. Above that, `registration` carries
+`candidate_count`, `candidates_omitted`, a 10-name `candidates_preview`,
+per-page counts (`candidates_by_page`, Figma sources) and any `warnings`
+instead of the list, because a big Figma file would otherwise put roughly
+10k tokens of candidates into the caller's context. Pass
+`include_candidates: true` to always get the full list (or `false` to always
+get the summary). The registration is stored in full either way.
 
 Registering overwrites (does not merge with) any prior registration for the
 same `project_id`. Once registered, `recommend_component` scores ONLY
@@ -2516,3 +2530,9 @@ requirement is still model judgment.
 
 When introducing Pattern into a new workflow, spot-check early results
 against the actual components before relying on it unattended.
+
+## Setup preflight
+
+`npx -p pattern-mcp pattern doctor` checks the things that usually go wrong before the first run: which MCP config holds the server, which keys are in that server's own `env` block (a shell export or project `.env` is never read), whether the Figma token is well-formed (`--online` also tests it), the resolved project root and id, and whether a design system is registered. It never prints a secret.
+
+`npx -p pattern-mcp pattern fetch-figma <file_key>` downloads a Figma file with your token and saves it to `.pattern/figma/<key>.json` only if it is a real file (never an error body). Register it with `figma_json_path`. For big files, scope with `figma_pages`.
