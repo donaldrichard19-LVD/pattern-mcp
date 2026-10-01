@@ -896,9 +896,23 @@ server's working directory) -- never an absolute path.
     "candidates": [
       { "name": "ReferralBanner", "props": ["code", "bonusAmount"], "description": null, "usage_example": null, "file_path": "rewards/ReferralBanner.jsx" }
     ]
-  }
+  },
+  "resolved": { "project_root": "/home/me/my-booking-app", "design_systems_path": "/home/me/.pattern/design_systems.json" }
 }
 ```
+
+`resolved` echoes where relative paths were resolved from (the server's
+project root is often not the repo you are working in) and where the
+registration is stored.
+
+**Large registrations return a summary.** Up to 25 candidates the full
+`candidates` list is returned as above. Above that, `registration` carries
+`candidate_count`, `candidates_omitted`, a 10-name `candidates_preview`,
+per-page counts (`candidates_by_page`, Figma sources) and any `warnings`
+instead of the list, because a big Figma file would otherwise put roughly
+10k tokens of candidates into the caller's context. Pass
+`include_candidates: true` to always get the full list (or `false` to always
+get the summary). The registration is stored in full either way.
 
 Registering overwrites (does not merge with) any prior registration for the
 same `project_id`. Once registered, `recommend_component` scores ONLY

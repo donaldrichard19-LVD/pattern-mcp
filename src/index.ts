@@ -1074,6 +1074,10 @@ const BACKFILL_LEDGER_SNAPSHOT_REF_INPUT_SCHEMA = {
   required: ["project_id"],
 } as const;
 
+// Registrations up to this many candidates are echoed in full by default;
+// larger ones get registrationResponseView's compact summary.
+export const REGISTER_FULL_LIST_MAX = 25;
+
 const REGISTER_DESIGN_SYSTEM_INPUT_SCHEMA = {
   type: "object",
   properties: {
@@ -1124,6 +1128,15 @@ const REGISTER_DESIGN_SYSTEM_INPUT_SCHEMA = {
       type: "boolean",
       description:
         "Two different things. (1) directory_path: ON BY DEFAULT when ANTHROPIC_API_KEY is set: writes a short (2-3 sentence) capability summary for each scanned file with Claude Haiku and stores it on the registration -- a big accuracy/confidence gain for the Jev design-system scorer (PATTERN_SCORER=jev) and harmless for the default one. This SENDS up to 8000 characters of each source file that needs a summary to api.anthropic.com; pass false (or set PATTERN_NO_SUMMARIES=1) to keep registration fully local. true refuses (leaving the previous registration untouched) when there is no key or no directory_path; unset never refuses, it just skips. Costs about 0.2 cents per file (capped at PATTERN_SUMMARY_MAX_FILES, default 200 files). Summaries are cached by file content: re-registering only pays for files that changed, and unchanged files keep their summary even with summarize: false. (2) figma_file_key: OPT-IN ONLY (summarize: true; never default) -- renders each registered design with Figma's images API and has Claude Haiku write a 2-sentence VISION caption of it (chart type, what is drawn, tooltips/legends/toggles), stored as the candidate's summary. Text and layer names can't say what is drawn, and on a real file this raised needs matched from ~17/27 to 23/27 with a clean score gap. It SENDS IMAGES OF YOUR DESIGNS to api.anthropic.com and asks Figma to render them with your token; needs ANTHROPIC_API_KEY and FIGMA_ACCESS_TOKEN; costs under a tenth of a cent per design; refused with figma_json_path (fully local).",
+    },
+    include_candidates: {
+      type: "boolean",
+      description:
+        "Optional. Whether the response carries the full registration.candidates list. Unset: the full list " +
+        "for small registrations (up to " + REGISTER_FULL_LIST_MAX + " candidates), and a compact summary for larger ones " +
+        "(candidate_count, a short name preview, per-page counts for Figma, plus warnings) -- a large Figma file " +
+        "otherwise puts ~10k tokens of candidates into the caller's context. true always returns the full list; " +
+        "false always returns the summary. The registration itself is stored in full either way.",
     },
   },
   required: ["project_id"],
@@ -1889,6 +1902,39 @@ export interface DesignSystemCandidate {
   // its variant structure. Untested on real Figma files -- see
   // design-system-figma.ts.
   figma?: FigmaCandidateInfo;
+}
+
+// What register_design_system returns for `registration`: the full object, or
+// (for a large one) everything except the candidates list plus an overview. The
+// stored registration is untouched; this is only the response view.
+export function registrationResponseView(
+  registration: DesignSystemRegistration,
+  includeCandidates: boolean | undefined
+): Record<string, unknown> {
+  const full = includeCandidates ?? registration.candidates.length <= REGISTER_FULL_LIST_MAX;
+  const warnings: string[] = [];
+  if (registration.candidate_count === 0) {
+    warnings.push("0 candidates registered: recommend_component has nothing to score against.");
+  } else if (registration.source_kind !== "manifest" && registration.candidate_count < 5) {
+    warnings.push(
+      `Only ${registration.candidate_count} candidate(s) registered. If that is fewer than expected, check figma_pages / figma_exclude_pages or the directory_path.`
+    );
+  }
+  if (full) return warnings.length ? { ...registration, warnings } : { ...registration };
+  const { candidates, ...rest } = registration;
+  const pages: Record<string, number> = {};
+  for (const c of candidates) {
+    const page = c.figma?.page?.trim();
+    if (page) pages[page] = (pages[page] ?? 0) + 1;
+  }
+  return {
+    ...rest,
+    candidates_omitted: candidates.length,
+    candidates_preview: candidates.slice(0, 10).map((c) => (c.figma?.page ? `${c.name} (${c.figma.page.trim()})` : c.name)),
+    ...(Object.keys(pages).length ? { candidates_by_page: pages } : {}),
+    ...(warnings.length ? { warnings } : {}),
+    hint: "Full candidate list omitted to save context; pass include_candidates: true to get it. The registration is stored in full.",
+  };
 }
 
 export interface DesignSystemRegistration {
@@ -4942,6 +4988,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       figma_pages?: string[];
       figma_exclude_pages?: string[];
       summarize?: boolean;
+      include_candidates?: boolean;
     };
 
     try {
@@ -5027,7 +5074,19 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
       }
       return {
-        content: [{ type: "text", text: JSON.stringify({ status: "registered", registration, ...(summaries ? { summaries } : {}) }) }],
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              status: "registered",
+              registration: registrationResponseView(registration, args.include_candidates),
+              // Where relative paths resolved from and where this registration lives:
+              // the server's root is often not the repo you are in.
+              resolved: { project_root: PROJECT_ROOT, design_systems_path: DESIGN_SYSTEMS_PATH },
+              ...(summaries ? { summaries } : {}),
+            }),
+          },
+        ],
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
