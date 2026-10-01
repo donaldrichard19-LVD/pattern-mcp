@@ -2530,3 +2530,9 @@ requirement is still model judgment.
 
 When introducing Pattern into a new workflow, spot-check early results
 against the actual components before relying on it unattended.
+
+## Setup preflight
+
+`npx -p pattern-mcp pattern doctor` checks the things that usually go wrong before the first run: which MCP config holds the server, which keys are in that server's own `env` block (a shell export or project `.env` is never read), whether the Figma token is well-formed (`--online` also tests it), the resolved project root and id, and whether a design system is registered. It never prints a secret.
+
+`npx -p pattern-mcp pattern fetch-figma <file_key>` downloads a Figma file with your token and saves it to `.pattern/figma/<key>.json` only if it is a real file (never an error body). Register it with `figma_json_path`. For big files, scope with `figma_pages`.

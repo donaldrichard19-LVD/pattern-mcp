@@ -1933,6 +1933,9 @@ export function registrationResponseView(
     candidates_preview: candidates.slice(0, 10).map((c) => (c.figma?.page ? `${c.name} (${c.figma.page.trim()})` : c.name)),
     ...(Object.keys(pages).length ? { candidates_by_page: pages } : {}),
     ...(warnings.length ? { warnings } : {}),
+    ...(registration.source_kind === "figma" && Object.keys(pages).length > 1
+      ? { figma_pages_hint: "Large Figma files are mostly sub-parts. Re-register with figma_pages: [<page names from candidates_by_page>] (or figma_exclude_pages) to score only the pages that hold real components." }
+      : {}),
     hint: "Full candidate list omitted to save context; pass include_candidates: true to get it. The registration is stored in full.",
   };
 }
