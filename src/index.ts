@@ -1493,7 +1493,12 @@ existing_stack: ${input.existing_stack ?? "(not specified)"}${checklistBlock}${p
 
   const data = await streamAnthropicMessage({
     model: MODEL,
-    max_tokens: 8192,
+    // Ceiling only, not a target: adaptive thinking counts against it and
+    // varies per pass (measured ~2-3k of ~3-4k output tokens per pass), so
+    // 8192 could truncate a pass whose visible JSON was tiny. Streaming is
+    // on, so a higher ceiling adds no timeout risk and costs nothing unless
+    // the model actually uses it.
+    max_tokens: 16384,
     // System prompt is identical on every call, so mark it cacheable --
     // cache reads cost roughly a tenth of fresh input tokens.
     system: [
@@ -1509,11 +1514,29 @@ existing_stack: ${input.existing_stack ?? "(not specified)"}${checklistBlock}${p
     tools: [],
   });
 
+  // Diagnostic only: where do output tokens go on this path? Logged before
+  // the truncation check so a truncated pass is still visible.
+  {
+    const rawText = data.content.filter((b) => b.type === "text").map((b) => b.text ?? "").join("");
+    console.error(
+      JSON.stringify({
+        diagnostic: "design_system_pass_size",
+        stop_reason: data.stop_reason ?? null,
+        input_tokens: data.usage?.input_tokens ?? null,
+        output_tokens: data.usage?.output_tokens ?? null,
+        output_chars: rawText.length,
+        block_types: data.content.map((b) => b.type),
+        candidates_in_prompt: designSystem.candidates.length,
+        prompt_chars: userMessage.length,
+      })
+    );
+  }
+
   // If the model hits max_tokens, the response is cut
   // mid-JSON and must not be silently returned as if it were valid.
   if (data.stop_reason === "max_tokens") {
     throw new Error(
-      "Anthropic response was truncated (stop_reason: max_tokens) before finishing its JSON output. Raise max_tokens or register a smaller design system."
+      "Anthropic response was truncated (stop_reason: max_tokens) before finishing its JSON output. The pass spent its whole output budget (including thinking) before finishing; retry, or register a smaller design system."
     );
   }
 
