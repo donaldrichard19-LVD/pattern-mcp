@@ -709,15 +709,17 @@ async function streamAnthropicMessage(body: Record<string, unknown>): Promise<St
   };
 }
 
-// Phase 3b experiment knobs for the design-system scoring pass. Unset =
-// API defaults (adaptive thinking, effort "high" on claude-sonnet-5), i.e.
-// no behavior change. PATTERN_SCORE_EFFORT=low|medium|high|xhigh|max sets
-// output_config.effort; PATTERN_SCORE_THINKING=disabled turns thinking off
-// (accepted on claude-sonnet-5; 400s on newer models that can't disable it).
+// Phase 3b: effort for the design-system scoring pass defaults to "medium"
+// (A/B on the confirm-dialog need: ~35% cheaper and ~2x faster than the API
+// default "high" with the same verdict; see project notes). Overrides:
+// PATTERN_SCORE_EFFORT=low|medium|high|xhigh|max sets output_config.effort
+// ("high" restores the API default behavior); PATTERN_SCORE_THINKING=disabled
+// turns thinking off (accepted on claude-sonnet-5 only; 400s on 5.5/Opus 5.5).
 function scoringThinkingParams(): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  const effort = process.env.PATTERN_SCORE_EFFORT;
-  if (effort && ["low", "medium", "high", "xhigh", "max"].includes(effort)) out.output_config = { effort };
+  const requested = process.env.PATTERN_SCORE_EFFORT;
+  const effort = requested && ["low", "medium", "high", "xhigh", "max"].includes(requested) ? requested : "medium";
+  out.output_config = { effort };
   if (process.env.PATTERN_SCORE_THINKING === "disabled") out.thinking = { type: "disabled" };
   return out;
 }
