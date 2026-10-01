@@ -1531,6 +1531,12 @@ existing_stack: ${input.existing_stack ?? "(not specified)"}${checklistBlock}${p
   enforceVerdictThreshold(parsed);
   enforceRecommendationConsistency(parsed);
 
+  // The model has no clock: JUDGMENT_RESPONSE_SHAPE asks it for "today's
+  // date" and it fills in a guess from its training data (observed live as
+  // 2025 dates). The Jev and skip-list paths already stamp the server
+  // clock, so do the same here instead of trusting the model's value.
+  parsed.computed_at = new Date().toISOString().slice(0, 10);
+
   // Set server-side, never trusted from the model's own "source" text --
   // same "server derives what it already knows deterministically" policy
   // as the other enforce* calls above. A design-system-scored use_existing
@@ -4966,7 +4972,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
         const token = process.env.FIGMA_ACCESS_TOKEN;
         if (!token) {
-          throw new Error("figma_file_key needs FIGMA_ACCESS_TOKEN set in the environment (a Figma personal access token that can read the file). Alternatively save the file's JSON and pass figma_json_path, which needs no token and makes no network call.");
+          throw new Error(
+            "figma_file_key needs FIGMA_ACCESS_TOKEN (a Figma personal access token that can read the file) in THIS server's own environment: " +
+              "the `env` block of its entry in your MCP client config (e.g. ~/.claude.json), then restart the client. " +
+              "A variable exported in your shell, or a project .env file, does not reach a server the client launched. " +
+              "Set it yourself; never paste the token into a chat. " +
+              "Alternatively save the file's JSON (GET https://api.figma.com/v1/files/<file_key>) and pass figma_json_path, which needs no token and makes no network call."
+          );
         }
         registerInput = {
           project_id: args.project_id,

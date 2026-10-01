@@ -109,6 +109,16 @@ export function parseFigmaFile(
   options: FigmaParseOptions = {}
 ): { candidates: FigmaCandidate[]; stats: FigmaParseStats } {
   const file = raw as FigmaFile;
+  // A failed download saved as "the file" is the most common way to land here:
+  // Figma's error body is {"status": 403, "err": "Invalid token"}. Say so,
+  // instead of the generic "doesn't look like a Figma file" below.
+  const apiError = raw as { status?: unknown; err?: unknown } | null;
+  if (apiError && typeof apiError === "object" && typeof apiError.status === "number" && typeof apiError.err === "string" && !file.document) {
+    throw new Error(
+      `"${sourceLabel}" is a Figma API error response (status ${apiError.status}: ${apiError.err}), not a file -- the download failed. ` +
+        `Fix the cause (for ${apiError.status === 403 ? "403: an invalid token or one without file_content:read access" : "this status: see Figma's message above"}) and download it again; do not paste tokens into a chat.`
+    );
+  }
   if (!file || typeof file !== "object" || !file.document || !Array.isArray(file.document.children)) {
     throw new Error(
       `"${sourceLabel}" doesn't look like a Figma file response (expected a top-level "document" with "children" pages). ` +
@@ -212,7 +222,7 @@ export async function fetchFigmaFile(fileKey: string, token: string): Promise<un
   } catch (err) {
     throw new Error(`Could not reach the Figma API: ${err instanceof Error ? err.message : String(err)}`);
   }
-  if (res.status === 403) throw new Error("Figma refused the request (403): check that FIGMA_ACCESS_TOKEN is valid and can read this file.");
+  if (res.status === 403) throw new Error("Figma refused the request (403): check that FIGMA_ACCESS_TOKEN is valid (plain ASCII, starting figd_) and can read this file (file_content:read).");
   if (res.status === 404) throw new Error(`Figma file "${fileKey}" was not found (404): check the file key.`);
   if (!res.ok) throw new Error(`Figma API error ${res.status}: ${(await res.text()).slice(0, 200)}`);
   return res.json();
