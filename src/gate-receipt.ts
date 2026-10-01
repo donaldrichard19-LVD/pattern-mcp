@@ -21,8 +21,30 @@ import { createHash } from "node:crypto";
 
 const RECEIPTS_DIR = ".pattern/receipts";
 
+// Schema v2 adds an optional `verification` block written by verify_component
+// after the file is built (per-item outcomes, not just the pre-build verdict).
+// v1 receipts stay valid forever: CI matches on file_path alone, and
+// readers must treat `verification` as absent on v1.
+export type VerificationStatus = "pass" | "fail" | "unverified";
+
+export interface VerificationItem {
+  item: string;
+  status: VerificationStatus;
+  /** Verbatim quote from the built file for pass/fail (server-checked); empty only for a fail by absence. */
+  evidence: string;
+}
+
+export interface ReceiptVerification {
+  verified_at: string;
+  /** sha256 of the file content that was verified, so a later edit makes the verification visibly stale. */
+  file_sha256: string;
+  summary: { pass: number; fail: number; unverified: number; total: number };
+  items: VerificationItem[];
+  divergences: string[];
+}
+
 export interface GateReceipt {
-  schema_version: 1;
+  schema_version: 1 | 2;
   feature_id: string;
   file_path: string;
   ledger_entry_id: string | null;
@@ -32,6 +54,7 @@ export interface GateReceipt {
   checked_at: string;
   manual_override: boolean;
   override_reason: string | null;
+  verification?: ReceiptVerification;
 }
 
 const ALLOWED_GATE_RECEIPT_KEYS = new Set([
@@ -45,6 +68,7 @@ const ALLOWED_GATE_RECEIPT_KEYS = new Set([
   "checked_at",
   "manual_override",
   "override_reason",
+  "verification",
 ]);
 
 // Same throw-on-unknown-key discipline as index.ts's
@@ -60,8 +84,15 @@ export function assertGateReceiptShape(value: unknown): asserts value is GateRec
   if (extra.length > 0) {
     throw new Error(`GateReceipt has disallowed key(s): ${extra.join(", ")}`);
   }
-  if (record.schema_version !== 1) {
-    throw new Error("GateReceipt.schema_version must be 1");
+  if (record.schema_version !== 1 && record.schema_version !== 2) {
+    throw new Error("GateReceipt.schema_version must be 1 or 2");
+  }
+  if (record.verification !== undefined) {
+    if (record.schema_version !== 2) throw new Error("GateReceipt.verification requires schema_version 2");
+    const v = record.verification as Record<string, unknown> | null;
+    if (!v || typeof v !== "object" || !Array.isArray(v.items) || typeof v.file_sha256 !== "string" || typeof v.summary !== "object") {
+      throw new Error("GateReceipt.verification is malformed");
+    }
   }
 }
 
@@ -109,4 +140,23 @@ export function readAllGateReceipts(root: string): GateReceipt[] {
     }
   }
   return receipts;
+}
+
+const normalizeRel = (p: string) => p.trim().replace(/\\/g, "/").replace(/^\.\//, "");
+
+/**
+ * Attaches a verification block to the existing receipt for `filePath`
+ * (matched like CI does, by file_path), upgrading it to schema v2. Returns
+ * false when the file has no receipt (nothing is created: a receipt is only
+ * ever minted by the gate, never by verification).
+ */
+export function attachVerificationToReceipt(
+  root: string,
+  filePath: string,
+  verification: ReceiptVerification
+): { updated: boolean; feature_id?: string } {
+  const target = readAllGateReceipts(root).find((r) => normalizeRel(r.file_path) === normalizeRel(filePath));
+  if (!target) return { updated: false };
+  writeGateReceipt(root, { ...target, schema_version: 2, verification });
+  return { updated: true, feature_id: target.feature_id };
 }

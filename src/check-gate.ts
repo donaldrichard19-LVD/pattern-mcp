@@ -37,6 +37,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, relative, resolve as resolvePath } from "node:path";
 import { isGatedComponentFile, parseManualOverride } from "./component-gate.js";
+import { createHash } from "node:crypto";
 import { deriveOverrideFeatureId, GateReceipt, readAllGateReceipts, writeGateReceipt } from "./gate-receipt.js";
 import { deriveProjectId } from "./project-id.js";
 import { runInit } from "./init-enforcement.js";
@@ -184,6 +185,8 @@ async function runVerify(root: string, files: string[]): Promise<void> {
   const receipts = readAllGateReceipts(root);
   const ungated: string[] = [];
   let checked = 0;
+  // Non-blocking: what the receipts say about the built file (schema v2).
+  const verification = { verified: 0, stale: 0, unverified_receipts: 0, failed_items: 0 };
 
   for (const fileArg of files) {
     const relPath = toRepoRelative(root, fileArg);
@@ -197,8 +200,15 @@ async function runVerify(root: string, files: string[]): Promise<void> {
     if (!isGatedComponentFile(relPath, content, true)) continue;
 
     checked++;
-    const hasReceipt = receipts.some((r) => normalize(r.file_path) === relPath);
-    if (!hasReceipt) ungated.push(relPath);
+    const receipt = receipts.find((r) => normalize(r.file_path) === relPath);
+    if (!receipt) ungated.push(relPath);
+    else if (!receipt.verification) verification.unverified_receipts++;
+    else {
+      // A later edit changes the hash: the verification no longer describes this file.
+      if (receipt.verification.file_sha256 === createHash("sha256").update(content).digest("hex")) verification.verified++;
+      else verification.stale++;
+      verification.failed_items += receipt.verification.summary?.fail ?? 0;
+    }
   }
 
   if (ungated.length > 0) {
@@ -211,7 +221,7 @@ async function runVerify(root: string, files: string[]): Promise<void> {
       false,
     );
   }
-  emit({ ok: true, checked }, true);
+  emit({ ok: true, checked, verification }, true);
 }
 
 async function main(): Promise<void> {
