@@ -25,7 +25,7 @@ export function Close() {
         <Reveal delay={100}>
           <div style={{ display: "grid", gap: 14, justifyItems: "center" }}>
             <div style={{ display: "flex", gap: 14, flexWrap: "wrap", justifyContent: "center", alignItems: "center" }}>
-              <Button href="#install" size="lg">
+              <Button href="/#install" size="lg">
                 Get started
               </Button>
               <div style={{ width: 260 }}>
@@ -45,7 +45,7 @@ export function Close() {
           <a href={DOCS} target="_blank" rel="noreferrer" style={{ color: "var(--text-secondary)" }}>
             Docs
           </a>
-          <a href={DOCS} target="_blank" rel="noreferrer" style={{ color: "var(--text-secondary)" }}>
+          <a href="/reference" style={{ color: "var(--text-secondary)" }}>
             Reference
           </a>
           <a href={REPO} target="_blank" rel="noreferrer" style={{ color: "var(--text-secondary)" }}>
