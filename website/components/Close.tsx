@@ -58,7 +58,7 @@ export function Close() {
         {/* Vercel deploys this website/ directory in isolation, so it can't read
             the pattern-mcp package's version at build time -- update this literal
             by hand alongside each pattern-mcp release. */}
-        <span style={{ fontSize: "var(--text-caption)", color: "var(--text-tertiary)" }}>v0.19.1 &middot; MIT &middot; Don Richard</span>
+        <span style={{ fontSize: "var(--text-caption)", color: "var(--text-tertiary)" }}>v0.19.2 &middot; MIT &middot; Don Richard</span>
       </div>
     </footer>
   );

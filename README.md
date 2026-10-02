@@ -14,7 +14,14 @@ is recorded in an auditable ledger you can verify later.
 
 [Website](https://usepattern.sh) · [npm](https://www.npmjs.com/package/pattern-mcp) · [Report an issue](https://github.com/donaldrichard19-LVD/pattern-mcp/issues/new/choose)
 
-**Current release: v0.19.1** fixes the enforcement setup. Through 0.19.0 the
+**Current release: v0.19.2** fixes the CI workflow template (`templates/github-workflows/pattern-gate.yml`)
+shipped in 0.19.1 and earlier: it put the list of changed files straight into the
+shell script, so a PR that added more than one file failed (the shell ran the
+second file name as a command) and a hostile file name could inject shell. The
+list now travels in an environment variable and is split one argument per file.
+If you copied that template into your repo, copy the new one.
+
+**v0.19.1** fixes the enforcement setup. Through 0.19.0 the
 CI workflow template, the hook that `init` wrote, the first-run notice and the
 docs launched `pattern-check-gate` and `pattern-check-gate-hook` through a bare
 `npx` call, but those are bins inside `pattern-mcp`, not npm packages. On a
