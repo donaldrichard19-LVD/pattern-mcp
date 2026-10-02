@@ -45,8 +45,10 @@ returns an error until one is registered for the `project_id`.
 
 ### `recommend_component` (primary tool -- start here)
 
-The single-call default. Extracts requirements, scores coverage against
-the registered design system's candidates, and returns a verdict. Requires
+The single-call default. Scores the registered design system's candidates
+(with Jev when `TYPESAFE_API_KEY` is set -- sub-second, returns
+`design_system_match`; otherwise, or when Jev finds nothing, with an
+Anthropic checklist + coverage pass) and returns a verdict. Requires
 `project_id` with a registered design system.
 This is the recommended path for most callers -- call it directly with
 `component_need`, `domain`, and `framework`.

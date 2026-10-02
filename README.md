@@ -26,6 +26,11 @@ are gone. Sections below that describe web search, Mobbin or Figma
 Community references, or search budgets are historical and marked as
 such.
 
+**Jev is now the default scorer** when `TYPESAFE_API_KEY` is set: sub-second
+matches with no Anthropic call, and Anthropic only runs to write the gap list
+when Jev finds nothing that fits (see
+[Scoring your design system with Jev](#scoring-your-design-system-with-jev)).
+
 v0.17.1 made `register_design_system` take a Figma file
 directly (`figma_json_path` or `figma_file_key`), scored as component
 sets grouped by page or, for files with no real Figma components, as
@@ -300,9 +305,11 @@ ANTHROPIC_API_KEY
 The API account associated with this key pays for the requests Pattern
 makes (see [Cost](#cost) below).
 
-`TYPESAFE_API_KEY` is only required if you set `PATTERN_SCORER=jev`
-(experimental, staged pipeline only, off by default). Leave both unset for
-normal use.
+`TYPESAFE_API_KEY` (optional) turns on Jev scoring, which is faster and
+cheaper than the Anthropic scorer -- see
+[Scoring your design system with Jev](#scoring-your-design-system-with-jev).
+With both keys set, Jev picks the match and Anthropic only runs when Jev
+finds nothing that fits.
 
 You get the key from the Anthropic Console under Settings → API Keys.
 API billing is separate from Claude.ai or Claude Code subscriptions. A
@@ -1127,7 +1134,7 @@ never a tool argument, so it can't land in logs or transcripts).
   or `_`) and instances are skipped. Two components with the same name on
   different pages stay separate.
 - **Scored like any registration:** the default scorer sees the extra text, and
-  with `PATTERN_SCORER=jev` the same collapse-and-score path is used
+  with Jev scoring the same collapse-and-score path is used
   (`design_system_match.file` is `null` -- a Figma component isn't a file).
   Jev scores one entry per **page** (component family): real design systems
   define sub-parts as separate component sets (`SheetHeader`, `Table cell`), and a
@@ -1242,18 +1249,29 @@ and highest "nothing fits" 0.12. The default scorer also sees the summaries.
   registration untouched, when there is no key or you passed `manifest_path`
   (no source files to read); the unset default never refuses, it just skips.
 
-### Scoring your design system with Jev (experimental, opt-in)
+### Scoring your design system with Jev
 
-With `PATTERN_SCORER=jev` and a registered design system, `recommend_component`
-scores your components with [Jev](https://typesafe.ai) (TypeSafe AI) instead of
-Anthropic: no Anthropic call, no web search, sub-second. Needs
-`TYPESAFE_API_KEY`; `ANTHROPIC_API_KEY` is not required for these calls.
+Set `TYPESAFE_API_KEY` and `recommend_component` scores your registered design
+system with [Jev](https://typesafe.ai) (TypeSafe AI): sub-second, no Anthropic
+call for a match. `PATTERN_SCORER` picks the mode:
+
+| `PATTERN_SCORER` | Behavior |
+|---|---|
+| unset (with `TYPESAFE_API_KEY`) | **Hybrid.** Jev scores every call. A match returns immediately. If Jev finds nothing that fits, Anthropic runs (when `ANTHROPIC_API_KEY` is set) to produce the requirement-by-requirement gap list, and the result carries `jev_screen`. Without an Anthropic key you get Jev's plain "nothing fits" result. |
+| `jev` | Jev only. No Anthropic call ever, so a `custom_build` has no gap list. |
+| `anthropic` | Anthropic only, even when `TYPESAFE_API_KEY` is set. |
+
+Without `TYPESAFE_API_KEY` (and `PATTERN_SCORER` unset) Pattern uses the
+Anthropic scorer for everything. `extract_requirements`, calls that pass a
+`checklist`, registration summaries and Figma vision captions still need
+`ANTHROPIC_API_KEY`.
 
 - **Nothing fits -> it says so.** If no component scores at least
-  `PATTERN_JEV_FOUND_THRESHOLD` (default `0.4`), the result is
+  `PATTERN_JEV_FOUND_THRESHOLD` (default `0.4`), Jev's result is
   `verdict: "custom_build"`, `reason: "no_candidates_found"`, with a plain
-  `not_found_message`. There is deliberately **no web-search fallback** in this
-  mode.
+  `not_found_message`. In hybrid mode with an Anthropic key, that result is
+  replaced by the Anthropic pass (checklist, coverage, unmet items) and
+  annotated with `jev_screen`.
 - **Found -> `use_existing`**, `recommendation.source: "design_system"`, plus
   `design_system_match` (best file, runners-up, raw score). Confidence is
   `low` or `medium`, never `high`: Jev's scores rank well but are **not
@@ -2715,10 +2733,11 @@ Pattern requires outbound access to:
 api.anthropic.com
 ```
 
-If you opt in to `PATTERN_SCORER=jev`, candidate evidence (component
-names, descriptions and props, which may reflect real product or UI text) is
-also sent to `api.typesafe.ai`. This is off by default; with it unset,
-nothing goes to TypeSafe.
+If `TYPESAFE_API_KEY` is set (or `PATTERN_SCORER=jev`), candidate evidence
+(component names, doc comments and summaries, which may reflect real product
+or UI text) and the component need are also sent to `api.typesafe.ai`. With
+no TypeSafe key and `PATTERN_SCORER` unset, nothing goes to TypeSafe; set
+`PATTERN_SCORER=anthropic` to keep it off even when the key is present.
 
 It will not work in an environment that blocks general outbound internet
 access.
