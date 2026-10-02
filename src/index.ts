@@ -132,7 +132,9 @@ export const ANTHROPIC_WORKSPACE_ID = process.env.ANTHROPIC_WORKSPACE_ID;
 function warnIfAnthropicKeyLooksWrong(): void {
   if (!ANTHROPIC_API_KEY) {
     console.error(
-      "Pattern: ANTHROPIC_API_KEY is not set. recommend_component and extract_requirements will fail until it is."
+      DESIGN_SYSTEM_JEV_ENABLED
+        ? "Pattern: ANTHROPIC_API_KEY is not set. recommend_component will score with Jev only (no custom-build gap list); extract_requirements will fail until it is set."
+        : "Pattern: ANTHROPIC_API_KEY is not set. recommend_component and extract_requirements will fail until it is."
     );
     return;
   }
@@ -168,13 +170,20 @@ const MISSING_API_KEY_MESSAGE =
 // messaging) and diff verdicts before trusting it in production.
 export const MODEL = process.env.PATTERN_MODEL ?? "claude-sonnet-5";
 
-// Design-system mode only: PATTERN_SCORER=jev scores a project's registered
-// design system with Jev (TypeSafe AI) instead of Anthropic -- no web search,
-// no Anthropic call, and a plain "nothing fits" result when nothing does.
-// Off by default; see src/design-system-jev.ts for what the eval showed.
-// Candidate names, file names, doc comments and summaries (never prop lists)
-// plus the component_need are sent to api.typesafe.ai when it is on.
-const DESIGN_SYSTEM_JEV_ENABLED = process.env.PATTERN_SCORER === "jev";
+// Scorer selection. A registered design system is scored by Jev (TypeSafe AI)
+// whenever TYPESAFE_API_KEY is set -- sub-second, no Anthropic call. Unset
+// PATTERN_SCORER is "hybrid": Jev picks a match, and only when Jev finds
+// nothing that fits does Anthropic run (if ANTHROPIC_API_KEY is set) to
+// produce the requirement-by-requirement gap list a custom build needs.
+//   PATTERN_SCORER=jev        Jev only, no Anthropic call ever (no gap list)
+//   PATTERN_SCORER=anthropic  Anthropic only, ignores TYPESAFE_API_KEY
+// See src/design-system-jev.ts for what the eval showed. Candidate names,
+// file names, doc comments and summaries (never prop lists) plus the
+// component_need are sent to api.typesafe.ai when Jev is used.
+const SCORER_MODE = process.env.PATTERN_SCORER;
+const DESIGN_SYSTEM_JEV_ENABLED =
+  SCORER_MODE === "jev" || (SCORER_MODE !== "anthropic" && !!process.env.TYPESAFE_API_KEY);
+const JEV_GAP_PASS_ENABLED = SCORER_MODE !== "jev";
 // First guess from the eval: lowest correct top pick was 0.44 without
 // summaries (0.55 with) and highest "nothing fits" score was 0.27, so 0.4
 // separates them on that data. Jev's scores are not calibrated -- tune this
@@ -1467,19 +1476,35 @@ async function runSinglePass(input: {
   // Jev design-system path: needs no Anthropic key. A caller-supplied
   // checklist opts out (Jev scores whole files, not per-requirement items),
   // falling through to the normal Anthropic path below.
+  let jevScreen: JudgmentResult["design_system_match"] | null = null;
   if (DESIGN_SYSTEM_JEV_ENABLED && input.project_id && !(input.checklist && input.checklist.length > 0)) {
     const jevDesignSystem = getRegisteredDesignSystem(input.project_id);
-    if (jevDesignSystem) return runDesignSystemJevPass(input, jevDesignSystem, passStartMs);
+    if (jevDesignSystem) {
+      const jevPass = await runDesignSystemJevPass(input, jevDesignSystem, passStartMs);
+      // Hybrid: a Jev "nothing fits" gets an Anthropic pass so the caller
+      // still receives the unmet-requirements gap list. Everything else
+      // (a match, or no Anthropic key, or PATTERN_SCORER=jev) returns as is.
+      const needsGapPass =
+        JEV_GAP_PASS_ENABLED && ANTHROPIC_API_KEY && jevPass.ok && jevPass.result.verdict === "custom_build";
+      if (!needsGapPass) return jevPass;
+      jevScreen = jevPass.ok ? (jevPass.result.design_system_match ?? null) : null;
+    }
   }
 
   // Pattern judges against a project's own registered design system only.
   // No registration -> nothing to score against; say so instead of falling
   // back to searching external libraries.
+  const noDesignSystem = !input.project_id || !getRegisteredDesignSystem(input.project_id);
+  // A Jev-only setup has no Anthropic key by design, so report the missing
+  // design system first there; otherwise the key check leads (see
+  // verify-client-connect.mjs).
+  if (noDesignSystem && DESIGN_SYSTEM_JEV_ENABLED) throw new Error(NO_DESIGN_SYSTEM_MESSAGE);
+
   if (!ANTHROPIC_API_KEY) {
     throw new Error(MISSING_API_KEY_MESSAGE);
   }
 
-  if (!input.project_id || !getRegisteredDesignSystem(input.project_id)) {
+  if (noDesignSystem) {
     throw new Error(NO_DESIGN_SYSTEM_MESSAGE);
   }
 
@@ -1676,6 +1701,8 @@ existing_stack: ${input.existing_stack ?? "(not specified)"}${checklistBlock}${p
   // other enforce* functions above.
   parsed.checklist_source = checklistSource;
   parsed._meta = buildMeta(data.timings, data.usage);
+  // Hybrid mode: record that Jev screened this need first and found nothing.
+  if (jevScreen) parsed.jev_screen = { verdict: "custom_build", closest: jevScreen };
 
   // Same "server-side, not just prompt instruction" policy as the rest of
   // this file: a past_decision_signal is only trusted when this call
@@ -5004,7 +5031,10 @@ const ALL_TOOLS = [
         "same way install_command is shown before running -- it's real " +
         "spend against the user's own API key, not internal bookkeeping " +
         "to keep from them. This call scores ONLY against the project's " +
-        "own registered candidates. A custom_build verdict " +
+        "own registered candidates, using Jev when TYPESAFE_API_KEY is set " +
+        "(fast; a match carries design_system_match instead of a checklist) " +
+        "and Anthropic otherwise or to write the gap list when Jev finds " +
+        "nothing (see jev_screen). A custom_build verdict " +
         "with reason no_candidates_found may also carry a top-level " +
         "design_system_recall_check field -- a deterministic, zero-cost " +
         "keyword-overlap check flagging registered candidates that share " +
