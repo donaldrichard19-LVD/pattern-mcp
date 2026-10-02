@@ -36,6 +36,7 @@ import {
 import { instrument } from "@posthog/mcp";
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
+import { SERVER_INSTRUCTIONS } from "./agent-guidance.js";
 import { attachVerificationToReceipt, type ReceiptVerification, type VerificationClause, type VerificationItem } from "./gate-receipt.js";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -4953,7 +4954,13 @@ export function extractJson(text: string): string {
 // as possible, before the crash handlers -- see the comment there).
 const server = new Server(
   { name: "pattern-mcp", version: PACKAGE_VERSION },
-  { capabilities: { tools: {} } }
+  {
+    capabilities: { tools: {} },
+    // Tells the agent when and how to use Pattern without the user asking
+    // (see agent-guidance.ts). PATTERN_NO_INSTRUCTIONS=1 omits it, for A/B
+    // measurement or if a client's system prompt is too crowded.
+    ...(process.env.PATTERN_NO_INSTRUCTIONS ? {} : { instructions: SERVER_INSTRUCTIONS }),
+  }
 );
 
 // Standard MCP tool-call analytics (tool name, duration, success/failure,

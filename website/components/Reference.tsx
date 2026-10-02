@@ -196,6 +196,7 @@ const CONFIG_ROWS: Row[] = [
   ["PATTERN_FIGMA_EVIDENCE_TOPK", "3", "How many best-matching candidates get their stored Figma facts shown to scoring and extraction. 0 turns it off"],
   ["PATTERN_FIGMA_EVIDENCE_DIR", "~/.pattern/figma_evidence", "Where per-project Figma facts are stored, local only"],
   ["PATTERN_LEDGER_VERIFICATIONS_PATH", "~/.pattern/ledger_verifications.jsonl", "Every verify_component result, appended"],
+  ["PATTERN_NO_INSTRUCTIONS", "unset", "Set to 1 to stop the server sending its usage instructions (the note that tells the agent to use Pattern on its own when it is about to build UI)."],
   ["PATTERN_TOOLS", "core", "Set to full to advertise all fourteen tools. Every tool is callable by name either way"],
   ["PATTERN_MODEL", "claude-sonnet-5", "Swap models without a code change. Re-run the five test cases first"],
   ["PATTERN_SESSION_CAP", "40", "Per-process call cap, a runaway-agent guard, not a usage budget"],

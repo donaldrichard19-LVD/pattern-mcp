@@ -1,9 +1,19 @@
 ---
 name: pattern
-description: Judge whether a UI component need should use a component from the project's own registered design system, or requires a custom build.
+description: Use when building, prototyping or scaffolding UI (a component, page or screen), especially from a Figma link, mockup or screenshot. Checks the project's own design system first to decide reuse versus build, returns the exact unmet requirements to build, then verifies the built file. Skip trivial primitives (button, input, icon) and small edits to existing components.
 ---
 
 # Pattern
+
+## When to use it (without being asked)
+
+Use Pattern yourself, before writing code, whenever you are about to build,
+prototype or scaffold a new, non-trivial UI component, page or screen, and
+especially when the user gives you a Figma link, mockup or screenshot. The user
+should not have to say "use Pattern". Skip it for trivial primitives (button,
+input, label, icon), copy or style tweaks, and edits to existing components.
+If no design system is registered yet, register one first (a Figma file key, a
+components folder, or a manifest) -- see the workflow below.
 
 Pattern is an MCP server (`pattern-mcp`) that judges UI component
 decisions: given a component need, it returns a structured verdict

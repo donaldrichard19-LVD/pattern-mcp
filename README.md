@@ -488,11 +488,22 @@ client after `init` so the hook loads.
 
 ## Try it
 
-Give your agent a specific UI need, for example:
+Just ask for the UI, the way you would anyway:
 
-> Use recommend_component to find me a UI component for a price breakdown
-> showing nightly rate, cleaning fee, service fee, and taxes. I'm building
-> an Airbnb-style booking checkout in React with Tailwind.
+> Build me a price breakdown showing nightly rate, cleaning fee, service
+> fee, and taxes. I'm building an Airbnb-style booking checkout in React
+> with Tailwind.
+
+You do not need to mention Pattern. When the agent is about to build or
+prototype a non-trivial component, page or screen (especially from a Figma
+link, mockup or screenshot), it should check the design system first. Two
+things make that happen: the server sends the agent short usage instructions
+when it connects (set `PATTERN_NO_INSTRUCTIONS=1` to turn that off), and
+`npx pattern-mcp init` offers to install a Claude Code skill at
+`~/.claude/skills/pattern/SKILL.md`. It also offers to update an older Pattern
+skill, which matters if you installed one before 0.18: that one still tells the
+agent to search shadcn/ui and Mobbin. Models can still ignore instructions, so
+if you want it guaranteed, turn on the [enforcement boundary](#enforcement-boundary-hook--ci-gate).
 
 The agent should use the result to make the next decision:
 
