@@ -68,6 +68,25 @@ check("legacy flat shape = one clause", idx.reconcileVerification(["x"], [{ inde
 check("more than 6 clauses capped", cl(Array.from({ length: 9 }, (_, i) => ({ clause: `c${i}`, status: "unverified" }))).clauses.length === 6);
 check("empty clauses array falls back to flat fields", idx.reconcileVerification(["x"], [{ index: 1, clauses: [], status: "pass", evidence: "triggerRef.current?.focus();" }], cf)[0].status === "pass");
 
+console.log("divergences: only checkable, same-element, measurable ones survive");
+const evBlock = `\n\nDetailed Figma evidence...:\n- Alert Dialog: FIGMA EVIDENCE (read from the first variant "1:2"): size 320x224; vertical auto-layout, gap 16, radius 14; text: Don't allow | Allow\n- Icon Button: FIGMA EVIDENCE (read from the first variant "3:4"): size 24x24; horizontal auto-layout, gap 10, radius 6`;
+const evNames = ["Alert Dialog", "Icon Button"];
+const dfile = `const box = { gap: 12, borderRadius: 14, width: 320 };\nconst tile = { width: 40, height: 40 };\nconst label = "Cancel";`;
+const good = { kind: "spacing", figma_component: "Alert Dialog", figma_value: "gap 16", code_snippet: "gap: 12", code_value: "gap 12", same_element: true };
+const rd = (...d) => idx.reconcileDivergences(d, evBlock, evNames, dfile);
+check("a backed-up divergence is kept and rendered with both values + snippet", rd(good).kept.length === 1 && /gap 16 vs code gap 12/.test(rd(good).kept[0]) && /gap: 12/.test(rd(good).kept[0]));
+check("different element (40px tile vs Icon Button) dropped", rd({ kind: "size", figma_component: "Icon Button", figma_value: "size 24x24", code_snippet: "width: 40, height: 40", code_value: "40x40", same_element: false }).dropped[0]?.reason.includes("same element"));
+check("same_element missing -> dropped", rd({ ...good, same_element: undefined }).kept.length === 0);
+check("text / label divergence dropped (kind not allowed)", rd({ kind: "text", figma_component: "Alert Dialog", figma_value: "Don't allow", code_snippet: 'label = "Cancel"', code_value: "Cancel", same_element: true }).kept.length === 0);
+check("color kind dropped", rd({ ...good, kind: "color" }).kept.length === 0);
+check("component not in the evidence shown -> dropped", rd({ ...good, figma_component: "Tooltip" }).kept.length === 0);
+check("paraphrased figma_value not in evidence -> dropped", rd({ ...good, figma_value: "16px gap" }).kept.length === 0);
+check("code snippet not in the file -> dropped", rd({ ...good, code_snippet: "gap: 99" }).kept.length === 0);
+check("equal numbers (not a real difference) -> dropped", rd({ ...good, code_snippet: "borderRadius: 14", figma_value: "radius 14", kind: "radius", code_value: "radius 14" }).kept.length === 0);
+check("no evidence at all -> nothing kept", idx.reconcileDivergences([good], "", [], dfile).kept.length === 0);
+check("garbage / non-array -> empty, no throw", idx.reconcileDivergences("nope", evBlock, evNames, dfile).kept.length === 0 && idx.reconcileDivergences([null, 3, "x"], evBlock, evNames, dfile).kept.length === 0);
+check("capped at 5", idx.reconcileDivergences(Array.from({ length: 9 }, () => good), evBlock, evNames, dfile).kept.length === 5);
+
 console.log("absence clauses are decided by the server");
 const af = `export const D = () => <div style={{ width: 320 }} />;`;
 const ab = (absent, status = "pass") => idx.reconcileVerification(["no Tailwind"], [{ index: 1, clauses: [{ clause: "no Tailwind classes", status, absent }] }], af)[0];
