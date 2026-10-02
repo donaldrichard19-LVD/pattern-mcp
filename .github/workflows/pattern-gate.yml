@@ -32,11 +32,24 @@ jobs:
           node-version: "20"
       - name: Compute added files
         id: diff
+        env:
+          # Passed through the environment, never interpolated into the script:
+          # the base branch name and (below) file names come from the PR.
+          BASE_REF: ${{ github.base_ref }}
         run: |
-          ADDED=$(git diff --name-only --diff-filter=A "origin/${{ github.base_ref }}...HEAD")
-          echo "files<<EOF" >> "$GITHUB_OUTPUT"
-          echo "$ADDED" >> "$GITHUB_OUTPUT"
-          echo "EOF" >> "$GITHUB_OUTPUT"
+          ADDED=$(git diff --name-only --diff-filter=A "origin/${BASE_REF}...HEAD")
+          DELIM="PATTERN_FILES_$(date +%s%N)"
+          {
+            echo "files<<${DELIM}"
+            echo "${ADDED}"
+            echo "${DELIM}"
+          } >> "$GITHUB_OUTPUT"
       - name: Run pattern-check-gate verify
         if: steps.diff.outputs.files != ''
-        run: npx --yes -p pattern-mcp@latest pattern-check-gate verify --files ${{ steps.diff.outputs.files }} --project-root "$PWD"
+        env:
+          ADDED_FILES: ${{ steps.diff.outputs.files }}
+        # One file name per line -> one argument each (--files must come last).
+        # Interpolating the list straight into `run:` would execute every file
+        # name after the first as a command, and let a hostile name inject shell.
+        run: |
+          printf '%s\n' "$ADDED_FILES" | sed '/^$/d' | xargs -d '\n' -r npx --yes -p pattern-mcp@latest pattern-check-gate verify --project-root "$PWD" --files
