@@ -394,7 +394,7 @@ const LEDGER_CACHE_HIT_ENABLED = !process.env.PATTERN_NO_LEDGER_CACHE_HIT;
 // Everything else (design-system registration, ledger provenance/liveness,
 // cost/outcome tracking) is real but stays out of the default tool list so
 // it can reveal itself once a caller actually needs it, rather than
-// front-loading all eleven -- er, twelve -- tools on day one. Set
+// front-loading all fourteen tools on day one. Set
 // PATTERN_TOOLS=full to advertise every tool immediately.
 const TOOL_TIER = process.env.PATTERN_TOOLS === "full" ? "full" : "core";
 

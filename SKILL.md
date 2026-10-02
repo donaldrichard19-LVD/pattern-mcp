@@ -15,11 +15,23 @@ Full behavior, output schemas, and cost details are in
 [README.md](./README.md). This file is a quick tool-list orientation.
 
 Only `register_design_system`, `recommend_component`,
-`extract_requirements`, and `record_component_decision` are advertised in `tools/list` by default.
-`read_ledger`, `report_build_cost`, and `report_outcome_proxy` below are
+`extract_requirements`, `verify_component`, and `record_component_decision` are advertised in `tools/list` by default.
+`read_ledger`, `report_build_cost`, `report_outcome_proxy`, and `get_figma_evidence` below are
 real and callable by name at any time, but stay out of the default list
 until the server is started with `PATTERN_TOOLS=full` -- see the
 README's [Tool tiers](./README.md#tool-tiers).
+
+## Workflow (follow this order)
+
+1. `register_design_system` once per project.
+2. `extract_requirements({component_need, domain, project_id})` -- review or
+   edit the checklist (optional; skip to let `recommend_component` extract).
+3. `recommend_component({..., project_id, checklist, file_path})` -- pass
+   `file_path` NOW, before writing the file.
+4. Build.
+5. `verify_component({project_id, file_path})` -- fix `fail` items, look at
+   `unverified` ones.
+6. `record_component_decision` when you acted on the verdict.
 
 ## Tools
 
@@ -38,6 +50,10 @@ the registered design system's candidates, and returns a verdict. Requires
 `project_id` with a registered design system.
 This is the recommended path for most callers -- call it directly with
 `component_need`, `domain`, and `framework`.
+
+For a Figma registration, scoring also sees the exact sizes, spacing and
+nested components of the best-matching candidates, so requirements about size
+or composition can be judged instead of marked unknown.
 
 Optional inputs: `existing_stack` (tiebreaker), `project_id` (surfaces
 past decisions from `record_component_decision` as a consistency signal),
@@ -76,13 +92,36 @@ checklist *before* `recommend_component` scores,
 e.g. to catch a misread requirement early. This is an opt-in two-call
 pattern, not a replacement for the single-call default above.
 
-Flow: call `extract_requirements({component_need, domain})` → review (or
+Pass `project_id` (the one you registered under) to ground the checklist in the
+project's Figma values; the response then also has `checklist_items`, each tagged
+`figma-evidenced` / `inferred` / `general-practice`, and `grounded_in`.
+`general-practice` items (accessibility, keyboard, focus) are things a design
+file can't prove -- expect them unmet against a Figma-only registration; that
+is a gap to build, not a bad match.
+
+Flow: call `extract_requirements({component_need, domain, project_id})` → review (or
 edit) the returned `checklist` → pass it back into
 `recommend_component({..., checklist})`, which then scores against
 exactly those items instead of re-extracting its own.
 
 `extraction_confidence` in the response is a placeholder heuristic (see
 README) -- treat `"low"` as a hint to reread the input, not a hard error.
+
+### `verify_component`
+
+Call after building. Checks the built file (`file_path`, the same one passed to
+`recommend_component`) against its recorded checklist, item by item:
+`pass` / `fail` / `unverified`. Each clause of an item needs a verbatim quote
+the server confirms is in the file; must-be-absent clauses are searched by the
+server. It judges code, not rendered output. Writes the result into the
+committed receipt (schema v2) when one exists. Costs a few cents; surface
+`_meta.estimated_cost_usd`. Treat `unverified` as "needs a human look".
+
+### `get_figma_evidence` (advanced)
+
+`get_figma_evidence({project_id, node_id | name})` returns the raw Figma facts
+stored at registration (size, auto-layout, padding, gap, radius, nested
+components, text). Local read, no API call.
 
 ### `record_component_decision`
 
@@ -143,7 +182,7 @@ response. It's the one exception to "every call scores fresh"; see
 the exact match rules. Set `PATTERN_NO_LEDGER_CACHE_HIT` to turn this
 exception off and force every call to score fresh again.
 
-Every `recommend_component` and `extract_requirements` response carries an
+Every `recommend_component`, `extract_requirements` and `verify_component` response carries an
 `_meta` block (`total_ms`, `breakdown_ms`, `tokens_used`,
 `estimated_cost_usd`) so you can see what a call actually spent. **Surface
 `_meta.estimated_cost_usd` to the user after the call** -- it's real spend

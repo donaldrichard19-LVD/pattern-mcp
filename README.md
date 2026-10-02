@@ -38,10 +38,10 @@ for more details.
 <details>
 <summary><strong>Contents</strong> (click to expand)</summary>
 
-- [Install](#install) · [What Pattern Does](#what-pattern-does) · [How it works](#how-it-works) · [Quick Start](#quick-start) · [Try it](#try-it) · [Validation examples](#validation-examples)
+- [Install](#install) · [What Pattern Does](#what-pattern-does) · [How it works](#how-it-works) · [Quick Start](#quick-start) · [Recommended workflow](#recommended-workflow) · [Try it](#try-it) · [Validation examples](#validation-examples)
 - [Enforcement boundary: hook + CI gate](#enforcement-boundary-hook--ci-gate) (require the call, don't just log it)
-- **Core tools** (on by default -- see [Tool tiers](#tool-tiers)): [`recommend_component`](#tool-recommend_component) · [`extract_requirements`](#tool-extract_requirements) · [`record_component_decision`](#tool-record_component_decision)
-- **[Advanced tools](#advanced-tools)** (`PATTERN_TOOLS=full`): [`register_design_system`](#tool-register_design_system) · [`read_ledger`](#tool-read_ledger) · [`report_build_cost`](#tool-report_build_cost) · [`report_outcome_proxy`](#tool-report_outcome_proxy) · [Feature cost attribution](#feature-cost-attribution) · [Outcome proxies](#outcome-proxies) · [Per-project judgment ledger](#per-project-judgment-ledger) · [`check_ledger_liveness`](#tool-check_ledger_liveness) · [`sweep_ledger_liveness`](#tool-sweep_ledger_liveness) · [`export_ledger_provenance`](#tool-export_ledger_provenance) · [`backfill_ledger_snapshot_ref`](#tool-backfill_ledger_snapshot_ref) · [`post_ledger_provenance_to_github`](#tool-post_ledger_provenance_to_github) · [Ledger integrity and decision provenance](#ledger-integrity-and-decision-provenance)
+- **Core tools** (on by default -- see [Tool tiers](#tool-tiers)): [`register_design_system`](#tool-register_design_system) · [`recommend_component`](#tool-recommend_component) · [`extract_requirements`](#tool-extract_requirements) · [`verify_component`](#tool-verify_component) · [`record_component_decision`](#tool-record_component_decision)
+- **[Advanced tools](#advanced-tools)** (`PATTERN_TOOLS=full`): [`get_figma_evidence`](#tool-get_figma_evidence) · [`read_ledger`](#tool-read_ledger) · [`report_build_cost`](#tool-report_build_cost) · [`report_outcome_proxy`](#tool-report_outcome_proxy) · [Feature cost attribution](#feature-cost-attribution) · [Outcome proxies](#outcome-proxies) · [Per-project judgment ledger](#per-project-judgment-ledger) · [`check_ledger_liveness`](#tool-check_ledger_liveness) · [`sweep_ledger_liveness`](#tool-sweep_ledger_liveness) · [`export_ledger_provenance`](#tool-export_ledger_provenance) · [`backfill_ledger_snapshot_ref`](#tool-backfill_ledger_snapshot_ref) · [`post_ledger_provenance_to_github`](#tool-post_ledger_provenance_to_github) · [Ledger integrity and decision provenance](#ledger-integrity-and-decision-provenance)
 - [Per-project decision memory](#per-project-decision-memory) · [Security and privacy](#security-and-privacy) · [Telemetry](#telemetry)
 - **Cost:** [The `_meta` field](#the-_meta-field) · [Prompt caching](#prompt-caching) · [Measured cache and fetch behavior](#measured-cache-and-fetch-behavior-historical-pre-018) · [Search limits](#search-limits-removed-in-018) · [Ensemble cost](#ensemble-cost-boundary-risk-cases-only) · [Session call cap](#session-call-cap)
 - [Local call log](#local-call-log) · [Known limitations](#known-limitations)
@@ -85,9 +85,9 @@ opt-in enforcement boundary can make the check required instead of
 optional, and every decision it leads to lands in an auditable ledger
 you can verify later.
 
-It exposes twelve tools. Four are on by default -- the ones the
-install → recommend → enforce → build path actually needs -- and the
-rest reveal themselves once you need them. See [Tool
+It exposes fourteen tools. Five are on by default -- the ones the
+register → extract → recommend → build → verify path actually needs -- and
+the rest reveal themselves once you need them. See [Tool
 tiers](#tool-tiers).
 
 **Core, on by default.**
@@ -100,6 +100,9 @@ tiers](#tool-tiers).
 - `extract_requirements` — runs just the requirement-extraction step on
   its own, so you can inspect or hand-edit the checklist before
   `recommend_component` scores against it.
+- `verify_component` — run after the build: checks the built file against
+  the requirement checklist item by item, with quotes the server confirms
+  are really in the file, and records the outcome in the receipt.
 - `record_component_decision` — records what the agent actually did so
   future recommendations in the same project can take that decision into
   account.
@@ -111,14 +114,14 @@ list.
 
 ### Tool tiers
 
-By default Pattern's `tools/list` response advertises only the three
+By default Pattern's `tools/list` response advertises only the five
 core tools above, so a first-time agent sees a small, obvious surface
-instead of all twelve at once. Every tool still works when called
+instead of all fourteen at once. Every tool still works when called
 directly, tiering only changes what gets *advertised* -- so a script or
 an agent that already knows a tool's name (e.g. from this README) can
 still call `read_ledger` without setting
 anything. Set `PATTERN_TOOLS=full` in the server's environment to
-advertise all twelve tools immediately, e.g. for the "verify and export
+advertise all fourteen tools immediately, e.g. for the "verify and export
 old decisions" or cost-tracking workflows described below.
 
 ## How it works
@@ -404,6 +407,42 @@ Then ask your agent to list its available MCP tools and look for:
 recommend_component
 ```
 
+## Recommended workflow
+
+The order that gets the most out of Pattern, with the call that carries
+each piece of context:
+
+1. **Register once per project** -- `register_design_system({ project_id,
+   figma_file_key | figma_json_path | directory_path | manifest_path })`.
+   For a Figma file, scope it with `figma_pages` / `figma_exclude_pages`;
+   components-mode registration also stores the raw Figma facts (sizes,
+   spacing, nested components) for later steps. Run `npx pattern doctor`
+   first if anything about setup is unclear.
+2. **Extract the checklist** -- `extract_requirements({ component_need,
+   domain, project_id })`. With a `project_id` that has a Figma
+   registration, the checklist uses the file's real values and every item is
+   tagged `figma-evidenced` / `inferred` / `general-practice`. Review or
+   edit it. Skip this step to let `recommend_component` extract its own.
+3. **Recommend, with the file path** -- `recommend_component({ ...,
+   project_id, checklist, file_path })`. Pass `file_path` (the file you are
+   about to write) **now, before writing**: the enforcement hook and the
+   receipt match on it, and a receipt created after the fact is only a
+   retroactive record.
+4. **Build.** On `custom_build`, the `met: false` items are the gap to build;
+   on `use_existing`, reuse the named design-system component.
+5. **Verify** -- `verify_component({ project_id, file_path })`. Treat `fail`
+   items as work left, `unverified` items as needing a human look, and
+   `general-practice` items (accessibility, keyboard behavior) as things a
+   design file can never prove -- expect them to stay unmet against a
+   Figma-only registration.
+6. **Record** -- `record_component_decision(...)` when you acted on the
+   verdict (optional; it feeds the project's decision memory).
+
+Things that will bite you if skipped: put `ANTHROPIC_API_KEY` (and
+`FIGMA_ACCESS_TOKEN` / `TYPESAFE_API_KEY` if used) in the MCP server's own
+`env` block, not just your shell; never paste a token into chat; restart the
+client after `init` so the hook loads.
+
 ## Try it
 
 Give your agent a specific UI need, for example:
@@ -529,6 +568,11 @@ implementation.
   touches `~/.pattern/` (not reachable from a CI runner) and needs no
   `GITHUB_TOKEN` -- it trusts the committed receipt as the artifact of
   record, the same way it would trust a committed test fixture.
+
+Receipts are `schema_version: 1` at creation. `verify_component` upgrades the
+receipt for the file to `schema_version: 2` by adding a `verification` block;
+the CI check matches on `file_path` alone, so v1 and v2 receipts are both
+accepted.
 
 The join between the two depends on `file_path` being passed to
 `recommend_component`/`record_component_decision` -- if it's omitted, the
@@ -740,7 +784,11 @@ not as a routine first step.
 ```
 
 Same fields, same meaning, as `recommend_component`'s `component_need` and
-`domain`. There is no `framework` input here -- extraction is grounded in
+`domain`. Optionally pass the same `project_id` you register and recommend
+with: when that project has a Figma design system registered (components
+mode), the extractor is shown the exact sizes, spacing and composition of the
+most relevant components and writes the checklist with those real values.
+There is no `framework` input here -- extraction is grounded in
 the domain, not the framework, so `framework` doesn't affect the checklist
 in `recommend_component` either.
 
@@ -749,6 +797,12 @@ in `recommend_component` either.
 ```json
 {
   "checklist": ["...", "...", "..."],
+  "checklist_items": [
+    { "item": "...", "basis": "figma-evidenced", "evidence": "size 320x224; vertical auto-layout, gap 16" },
+    { "item": "...", "basis": "inferred" },
+    { "item": "...", "basis": "general-practice" }
+  ],
+  "grounded_in": { "project_id": "my-booking-app", "candidates": ["Alert Dialog", "Button"] },
   "extraction_confidence": "high | medium | low",
   "_meta": {
     "total_ms": 6798,
@@ -758,6 +812,17 @@ in `recommend_component` either.
   }
 }
 ```
+
+`checklist` is the plain list of items, a drop-in for `recommend_component`'s
+`checklist` input. `checklist_items` tags each item with what it rests on:
+`figma-evidenced` (it quotes a fact from the design file; the server downgrades
+the tag to `inferred` if no evidence was shown or none is quoted), `inferred`
+(derived from the need and domain), or `general-practice` (expected behavior a
+design file cannot show -- accessibility roles, focus handling, keyboard
+support). `grounded_in` is `null` when no stored Figma evidence was used.
+In a measured run, `figma-evidenced` items were met 13 of 14 times and
+`general-practice` items 0 of 6, which is the design file's limit, not a bad
+match.
 
 Typical latency is a few seconds -- one small API call with no tools
 declared, versus `recommend_component`'s full search+score pipeline.
@@ -828,6 +893,73 @@ Anthropic API call.
   "entry": { "..." }
 }
 ```
+
+## Tool: `verify_component`
+
+Run it **after** you build. It checks the built file against the requirement
+checklist that `recommend_component` recorded for that `file_path`, and
+reports per item: `pass`, `fail` or `unverified`.
+
+### Input
+
+```json
+{ "project_id": "my-booking-app", "file_path": "src/components/ConfirmDialog.tsx" }
+```
+
+`file_path` must be the same relative path you passed to
+`recommend_component` -- that is how the ledger entry and its checklist are
+found. Files over 80,000 characters are refused rather than truncated.
+
+### How it decides
+
+- Every checklist item is split into atomic clauses ("Escape cancels", "focus
+  returns to the trigger", "visible focus ring"), and each clause needs its own
+  **verbatim quote** from the file. The server checks the quote is really
+  there (whitespace-insensitive); a `pass` with no real quote is downgraded to
+  `unverified`.
+- An item's status is derived by the server from its clauses: `pass` only if
+  every clause passes, `fail` if any clause fails, otherwise `unverified`.
+- A clause that must be **absent** ("no Tailwind classes", "LTR only") cannot
+  be quoted, so the model names search terms and the server searches the file
+  itself (comments ignored, whole-identifier match). It passes only if none
+  occur.
+- Up to five **divergences** from the chosen design are listed (e.g. a size or
+  spacing that differs from the Figma values).
+
+### Output and receipt
+
+```json
+{
+  "ledger_entry_id": "...",
+  "file_path": "src/components/ConfirmDialog.tsx",
+  "file_sha256": "...",
+  "summary": { "pass": 7, "fail": 0, "unverified": 2, "total": 9 },
+  "items": [ { "item": "...", "status": "pass", "evidence": "...", "clauses": [ { "clause": "...", "status": "pass", "evidence": "..." } ] } ],
+  "divergences": ["..."],
+  "receipt": { "updated": true, "feature_id": "my-booking-app-confirm-dialog" },
+  "_meta": { "estimated_cost_usd": 0.05 }
+}
+```
+
+If the enforcement gate already minted a receipt for this file, the result is
+written into it as `verification` and the receipt becomes **schema v2** (v1
+receipts stay valid; verification never creates a receipt on its own). The
+stored `file_sha256` lets anyone see when the file changed after it was
+verified. `pattern-check-gate verify` in CI reports `verified`, `stale`,
+`unverified_receipts` and `failed_items` -- informational, it does not block.
+Each result is also appended to `~/.pattern/ledger_verifications.jsonl`
+(`PATTERN_LEDGER_VERIFICATIONS_PATH`).
+
+### Limits
+
+It judges what the **code** says, not how it renders or behaves at runtime. A
+quote proves a snippet exists, and per-clause quoting shrinks but does not
+remove the chance that a clause is satisfied more loosely than it reads.
+Results vary a little between runs (on a real 9-item component, 6-7 items
+passed and the same one or two items flipped between `fail` and `unverified`
+across runs); treat `unverified` as "look at this", not "fine". The divergence
+list is the noisiest part. One call costs a few cents (measured $0.045-0.056
+on a ~7 KB component).
 
 ## Advanced tools
 
@@ -962,6 +1094,18 @@ face value. Absent entirely when there's no overlap, or outside
 design-system mode.
 
 ### Figma as the design system
+
+> **Stored evidence.** In components mode, registration also keeps the raw
+> facts of every component -- size, auto-layout direction/gap/padding/radius,
+> the nested components it uses (named by their component set, e.g. `Button`),
+> literal text, and a trimmed layer tree -- read from the component's first
+> variant. They live in `figma_evidence/<project_id>.json` next to
+> `design_systems.json` (`PATTERN_FIGMA_EVIDENCE_DIR` to move it), replaced on
+> every re-registration and removed if you re-register from a non-Figma source.
+> Frames-mode registrations have none. Scoring and extraction show the facts for
+> the three best-matching candidates (`PATTERN_FIGMA_EVIDENCE_TOPK`, default 3,
+> `0` turns it off); `get_figma_evidence` reads them directly. Registrations
+> made before this existed need a re-register to get them.
 
 Point registration at a Figma file instead of code: `figma_json_path` (a saved
 `GET https://api.figma.com/v1/files/<file_key>` response, relative to the
@@ -1124,6 +1268,21 @@ The threshold and the collapse/no-props choices came from
 `scripts/design-system-jev-eval.mjs` on 38 needs over two libraries, so they
 are a first guess -- re-run the eval on your own design system before
 trusting them.
+
+## Tool: `get_figma_evidence`
+
+Returns the raw Figma facts stored at registration for a component, with no
+API call.
+
+```json
+{ "project_id": "my-booking-app", "name": "Alert Dialog" }
+```
+
+Pass `node_id` (exact) or `name` (case-insensitive, exact match first, then
+substring, up to 5 results). Output is `{ captured_at, matches: [{ node_id,
+name, source_node, size, layout, instances, texts, tree, truncated }] }`.
+Returns an error with a hint if the project has no stored evidence (non-Figma
+or frames-mode registration, or one made before evidence capture).
 
 ## Tool: `read_ledger`
 
@@ -2211,7 +2370,7 @@ Pattern uses extra model calls only when a result is close enough to a
 decision threshold that a small change in judgment could change the
 verdict.
 
-The requirement checklist has eight items, so coverage can only land on
+The default checklist has eight items, so coverage can only land on
 these values:
 
 ```
@@ -2253,6 +2412,25 @@ is surfaced rather than hidden.
 
 Results at 0, 12.5, 25, 62.5, and 100% stay single-pass because one
 changed requirement can't move them across either threshold.
+
+**Other checklist sizes.** The same rule applies to any size, e.g. a
+checklist you pass in or hand-edit: a result is a boundary case only when one
+requirement flipping (met ± 1) would move coverage across 40% or 80%. For 8
+items that is exactly the set above; for 9 or 10 items it is 3, 4, 7 or 8 met.
+(Before, any checklist that was not exactly eight items always paid for the
+extra passes.)
+
+### Scoring effort
+
+The design-system scoring pass runs with `effort: medium` by default. On two
+measured needs that was about 25-35% cheaper and about 2x faster than the
+model's default effort (`high`) with the same verdict; item-level calls still
+vary a little between runs at every setting, and there are no ground-truth
+labels for that, so accuracy was not separately measured. Override with
+`PATTERN_SCORE_EFFORT=low|medium|high|xhigh|max`. `PATTERN_SCORE_THINKING=disabled`
+turns thinking off entirely (accepted on `claude-sonnet-5` only; it was the
+cheapest and most stable setting but also the most lenient scorer). Thinking
+tokens count against `max_tokens`, so the ceiling is 16384 on this path.
 
 ### Measured ensemble cost
 

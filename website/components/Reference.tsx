@@ -131,12 +131,26 @@ const BACKFILL_OUTPUT_ROWS: Row[] = [
 const EXTRACT_INPUT_ROWS: Row[] = [
   ["component_need", "string, required", "Same field as recommend_component's input"],
   ["domain", "string, required", "Extraction is grounded in this, not the component name alone"],
+  ["project_id", "string, optional", "The project's registered Figma design system. When it has stored evidence, the checklist uses its real sizes and spacing and each item is tagged by what it rests on"],
 ];
 
 const EXTRACT_OUTPUT_ROWS: Row[] = [
   ["checklist", "string[]", "Exactly 8 items, ranked most-important first, unless the need hit the skip-list"],
+  ["checklist_items", "{ item, basis, evidence? }[]", "Same items tagged figma-evidenced (quotes a fact from the design file), inferred, or general-practice (accessibility, keyboard, focus: things a design file can't show)"],
   ["extraction_confidence", "high | medium | low", "A word-count heuristic today, not a calibrated signal. Treat low as a prompt to reread the input"],
   ["_meta", "{ total_ms, tokens_used, estimated_cost_usd }", "No search happens here, so this is typically a few seconds and a fraction of a cent"],
+];
+
+const VERIFY_INPUT_ROWS: Row[] = [
+  ["project_id", "string, required", "The project_id used in recommend_component for this component"],
+  ["file_path", "string, required", "The built file, relative to the project root. Must be the same file_path passed to recommend_component"],
+];
+
+const VERIFY_OUTPUT_ROWS: Row[] = [
+  ["summary", "{ pass, fail, unverified, total }", "Per checklist item. An item passes only if every clause of it has its own verbatim quote that the server confirms is in the file"],
+  ["items", "{ item, status, evidence, clauses[] }[]", "Must-be-absent clauses (no Tailwind, LTR only) are searched for by the server, not decided by the model"],
+  ["divergences", "string[]", "Up to 5 places the code departs from the chosen design or Figma values. The noisiest part of the result"],
+  ["receipt", "{ updated, feature_id? }", "Written into the committed receipt (schema v2) when the gate already created one for this file"],
 ];
 
 const REGISTER_DESIGN_SYSTEM_INPUT_ROWS: Row[] = [
@@ -204,6 +218,14 @@ const TOOLS: Tool[] = [
     description: "Optional standalone step: runs the requirement-extraction that recommend_component does internally, without scoring any candidates.",
     inputRows: EXTRACT_INPUT_ROWS,
     outputRows: EXTRACT_OUTPUT_ROWS,
+  },
+  {
+    name: "verify_component",
+    group: "Make the judgment call",
+    cost: "API call",
+    description: "Run after you build. Checks the built file against the recorded checklist, item by item, with quotes the server confirms are in the file. Judges what the code says, not how it renders. Typically a few cents.",
+    inputRows: VERIFY_INPUT_ROWS,
+    outputRows: VERIFY_OUTPUT_ROWS,
   },
   {
     name: "register_design_system",
