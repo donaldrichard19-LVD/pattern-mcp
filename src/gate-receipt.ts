@@ -27,11 +27,21 @@ const RECEIPTS_DIR = ".pattern/receipts";
 // readers must treat `verification` as absent on v1.
 export type VerificationStatus = "pass" | "fail" | "unverified";
 
-export interface VerificationItem {
-  item: string;
+export interface VerificationClause {
+  clause: string;
   status: VerificationStatus;
   /** Verbatim quote from the built file for pass/fail (server-checked); empty only for a fail by absence. */
   evidence: string;
+}
+
+export interface VerificationItem {
+  item: string;
+  /** Derived server-side from `clauses`: pass only if every clause passes, fail if any fails, else unverified. */
+  status: VerificationStatus;
+  /** First decisive quote, kept for simple readers; the full evidence is in `clauses`. */
+  evidence: string;
+  /** A compound item is split into atomic clauses, each needing its own quote. */
+  clauses?: VerificationClause[];
 }
 
 export interface ReceiptVerification {

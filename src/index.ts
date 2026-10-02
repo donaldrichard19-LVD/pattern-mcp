@@ -36,7 +36,7 @@ import {
 import { instrument } from "@posthog/mcp";
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { attachVerificationToReceipt, type ReceiptVerification, type VerificationItem } from "./gate-receipt.js";
+import { attachVerificationToReceipt, type ReceiptVerification, type VerificationClause, type VerificationItem } from "./gate-receipt.js";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
@@ -1740,6 +1740,19 @@ function buildFigmaEvidenceBlock(
 // ---------------------------------------------------------------------
 const VERIFY_MAX_FILE_CHARS = 80_000;
 const VERIFICATIONS_PATH = process.env.PATTERN_LEDGER_VERIFICATIONS_PATH ?? join(homedir(), ".pattern", "ledger_verifications.jsonl");
+/**
+ * A forbidden-thing search term as a regex that does not match inside a
+ * longer identifier: "dir" must not hit "flexDirection" or "direction",
+ * while "dir=" (ends in punctuation) still anchors only on the left.
+ */
+export function absentTermRegex(term: string): RegExp {
+  const esc = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const word = /\w/;
+  return new RegExp(`${word.test(term[0]) ? "(?<![A-Za-z0-9_])" : ""}${esc}${word.test(term[term.length - 1]) ? "(?![A-Za-z0-9_])" : ""}`, "i");
+}
+export function stripCodeComments(text: string): string {
+  return text.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|\s)\/\/[^\n]*/g, "$1");
+}
 const squash = (t: string) => t.replace(/\s+/g, " ").trim();
 
 function buildVerifySystemPrompt(): string {
@@ -1748,15 +1761,17 @@ function buildVerifySystemPrompt(): string {
 Rules:
 - Judge only what the source code says. You cannot run it or see it render, so anything that depends on rendered appearance or runtime behavior you cannot see in the code is "unverified", not "pass".
 - "pass": the code clearly does it. "fail": the code clearly does not, or contradicts it. "unverified": cannot be decided from the source.
-- For "pass" and for a "fail" that rests on code that is present, "evidence" MUST be ONE contiguous snippet copied verbatim from the source (<= 200 characters, exact characters, no paraphrase, no ellipsis). For a "fail" because something is simply absent, use "" as evidence.
-- Be strict about numbers: if the item states a size, spacing, radius or count and the code uses a different value, that is a "fail" quoting the differing code.
-- Do not give credit for intent or comments. A TODO or a comment claiming it works is not a pass.
+- Many checklist items are COMPOUND ("Escape cancels, focus returns to the trigger, visible focus ring"). Split every item into its atomic clauses (1 to 6, each a short phrase naming one thing the code must do) and judge EACH clause separately. An item is only as good as its weakest clause: do not let one satisfied clause stand in for the others. A single-requirement item has exactly one clause.
+- For each clause, "pass" and a "fail" that rests on code that is present need "evidence": ONE contiguous snippet copied verbatim from the source (<= 200 characters, exact characters, no paraphrase, no ellipsis) that shows that clause specifically. For a "fail" because something is simply absent, use "" as evidence.
+- A clause that says something must be ABSENT ("no Tailwind classes", "LTR only, no RTL handling") cannot be quoted. Instead of "evidence", give "absent": 1 to 5 literal strings that would appear in the source if the forbidden thing were present (e.g. ["className=", "tw-", "rtl", "dir="]). The server searches the file for them: the clause passes only if none occur, and fails if any does. Choose strings specific enough not to appear innocently (comments are ignored by the search, but strings, identifiers and prop names are not).
+- Be strict about numbers: if a clause states a size, spacing, radius or count and the code uses a different value, that clause fails, quoting the differing code.
+Do not give credit for intent or comments. A TODO or a comment claiming it works is not a pass.
 
 Also list "divergences": up to 5 places where the source departs from the chosen design or from the Figma evidence given (a different size, spacing, radius, missing sub-component, extra behavior). One short sentence each, citing both values. Empty list if none.
 
 Respond with ONLY a single JSON object, no prose, no markdown fences:
 {
-  "items": [ { "index": 1, "status": "pass" | "fail" | "unverified", "evidence": "verbatim snippet or empty" } ],
+  "items": [ { "index": 1, "clauses": [ { "clause": "short phrase", "status": "pass" | "fail" | "unverified", "evidence": "verbatim snippet or empty", "absent": ["only for must-be-absent clauses"] } ] } ],
   "divergences": [ "string" ]
 }
 Return one entry per checklist item, using the item's number as "index".`;
@@ -1784,22 +1799,61 @@ export function reconcileVerification(
   fileText: string
 ): VerificationItem[] {
   const haystack = squash(fileText);
-  const byIndex = new Map<number, { status?: unknown; evidence?: unknown }>();
+  type RawItem = { index?: unknown; clauses?: unknown; status?: unknown; evidence?: unknown; clause?: unknown };
+  const byIndex = new Map<number, RawItem>();
   if (Array.isArray(raw)) {
-    for (const r of raw as Array<Record<string, unknown>>) {
+    for (const r of raw as RawItem[]) {
       const idx = typeof r?.index === "number" ? r.index : Number.NaN;
       if (Number.isInteger(idx) && idx >= 1 && idx <= checklist.length && !byIndex.has(idx)) byIndex.set(idx, r);
     }
   }
-  return checklist.map((item, i) => {
-    const r = byIndex.get(i + 1);
+  // A claim is only as good as its quote: a pass needs a quote that is
+  // really in the file; a fail that cites code needs that code to be there.
+  const judge = (label: string, r: { status?: unknown; evidence?: unknown; absent?: unknown } | undefined): VerificationClause => {
+    // A must-be-absent clause is decided by the server, not the model: search
+    // the file for the strings the model says would betray the forbidden thing.
+    if (Array.isArray(r?.absent)) {
+      const terms = (r!.absent as unknown[]).filter((t): t is string => typeof t === "string" && t.trim().length >= 2).map((t) => t.trim()).slice(0, 5);
+      if (terms.length > 0) {
+        // Comments don't count as the forbidden thing being present (a note
+        // saying "no RTL" or "Dir=None" is not RTL handling). Line comments
+        // only strip when preceded by start/whitespace, so "http://" in a
+        // string can't swallow the rest of its line.
+        const code = stripCodeComments(fileText);
+        const matcher = (t: string) => absentTermRegex(t);
+        const hit = terms.find((t) => matcher(t).test(code));
+        const line = hit ? code.split("\n").find((l) => matcher(hit).test(l)) : undefined;
+        return hit
+          ? { clause: label, status: "fail", evidence: `found "${hit}" in: ${squash(line ?? "").slice(0, 120)}` }
+          : { clause: label, status: "pass", evidence: `absent: ${terms.map((t) => `"${t}"`).join(", ")}` };
+      }
+    }
     const evidence = typeof r?.evidence === "string" ? squash(r.evidence).slice(0, 240) : "";
     const quoted = evidence !== "" && haystack.includes(evidence);
-    let status: VerificationItem["status"] =
+    let status: VerificationClause["status"] =
       r?.status === "pass" || r?.status === "fail" || r?.status === "unverified" ? r.status : "unverified";
-    if (status === "pass" && !quoted) status = "unverified"; // no real quote, no pass
-    if (status === "fail" && evidence !== "" && !quoted) status = "unverified"; // cited code that is not there
-    return { item, status, evidence: status === "unverified" ? "" : evidence };
+    if (status === "pass" && !quoted) status = "unverified";
+    if (status === "fail" && evidence !== "" && !quoted) status = "unverified";
+    return { clause: label, status, evidence: status === "unverified" ? "" : evidence };
+  };
+  return checklist.map((item, i) => {
+    const r = byIndex.get(i + 1);
+    // Accept the older flat shape (one status/evidence per item) as a single clause.
+    const rawClauses: Array<{ clause?: unknown; status?: unknown; evidence?: unknown; absent?: unknown }> =
+      Array.isArray(r?.clauses) && (r!.clauses as unknown[]).length > 0
+        ? (r!.clauses as Array<{ clause?: unknown; status?: unknown; evidence?: unknown; absent?: unknown }>).slice(0, 6)
+        : r
+          ? [{ clause: item, status: r.status, evidence: r.evidence }]
+          : [];
+    const clauses = rawClauses.map((c, k) => judge(typeof c?.clause === "string" && c.clause.trim() ? squash(c.clause).slice(0, 160) : `clause ${k + 1}`, c));
+    if (clauses.length === 0) return { item, status: "unverified" as const, evidence: "" };
+    const status: VerificationItem["status"] = clauses.some((c) => c.status === "fail")
+      ? "fail"
+      : clauses.every((c) => c.status === "pass")
+        ? "pass"
+        : "unverified";
+    const decisive = clauses.find((c) => c.status === status && c.evidence) ?? clauses.find((c) => c.evidence);
+    return { item, status, evidence: decisive?.evidence ?? "", clauses };
   });
 }
 

@@ -45,6 +45,49 @@ check("one result per checklist item, in order", out.length === 6 && out.every((
 check("garbage input -> all unverified", idx.reconcileVerification(["a", "b"], "nope", file).every((o) => o.status === "unverified"));
 check("pass with no evidence -> unverified", idx.reconcileVerification(["a"], [{ index: 1, status: "pass" }], file)[0].status === "unverified");
 
+console.log("compound items: every clause needs its own real quote");
+const cf = `onKeyDown={(e) => { if (e.key === "Escape") onCancel(); }}\ntriggerRef.current?.focus();`;
+const cl = (clauses) => idx.reconcileVerification(["Escape cancels, focus returns, focus ring"], [{ index: 1, clauses }], cf)[0];
+const c3 = cl([
+  { clause: "Escape cancels", status: "pass", evidence: 'if (e.key === "Escape") onCancel();' },
+  { clause: "focus returns to trigger", status: "pass", evidence: "triggerRef.current?.focus();" },
+  { clause: "visible focus ring", status: "pass", evidence: "outline: 2px solid" },   // not in file
+]);
+check("2 real quotes + 1 invented -> item NOT pass (unverified)", c3.status === "unverified" && c3.clauses.map((c) => c.status).join() === "pass,pass,unverified");
+const c4 = cl([
+  { clause: "Escape cancels", status: "pass", evidence: 'if (e.key === "Escape") onCancel();' },
+  { clause: "focus returns to trigger", status: "pass", evidence: "triggerRef.current?.focus();" },
+]);
+check("all clauses quoted -> item pass", c4.status === "pass" && c4.clauses.length === 2);
+const c5 = cl([
+  { clause: "Escape cancels", status: "pass", evidence: 'if (e.key === "Escape") onCancel();' },
+  { clause: "visible focus ring", status: "fail", evidence: "" },
+]);
+check("any clause fails (absence) -> item fail, even with a passing clause", c5.status === "fail" && c5.evidence.includes("Escape"));
+check("legacy flat shape = one clause", idx.reconcileVerification(["x"], [{ index: 1, status: "pass", evidence: "triggerRef.current?.focus();" }], cf)[0].clauses.length === 1);
+check("more than 6 clauses capped", cl(Array.from({ length: 9 }, (_, i) => ({ clause: `c${i}`, status: "unverified" }))).clauses.length === 6);
+check("empty clauses array falls back to flat fields", idx.reconcileVerification(["x"], [{ index: 1, clauses: [], status: "pass", evidence: "triggerRef.current?.focus();" }], cf)[0].status === "pass");
+
+console.log("absence clauses are decided by the server");
+const af = `export const D = () => <div style={{ width: 320 }} />;`;
+const ab = (absent, status = "pass") => idx.reconcileVerification(["no Tailwind"], [{ index: 1, clauses: [{ clause: "no Tailwind classes", status, absent }] }], af)[0];
+check("none of the terms present -> pass, evidence lists the terms", ab(["className=", "tw-"]).status === "pass" && /absent: "className="/.test(ab(["className="]).evidence));
+check("a term present -> fail, even if the model said pass", ab(["style={{"]).status === "fail" && /found "style=\{\{"/.test(ab(["style={{"]).evidence));
+check("term match is case-insensitive", ab(["WIDTH: 320"]).status === "pass" || ab(["WIDTH"]).status === "fail");
+const cm = `// Dir=None header, no rtl\n/* dir= note */\nconst u = "http://x.test"; const dir = 1;\nexport const D = () => <div dir="rtl" />;`;
+const abc = (terms) => idx.reconcileVerification(["x"], [{ index: 1, clauses: [{ clause: "c", absent: terms }] }], cm)[0];
+check("terms inside // and /* */ comments are ignored", abc(["Dir=None"]).status === "pass" && abc(["dir= note"]).status === "pass");
+check("a term in real code still fails, and shows the line", abc(['dir="rtl"']).status === "fail" && /<div dir=/.test(abc(['dir="rtl"']).clauses[0].evidence));
+check("// inside a string does not swallow the rest of the line", idx.stripCodeComments('const u = "http://x"; const bad = 1;').includes("const bad"));
+const idf = `export const D = () => <div style={{ flexDirection: "column" }} data-direction="x" />;`;
+const abi = (t) => idx.reconcileVerification(["x"], [{ index: 1, clauses: [{ clause: "c", absent: [t] }] }], idf)[0].status;
+check("'dir' does not match inside flexDirection / data-direction", abi("dir") === "pass");
+check("'direction' DOES match data-direction (hyphen is a boundary)", abi("direction") === "fail");
+check("whole identifier still matches ('flexDirection' present -> fail)", abi("flexDirection") === "fail");
+check("regex metacharacters in a term are literal and do not throw", abi("a.b(c") === "pass" && abi("[x]") === "pass" && abi(".*") === "pass");
+check("empty / junk absent list is not trusted as a pass", idx.reconcileVerification(["x"], [{ index: 1, clauses: [{ clause: "c", status: "pass", absent: ["", " "] }] }], af)[0].status === "unverified");
+check("quoted clause + absent clause -> item pass", idx.reconcileVerification(["x"], [{ index: 1, clauses: [{ clause: "a", status: "pass", evidence: "width: 320" }, { clause: "b", absent: ["className="] }] }], af)[0].status === "pass");
+
 console.log("receipt schema v1 / v2");
 const base = { feature_id: "f", file_path: "src/D.tsx", ledger_entry_id: null, verdict: "custom_build", chosen_candidate: null, snapshot_ref: null, checked_at: "t", manual_override: false, override_reason: null };
 const ver = { verified_at: "t", file_sha256: "abc", summary: { pass: 1, fail: 0, unverified: 0, total: 1 }, items: [{ item: "x", status: "pass", evidence: "y" }], divergences: [] };
