@@ -1755,7 +1755,7 @@ export function stripCodeComments(text: string): string {
 }
 const squash = (t: string) => t.replace(/\s+/g, " ").trim();
 
-function buildVerifySystemPrompt(): string {
+function buildVerifySystemPrompt(withEvidence: boolean): string {
   return `You are the post-build verification step of a UI component judgment tool. You are given a requirement checklist and the source of a component that was built to satisfy it. Decide, for EACH checklist item, whether the source satisfies it.
 
 Rules:
@@ -1767,12 +1767,14 @@ Rules:
 - Be strict about numbers: if a clause states a size, spacing, radius or count and the code uses a different value, that clause fails, quoting the differing code.
 Do not give credit for intent or comments. A TODO or a comment claiming it works is not a pass.
 
-Also list "divergences": up to 5 places where the source departs from the chosen design or from the Figma evidence given (a different size, spacing, radius, missing sub-component, extra behavior). One short sentence each, citing both values. Empty list if none.
+${withEvidence ? `Also list "divergences": measurable places where the source departs from the Figma evidence section. Be conservative; an empty list is a good answer. Each is an object:
+{ "kind": "size" | "spacing" | "radius" | "layout" | "composition", "figma_component": "exact component name as it appears in the evidence section", "figma_value": "the value copied verbatim from that component's evidence line (e.g. gap 16)", "code_snippet": "verbatim snippet from the source showing the differing value", "code_value": "the value the code uses", "same_element": true }
+Rules: "same_element" is true ONLY if the code element you point at is that very Figma component or a named part of it (the dialog itself, its header, its footer buttons). A different thing that merely resembles it (a 40px icon tile versus the 24px Icon Button component) is NOT a divergence; set same_element false or leave it out. Never report text content, labels, placeholder or sample copy, or colors as divergences. Never report something the evidence does not state. At most 5.` : `Set "divergences" to an empty list (no design evidence is available for this component).`}
 
 Respond with ONLY a single JSON object, no prose, no markdown fences:
 {
   "items": [ { "index": 1, "clauses": [ { "clause": "short phrase", "status": "pass" | "fail" | "unverified", "evidence": "verbatim snippet or empty", "absent": ["only for must-be-absent clauses"] } ] } ],
-  "divergences": [ "string" ]
+  "divergences": [ ]
 }
 Return one entry per checklist item, using the item's number as "index".`;
 }
@@ -1784,6 +1786,8 @@ export interface VerifyComponentResult {
   summary: ReceiptVerification["summary"];
   items: VerificationItem[];
   divergences: string[];
+  /** Model-proposed divergences the server could not back up (reason + raw), for transparency; not stored in the receipt. */
+  divergences_dropped: DivergenceCheck["dropped"];
   receipt: { updated: boolean; feature_id?: string };
   _meta: NonNullable<JudgmentResult["_meta"]>;
 }
@@ -1857,6 +1861,49 @@ export function reconcileVerification(
   });
 }
 
+export interface DivergenceCheck {
+  kept: string[];
+  dropped: Array<{ reason: string; raw: unknown }>;
+}
+
+/**
+ * Keeps only divergences the server can back up: a known kind, a component
+ * that was actually in the evidence shown, a figma_value that really appears
+ * in that evidence, a code snippet that really is in the file, the same
+ * element on both sides, and values that genuinely differ. Everything else is
+ * dropped (and reported), so the list is short and every entry is checkable.
+ */
+export function reconcileDivergences(
+  raw: unknown,
+  evidenceBlock: string,
+  evidenceNames: string[],
+  fileText: string
+): DivergenceCheck {
+  const KINDS = new Set(["size", "spacing", "radius", "layout", "composition"]);
+  const kept: string[] = [];
+  const dropped: DivergenceCheck["dropped"] = [];
+  const hay = squash(fileText);
+  const block = squash(evidenceBlock).toLowerCase();
+  const names = new Set(evidenceNames.map((n) => n.toLowerCase()));
+  const nums = (t: string) => (t.match(/-?\d+(?:\.\d+)?/g) ?? []).sort().join(",");
+  if (!Array.isArray(raw)) return { kept, dropped };
+  for (const d of raw as Array<Record<string, unknown>>) {
+    if (kept.length >= 5) break;
+    const str = (k: string) => (typeof d?.[k] === "string" ? squash(d[k] as string) : "");
+    const kind = str("kind"), comp = str("figma_component"), fv = str("figma_value"), snip = str("code_snippet"), cv = str("code_value");
+    const drop = (reason: string) => dropped.push({ reason, raw: d });
+    if (!KINDS.has(kind)) drop("kind not allowed (text, labels and colors are never divergences)");
+    else if (d.same_element !== true) drop("not the same element on both sides");
+    else if (!comp || !names.has(comp.toLowerCase())) drop("figma_component was not in the evidence shown");
+    else if (!fv || !block.includes(fv.toLowerCase())) drop("figma_value is not in the evidence");
+    else if (!snip || !hay.includes(snip)) drop("code_snippet is not in the file");
+    else if (!cv) drop("no code_value");
+    else if (nums(fv) !== "" && nums(fv) === nums(cv)) drop("values do not differ");
+    else kept.push(`${comp} ${kind}: Figma ${fv} vs code ${cv} (\`${snip.slice(0, 100)}\`)`);
+  }
+  return { kept, dropped };
+}
+
 async function runVerifyComponent(input: { project_id: string; file_path: string }): Promise<VerifyComponentResult> {
   const rel = normalizeRelPath(input.file_path);
   const abs = resolveWithinRoot(PROJECT_ROOT, rel);
@@ -1896,7 +1943,7 @@ async function runVerifyComponent(input: { project_id: string; file_path: string
     model: MODEL,
     max_tokens: 16384,
     ...scoringThinkingParams(),
-    system: [{ type: "text", text: buildVerifySystemPrompt(), cache_control: { type: "ephemeral" } }],
+    system: [{ type: "text", text: buildVerifySystemPrompt(evidence.names.length > 0), cache_control: { type: "ephemeral" } }],
     messages: [{ role: "user", content: userMessage }],
   });
   if (data.stop_reason === "max_tokens") throw new Error("Verification response was truncated (stop_reason: max_tokens); retry.");
@@ -1910,9 +1957,8 @@ async function runVerifyComponent(input: { project_id: string; file_path: string
   }
 
   const items = reconcileVerification(entry.checklist, parsed.items, fileText);
-  const divergences = Array.isArray(parsed.divergences)
-    ? (parsed.divergences as unknown[]).filter((d): d is string => typeof d === "string" && d.trim() !== "").map((d) => squash(d).slice(0, 300)).slice(0, 5)
-    : [];
+  const divCheck = reconcileDivergences(parsed.divergences, evidence.block, evidence.names, fileText);
+  const divergences = divCheck.kept;
   const summary = {
     pass: items.filter((i) => i.status === "pass").length,
     fail: items.filter((i) => i.status === "fail").length,
@@ -1944,6 +1990,7 @@ async function runVerifyComponent(input: { project_id: string; file_path: string
     summary,
     items,
     divergences,
+    divergences_dropped: divCheck.dropped,
     receipt,
     _meta: buildMeta(data.timings, data.usage),
   };

@@ -149,7 +149,7 @@ const VERIFY_INPUT_ROWS: Row[] = [
 const VERIFY_OUTPUT_ROWS: Row[] = [
   ["summary", "{ pass, fail, unverified, total }", "Per checklist item. An item passes only if every clause of it has its own verbatim quote that the server confirms is in the file"],
   ["items", "{ item, status, evidence, clauses[] }[]", "Must-be-absent clauses (no Tailwind, LTR only) are searched for by the server, not decided by the model"],
-  ["divergences", "string[]", "Up to 5 places the code departs from the chosen design or Figma values. The noisiest part of the result"],
+  ["divergences", "string[]", "Up to 5 measurable departures from the Figma values (size, spacing, radius, layout), each backed by a snippet the server confirmed is in the file. Often empty by design"],
   ["receipt", "{ updated, feature_id? }", "Written into the committed receipt (schema v2) when the gate already created one for this file"],
 ];
 

@@ -923,8 +923,14 @@ found. Files over 80,000 characters are refused rather than truncated.
   be quoted, so the model names search terms and the server searches the file
   itself (comments ignored, whole-identifier match). It passes only if none
   occur.
-- Up to five **divergences** from the chosen design are listed (e.g. a size or
-  spacing that differs from the Figma values).
+- Up to five **divergences** from the Figma values are listed (size, spacing,
+  radius, layout, composition) -- only for a Figma registration with stored
+  evidence. The server keeps a divergence only if it can back it up: the Figma
+  component and value are really in the evidence shown, the code snippet is
+  really in the file, both sides are the same element, and the numbers actually
+  differ. Text, labels, sample copy and colors are never divergences. Dropped
+  ones are returned as `divergences_dropped` (reason + raw) but not stored in
+  the receipt.
 
 ### Output and receipt
 
@@ -957,8 +963,9 @@ quote proves a snippet exists, and per-clause quoting shrinks but does not
 remove the chance that a clause is satisfied more loosely than it reads.
 Results vary a little between runs (on a real 9-item component, 6-7 items
 passed and the same one or two items flipped between `fail` and `unverified`
-across runs); treat `unverified` as "look at this", not "fine". The divergence
-list is the noisiest part. One call costs a few cents (measured $0.045-0.056
+across runs); treat `unverified` as "look at this", not "fine". Divergences are
+deliberately conservative: an empty list is common, and a divergence the model
+could have reported but did not is not caught. One call costs a few cents (measured $0.045-0.056
 on a ~7 KB component).
 
 ## Advanced tools
