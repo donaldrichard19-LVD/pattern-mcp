@@ -2161,6 +2161,62 @@ export function isBoundaryRisk(result: JudgmentResult): boolean {
   return isNearVerdictBoundary(met, total);
 }
 
+export interface StabilityReport {
+  passes: number;
+  /** Per-pass count of met items, e.g. [5, 7, 6] (same-length checklists only). */
+  met_per_pass?: number[];
+  /** "5-7 of 9" -- the spread of coverage across passes. */
+  coverage_spread?: string;
+  /** False when the passes scored different item lists (each pass re-extracted its own), so item-level agreement is not meaningful. */
+  items_comparable: boolean;
+  /** Items the passes did not agree on, with the vote. Empty when every item was unanimous. */
+  split_items?: Array<{ requirement: string; met_votes: string }>;
+  unanimous_items?: number;
+}
+
+const normReq = (t: string) => t.replace(/\s+/g, " ").trim().toLowerCase();
+
+/**
+ * Item-level variance across the scoring passes the ensemble already paid
+ * for -- free to compute. Reporting only: it never changes the verdict,
+ * coverage or confidence. Null when fewer than two passes have a checklist.
+ */
+export function summarizeStability(
+  perPass: Array<Array<{ requirement?: string; met?: boolean }> | null | undefined>,
+  opts: { providedChecklist?: string[] } = {}
+): StabilityReport | null {
+  type Item = { requirement?: string; met?: boolean };
+  const lists = perPass.filter((l): l is Item[] => Array.isArray(l) && l.length > 0);
+  if (lists.length < 2) return null;
+  // A caller-provided checklist is fixed input and the passes return its items
+  // in order (the model sometimes shortens the wording), so match by position
+  // when every pass has exactly that many items. An extracted checklist is
+  // different per pass, so there the wording must match.
+  const provided = opts.providedChecklist;
+  const byPosition = !!provided && provided.length > 0 && lists.every((l) => l.length === provided.length);
+  const sameItems =
+    byPosition ||
+    lists.every((l) => l.length === lists[0].length && l.every((it, i) => normReq(it.requirement ?? "") === normReq(lists[0][i].requirement ?? "")));
+  if (!sameItems) return { passes: lists.length, items_comparable: false };
+  const label = (i: number) => (byPosition ? provided![i] : lists[0][i].requirement ?? "");
+  const total = lists[0].length;
+  const metCounts = lists.map((l) => l.filter((it) => it.met === true).length);
+  const lo = Math.min(...metCounts), hi = Math.max(...metCounts);
+  const split: NonNullable<StabilityReport["split_items"]> = [];
+  lists[0].forEach((it, i) => {
+    const votes = lists.filter((l) => l[i].met === true).length;
+    if (votes !== 0 && votes !== lists.length) split.push({ requirement: label(i).slice(0, 160), met_votes: `${votes}/${lists.length}` });
+  });
+  return {
+    passes: lists.length,
+    met_per_pass: metCounts,
+    coverage_spread: lo === hi ? `${lo} of ${total} in every pass` : `${lo}-${hi} of ${total}`,
+    items_comparable: true,
+    split_items: split,
+    unanimous_items: total - split.length,
+  };
+}
+
 // Generalizes BOUNDARY_RISK_MET_COUNTS_FOR_8_ITEMS to any checklist size: a
 // single run is risky when one item's judgment flipping (met +/- 1) would
 // move coverage into a different band (<40% custom_build, 40-79% low-
@@ -4316,6 +4372,8 @@ async function judgeComponent(input: {
   // the tool should surface, not paper over with a confident-sounding verdict.
   if (majorityCount < passes.length) base.confidence = "low";
   base.ensemble = { triggered: true, runs: verdicts, agreement };
+  const stability = summarizeStability(passes.map((p) => p.result.requirements_checked), { providedChecklist: input.checklist });
+  if (stability) base.stability = stability;
   // Captured before aggregateMeta overwrites base._meta (same object as
   // winningPass.result._meta) with a fresh summed-across-passes object --
   // scoring_fetch isn't summed like cost/tokens, it describes whichever
@@ -4430,6 +4488,8 @@ export interface JudgmentResult {
     reference?: ReferenceEntry | ReferenceEntry[] | null;
   } | null;
   ensemble?: { triggered: boolean; runs?: string[]; agreement?: string };
+  /** Only when 2+ scoring passes ran: how much the passes agreed item by item. Absent on a single pass (no variance information). */
+  stability?: StabilityReport;
   past_decision_signal?: { considered: boolean; note: string } | null;
   checklist_source?: "extracted" | "provided";
   // Present and true only when this response was served from the ledger
