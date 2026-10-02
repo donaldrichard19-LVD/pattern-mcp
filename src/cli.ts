@@ -22,6 +22,7 @@ import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve as resolvePath } from "node:path";
 import { deriveProjectId } from "./project-id.js";
 import { fetchFigmaFile } from "./design-system-figma.js";
+import { GATE_INIT_COMMAND, GATE_NPX, isLegacyGateInvocation } from "./gate-commands.js";
 
 type Level = "ok" | "warn" | "fail";
 interface Line { level: Level; text: string }
@@ -29,6 +30,14 @@ interface Line { level: Level; text: string }
 const KEYS = ["ANTHROPIC_API_KEY", "TYPESAFE_API_KEY", "FIGMA_ACCESS_TOKEN"] as const;
 
 interface ServerEntry { source: string; env: Record<string, string> }
+
+function readText(path: string): string | null {
+  try {
+    return readFileSync(path, "utf8");
+  } catch {
+    return null;
+  }
+}
 
 function readJson(path: string): Record<string, any> | null {
   try {
@@ -149,8 +158,17 @@ export async function runDoctor(root: string, opts: { online: boolean; projectId
   }
 
   const settings = readJson(join(root, ".claude", "settings.json"));
-  const hooked = JSON.stringify(settings?.hooks ?? {}).includes("pattern-check-gate-hook");
-  out.push(hooked ? { level: "ok", text: "Gate hook installed in .claude/settings.json (restart the session that installed it)" } : { level: "warn", text: "Gate hook not installed (optional): `npx pattern-check-gate init`" });
+  const hooksText = JSON.stringify(settings?.hooks ?? {});
+  const hooked = hooksText.includes("pattern-check-gate-hook");
+  if (hooked && isLegacyGateInvocation(hooksText.replace(/\\"/g, '"'))) {
+    out.push({ level: "warn", text: `Gate hook in .claude/settings.json uses the pre-0.19.1 command, which cannot run (it names an npm package that does not exist), so the gate is not enforcing anything. Fix: re-run \`${GATE_INIT_COMMAND}\` (it repairs the command in place), then restart the session.` });
+  } else {
+    out.push(hooked ? { level: "ok", text: "Gate hook installed in .claude/settings.json (restart the session that installed it)" } : { level: "warn", text: `Gate hook not installed (optional): \`${GATE_INIT_COMMAND}\`` });
+  }
+  const workflow = readText(join(root, ".github", "workflows", "pattern-gate.yml"));
+  if (workflow && isLegacyGateInvocation(workflow)) {
+    out.push({ level: "warn", text: `.github/workflows/pattern-gate.yml runs pattern-check-gate through a bare npx (no \`-p pattern-mcp\`), which fails with "not found" on CI. Change it to \`${GATE_NPX} pattern-check-gate verify ...\` (see templates/github-workflows/pattern-gate.yml).` });
+  }
   return out;
 }
 

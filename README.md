@@ -14,7 +14,22 @@ is recorded in an auditable ledger you can verify later.
 
 [Website](https://usepattern.sh) · [npm](https://www.npmjs.com/package/pattern-mcp) · [Report an issue](https://github.com/donaldrichard19-LVD/pattern-mcp/issues/new/choose)
 
-**Current release: v0.19.0** closes the loop after the build. New:
+**Current release: v0.19.1** fixes the enforcement setup. Through 0.19.0 the
+CI workflow template, the hook that `init` wrote, the first-run notice and the
+docs launched `pattern-check-gate` and `pattern-check-gate-hook` through a bare
+`npx` call, but those are bins inside `pattern-mcp`, not npm packages. On a
+machine without `pattern-mcp` already installed, the CI check failed with
+"not found" and the hook errored on every call (a hook error does not block, so
+the gate silently never ran). Everything now uses `npx --yes -p pattern-mcp
+<bin>`; the hook calls its sibling script directly; `init` repairs an old hook
+command in place; `pattern doctor` warns about the old hook and workflow forms.
+If you set up the gate on 0.19.0 or earlier, re-run `npx -p pattern-mcp
+pattern-check-gate init` and update `.github/workflows/pattern-gate.yml` to the
+template. Also corrected: the docs' bare `npx` call for `pattern doctor` ran an
+unrelated npm package that happens to be named `pattern`; the right command is
+`npx -p pattern-mcp pattern doctor`.
+
+**v0.19.0** closes the loop after the build. New:
 `verify_component` checks the built file against its requirement checklist
 with quotes the server confirms are in the file, and writes the result into
 the receipt (schema v2); Figma registrations now keep raw sizes, spacing and
@@ -437,7 +452,7 @@ each piece of context:
    figma_file_key | figma_json_path | directory_path | manifest_path })`.
    For a Figma file, scope it with `figma_pages` / `figma_exclude_pages`;
    components-mode registration also stores the raw Figma facts (sizes,
-   spacing, nested components) for later steps. Run `npx pattern doctor`
+   spacing, nested components) for later steps. Run `npx -p pattern-mcp pattern doctor`
    first if anything about setup is unclear.
 2. **Extract the checklist** -- `extract_requirements({ component_need,
    domain, project_id })`. With a `project_id` that has a Figma
@@ -514,7 +529,7 @@ MCP host (Cursor, Codex, etc.) is entirely unaffected either way.
 **Set it up with one command:**
 
 ```bash
-npx pattern-check-gate init
+npx -p pattern-mcp pattern-check-gate init
 ```
 
 Confirms each step independently rather than one blanket "proceed?", and

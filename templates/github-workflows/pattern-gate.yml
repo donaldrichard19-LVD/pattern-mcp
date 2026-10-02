@@ -39,4 +39,4 @@ jobs:
           echo "EOF" >> "$GITHUB_OUTPUT"
       - name: Run pattern-check-gate verify
         if: steps.diff.outputs.files != ''
-        run: npx --yes pattern-check-gate verify --files ${{ steps.diff.outputs.files }} --project-root "$PWD"
+        run: npx --yes -p pattern-mcp pattern-check-gate verify --files ${{ steps.diff.outputs.files }} --project-root "$PWD"

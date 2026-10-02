@@ -5,11 +5,11 @@
 // automatically by pattern-mcp itself -- opt-in, per BACKLOG.md's
 // "Enforcement boundary: hook + CI gate" entry.
 //
-// A real bin entry (not a template file to hand-copy) so it resolves the
-// same way whether pattern-mcp is a real devDependency in the consuming
-// repo's node_modules or only ever fetched ad hoc via npx -- both cases
-// invoke it as `npx --yes pattern-check-gate-hook`, npx's own caching
-// handles the rest. This also makes it testable the same way as
+// A real bin entry (not a template file to hand-copy). It is invoked as
+// `npx --yes -p pattern-mcp pattern-check-gate-hook` (see gate-commands.ts:
+// the bin is not an npm package of its own), or directly from node_modules/.bin
+// when pattern-mcp is a devDependency. It runs its sibling check-gate.js with
+// the same node binary -- no second npx, no network. This also makes it testable the same way as
 // check-gate.ts itself (spawned as a real subprocess in
 // scripts/verify-check-gate.mjs), rather than living outside the build.
 //
@@ -25,6 +25,8 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 interface PreToolUseInput {
   tool_name?: string;
@@ -66,7 +68,8 @@ async function main(): Promise<void> {
   }
   if (isNewFile) args.push("--is-new");
 
-  const result = spawnSync("npx", ["--yes", "pattern-check-gate", ...args], {
+  const gateScript = join(dirname(fileURLToPath(import.meta.url)), "check-gate.js");
+  const result = spawnSync(process.execPath, [gateScript, ...args], {
     input: content,
     encoding: "utf8",
     timeout: 30000,

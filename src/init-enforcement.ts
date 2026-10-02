@@ -18,6 +18,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deriveProjectId } from "./project-id.js";
 import { closeRl, confirm, promptText, shellQuote, type PromptOptions } from "./prompt.js";
+import { GATE_INIT_COMMAND, HOOK_COMMAND, isLegacyGateInvocation } from "./gate-commands.js";
 
 const HOOK_MARKER = "pattern-check-gate-hook";
 
@@ -56,17 +57,40 @@ async function setupClaudeSettings(root: string, projectIdOverride: string | nul
   }
 
   const preToolUse: PreToolUseEntry[] = settings.hooks?.PreToolUse ?? [];
-  const alreadyInstalled = preToolUse.some((entry) =>
-    (entry.hooks ?? []).some((h) => typeof h.command === "string" && h.command.includes(HOOK_MARKER)),
-  );
+  const ours = (h: { command?: unknown }) => typeof h.command === "string" && h.command.includes(HOOK_MARKER);
+  const alreadyInstalled = preToolUse.some((entry) => (entry.hooks ?? []).some(ours));
   if (alreadyInstalled) {
-    console.log("  .claude/settings.json: hook already configured, skipping.");
-    return "already";
+    // Hooks written before 0.19.1 ran the hook bin through a bare npx (no
+    // `-p pattern-mcp`), which asks npm for a package that does not exist: the hook errors on every tool
+    // call and, since a hook error is non-blocking, the gate silently never runs.
+    // Repair those in place (keeping any env prefix), never touching other hooks.
+    let repaired = 0;
+    for (const entry of preToolUse) {
+      for (const h of entry.hooks ?? []) {
+        if (ours(h) && isLegacyGateInvocation(h.command as string)) {
+          h.command = (h.command as string).replace(/\bnpx\s+(?:(?:--yes|-y)\s+)?pattern-check-gate-hook\b/, HOOK_COMMAND);
+          repaired++;
+        }
+      }
+    }
+    if (repaired === 0) {
+      console.log("  .claude/settings.json: hook already configured, skipping.");
+      return "already";
+    }
+    console.log(`  .claude/settings.json: this hook uses the pre-0.19.1 command, which cannot run (it names an npm package that does not exist).`);
+    console.log(`  Updating it to: ${HOOK_COMMAND}`);
+    if (!(await confirm("  Write this?", options, true))) {
+      console.log("  Skipped.");
+      return "skipped";
+    }
+    writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n", "utf8");
+    console.log("  Written. Restart the Claude Code session so it picks up the change.");
+    return "written";
   }
 
   const command = projectIdOverride
-    ? `env PATTERN_PROJECT_ID=${shellQuote(projectIdOverride)} npx --yes pattern-check-gate-hook`
-    : "npx --yes pattern-check-gate-hook";
+    ? `env PATTERN_PROJECT_ID=${shellQuote(projectIdOverride)} ${HOOK_COMMAND}`
+    : HOOK_COMMAND;
 
   const newEntry: PreToolUseEntry = {
     matcher: "Edit|Write",
@@ -368,7 +392,7 @@ export async function offerEnforcementSetupOnce(root: string): Promise<void> {
       "",
       "Pattern -- enforcement boundary available (this will not print again)",
       "By default, Pattern is something the calling agent chooses to use.",
-      "An opt-in hook + CI check can require it instead: run `npx pattern-check-gate init`",
+      "An opt-in hook + CI check can require it instead: run `${GATE_INIT_COMMAND}`",
       "in your repo to set it up.",
       "Full details: https://github.com/donaldrichard19-LVD/pattern-mcp#enforcement-boundary-hook--ci-gate",
       "",

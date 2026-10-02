@@ -173,7 +173,7 @@ const FIGMA_EVIDENCE_OUTPUT_ROWS: Row[] = [
 const REGISTER_DESIGN_SYSTEM_INPUT_ROWS: Row[] = [
   ["project_id", "string, required", "Must match the project_id used in later recommend_component calls"],
   ["figma_file_key", "string, optional", "A Figma file, fetched with FIGMA_ACCESS_TOKEN from your environment (never a tool argument). Components mode also stores raw sizes, spacing and nested components"],
-  ["figma_json_path", "string, optional", "A saved Figma file response, relative to the project root. Fully local, no token. npx pattern fetch-figma <key> downloads one safely"],
+  ["figma_json_path", "string, optional", "A saved Figma file response, relative to the project root. Fully local, no token. npx -p pattern-mcp pattern fetch-figma <key> downloads one safely"],
   ["figma_mode", "components | frames, optional", "components (default): defined components and variants. frames: named designs on pages, for template files"],
   ["figma_pages", "string[], optional", "Only these pages (substring match). figma_exclude_pages skips pages, e.g. [\"Icons\"]"],
   ["manifest_path", "string, optional", "A hand-authored JSON manifest or a Storybook-exported stories/index file, relative to the project root"],
@@ -215,8 +215,8 @@ const CONFIG_ROWS: Row[] = [
 
 const ENFORCEMENT_CLI_ROWS: [string, string][] = [
   ["npx pattern-mcp init", "Connects Claude Code, Cursor, Codex or Claude Desktop, stores your key, and offers to install the enforcement hook."],
-  ["npx pattern doctor", "Checks what usually goes wrong before the first run: which config holds the server, which keys are in its env block, the Figma token shape, the project root and id. Never prints a secret."],
-  ["npx pattern fetch-figma <key>", "Downloads a Figma file with your token and saves it locally only if it is a real file, never an error body."],
+  ["npx -p pattern-mcp pattern doctor", "Checks what usually goes wrong before the first run: which config holds the server, which keys are in its env block, the Figma token shape, the project root and id. Never prints a secret."],
+  ["npx -p pattern-mcp pattern fetch-figma <key>", "Downloads a Figma file with your token and saves it locally only if it is a real file, never an error body."],
   ["pattern-check-gate write", "Run by the local hook. Blocks a new component from being written until a matching Pattern decision exists."],
   ["pattern-check-gate verify", "Run in CI. Fails the check if a committed receipt is missing for a new component."],
   ["pattern-check-gate init", "Sets up the enforcement boundary by configuring the local hook and CI workflow. It can also configure GitHub branch protection."],
