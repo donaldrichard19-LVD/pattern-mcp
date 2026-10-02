@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "PATTERN_PROJECT_ID=website npx --yes -p pattern-mcp@latest pattern-check-gate-hook",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}
