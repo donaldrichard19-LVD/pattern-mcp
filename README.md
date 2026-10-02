@@ -2427,6 +2427,31 @@ items that is exactly the set above; for 9 or 10 items it is 3, 4, 7 or 8 met.
 (Before, any checklist that was not exactly eight items always paid for the
 extra passes.)
 
+### Variance report (`stability`)
+
+Whenever the ensemble runs two or more scoring passes, the result also carries
+a `stability` block built from passes that were already paid for (no extra
+call):
+
+```json
+"stability": {
+  "passes": 2,
+  "met_per_pass": [7, 7],
+  "coverage_spread": "7 of 9 in every pass",
+  "items_comparable": true,
+  "split_items": [ { "requirement": "...", "met_votes": "1/2" } ],
+  "unanimous_items": 8
+}
+```
+
+`split_items` are the checklist items the passes disagreed on -- the ones to
+look at by hand. With a checklist you pass in, items are matched by position
+(the model sometimes shortens the wording); with an extracted checklist each
+pass writes its own items, so `items_comparable` is `false` and only the
+verdict agreement is reported. It is reporting only: it never changes the
+verdict, coverage or confidence, and a single-pass result has no `stability`
+block, because one pass carries no variance information.
+
 ### Scoring effort
 
 The design-system scoring pass runs with `effort: medium` by default. On two
