@@ -14,7 +14,21 @@ is recorded in an auditable ledger you can verify later.
 
 [Website](https://usepattern.sh) · [npm](https://www.npmjs.com/package/pattern-mcp) · [Report an issue](https://github.com/donaldrichard19-LVD/pattern-mcp/issues/new/choose)
 
-**Current release: v0.18.0** makes Pattern design-system-only.
+**Current release: v0.19.0** closes the loop after the build. New:
+`verify_component` checks the built file against its requirement checklist
+with quotes the server confirms are in the file, and writes the result into
+the receipt (schema v2); Figma registrations now keep raw sizes, spacing and
+nested components, which scoring, `extract_requirements` (new optional
+`project_id`, tagged `checklist_items`) and `get_figma_evidence` use; a hybrid
+scorer (Jev picks the match, Anthropic only writes the custom-build gap list
+when `TYPESAFE_API_KEY` is set); `pattern doctor` and `pattern fetch-figma`;
+and an ensemble `stability` report. Changed defaults: the scoring pass runs
+at `effort: medium` (about 25-35% cheaper and faster on two measured needs),
+and the extra ensemble passes now run only near a verdict boundary for any
+checklist size, not just eight items. See [Recommended
+workflow](#recommended-workflow).
+
+**v0.18.0** made Pattern design-system-only.
 `recommend_component` now scores exclusively against a design system you
 register with `register_design_system`. It no longer searches shadcn/ui,
 21st.dev, ReUI, Mobbin, or Figma Community, and a `custom_build` verdict
