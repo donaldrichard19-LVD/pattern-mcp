@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "npx --yes pattern-check-gate-hook",
+            "command": "npx --yes -p pattern-mcp pattern-check-gate-hook",
             "timeout": 60
           }
         ]

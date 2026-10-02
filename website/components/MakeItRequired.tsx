@@ -4,7 +4,7 @@ import { ArrowRight, Check, X } from "lucide-react";
 import { BODY, H2, LABEL, MONO, PANEL, SECTION } from "./tokens";
 import { CopyBlock, Reveal } from "./ui";
 
-const COMMAND_LINES = ["npx pattern-check-gate init"];
+const COMMAND_LINES = ["npx -p pattern-mcp pattern-check-gate init"];
 
 function FlowDiagram() {
   const steps = ["Agent: write PriceBreakdown.tsx", "Hook", "Pattern: Answers", "Write"];

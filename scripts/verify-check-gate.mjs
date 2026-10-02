@@ -573,7 +573,7 @@ console.log("13b. pattern-check-gate init: a hand-pinned hook is recognised, not
 {
   const root = mkdtempSync(join(tmpdir(), "pattern-check-gate-test-"));
   mkdirSync(join(root, ".claude"), { recursive: true });
-  const pinned = "PATTERN_PROJECT_ID=website npx --yes pattern-check-gate-hook";
+  const pinned = "PATTERN_PROJECT_ID=website npx --yes -p pattern-mcp pattern-check-gate-hook";
   const existing = { hooks: { PreToolUse: [{ matcher: "Edit|Write", hooks: [{ type: "command", command: pinned, timeout: 60 }] }] } };
   const before = JSON.stringify(existing, null, 2) + "\n";
   writeFileSync(join(root, ".claude", "settings.json"), before, "utf8");
@@ -583,6 +583,70 @@ console.log("13b. pattern-check-gate init: a hand-pinned hook is recognised, not
   check("settings.json is left byte-for-byte unchanged (no second entry)", after === before);
   check("says the hook was already configured", /hook already configured/.test(result.stdout));
   check("does not claim a restart is required for an untouched hook, but warns about its pinned id", !/will NOT fire in the session/.test(result.stdout) && /keeps whatever PATTERN_PROJECT_ID/.test(result.stdout));
+  rmSync(root, { recursive: true, force: true });
+}
+
+console.log("13c. pattern-check-gate init: repairs a pre-0.19.1 hook command in place");
+{
+  const root = mkdtempSync(join(tmpdir(), "pattern-check-gate-test-"));
+  mkdirSync(join(root, ".claude"), { recursive: true });
+  const legacy = "env PATTERN_PROJECT_ID=website npx --yes pattern-check-gate-hook";
+  const existing = { hooks: { PreToolUse: [
+    { matcher: "Bash", hooks: [{ type: "command", command: "echo unrelated" }] },
+    { matcher: "Edit|Write", hooks: [{ type: "command", command: legacy, timeout: 60 }] },
+  ] } };
+  writeFileSync(join(root, ".claude", "settings.json"), JSON.stringify(existing, null, 2) + "\n", "utf8");
+  const result = runInit(root, ["--yes"]);
+  const settings = JSON.parse(readFileSync(join(root, ".claude", "settings.json"), "utf8"));
+  check("init exits 0", result.status === 0);
+  check("legacy command rewritten to the -p pattern-mcp form", settings.hooks.PreToolUse[1].hooks[0].command === "env PATTERN_PROJECT_ID=website npx --yes -p pattern-mcp pattern-check-gate-hook");
+  check("env prefix, matcher and timeout preserved", settings.hooks.PreToolUse[1].matcher === "Edit|Write" && settings.hooks.PreToolUse[1].hooks[0].timeout === 60);
+  check("unrelated hook untouched and no duplicate entry", settings.hooks.PreToolUse.length === 2 && settings.hooks.PreToolUse[0].hooks[0].command === "echo unrelated");
+  check("tells the user it was a broken command and to restart", /cannot run/.test(result.stdout) && /Restart the Claude Code session/.test(result.stdout));
+  const again = runInit(root, ["--yes"]);
+  check("second run is a no-op", /hook already configured/.test(again.stdout));
+  rmSync(root, { recursive: true, force: true });
+}
+
+console.log("13d. the hook binary runs with NO npx on PATH (it calls its sibling script, not the registry)");
+{
+  const root = mkdtempSync(join(tmpdir(), "pattern-check-gate-test-"));
+  const emptyBin = mkdtempSync(join(tmpdir(), "pattern-empty-path-"));
+  mkdirSync(join(root, "src"), { recursive: true });
+  const hookPath = fileURLToPath(new URL("../dist/check-gate-hook.js", import.meta.url));
+  const payload = JSON.stringify({ tool_name: "Write", cwd: root, tool_input: { file_path: join(root, "src", "NewThing.tsx"), content: GATED_COMPONENT_SOURCE } });
+  const run = (env) => spawnSync(process.execPath, [hookPath], {
+    input: payload, encoding: "utf8",
+    env: { ...process.env, PATH: emptyBin, PATTERN_NO_AUTOSTART: "1", PATTERN_LEDGER_PATH: join(root, "no-ledger.jsonl"), ...env },
+  });
+  const denied = run({});
+  let out = null;
+  try { out = JSON.parse(denied.stdout); } catch { /* checked below */ }
+  check("exits 0", denied.status === 0);
+  check("denies a new component with no Pattern decision (so the gate really ran)", out?.hookSpecificOutput?.permissionDecision === "deny");
+  check("did not need npx or the network", !/not found|ENOENT|E404/.test(denied.stderr ?? ""));
+  const killed = run({ PATTERN_NO_ENFORCEMENT_HOOK: "1" });
+  check("kill switch still allows (no output)", killed.status === 0 && (killed.stdout ?? "").trim() === "");
+  rmSync(root, { recursive: true, force: true });
+  rmSync(emptyBin, { recursive: true, force: true });
+}
+
+console.log("13e. pattern doctor warns about the pre-0.19.1 hook command and workflow");
+{
+  const root = mkdtempSync(join(tmpdir(), "pattern-check-gate-test-"));
+  mkdirSync(join(root, ".claude"), { recursive: true });
+  mkdirSync(join(root, ".github", "workflows"), { recursive: true });
+  writeFileSync(join(root, ".claude", "settings.json"), JSON.stringify({ hooks: { PreToolUse: [{ matcher: "Edit|Write", hooks: [{ type: "command", command: "npx --yes pattern-check-gate-hook" }] }] } }), "utf8");
+  writeFileSync(join(root, ".github", "workflows", "pattern-gate.yml"), "jobs:\n  g:\n    steps:\n      - run: npx --yes pattern-check-gate verify --files a.tsx\n", "utf8");
+  const cliPath = fileURLToPath(new URL("../dist/cli.js", import.meta.url));
+  const doctor = (r) => spawnSync(process.execPath, [cliPath, "doctor", "--project-root", r], { encoding: "utf8", env: (() => { const e = { ...process.env }; delete e.PATTERN_NO_AUTOSTART; return e; })() });
+  const bad = doctor(root);
+  check("hook warning names the problem and the fix", /pre-0\.19\.1 command/.test(bad.stdout) && /pattern-check-gate init/.test(bad.stdout));
+  check("workflow warning names the fix", /pattern-gate\.yml runs/.test(bad.stdout) && /-p pattern-mcp pattern-check-gate verify/.test(bad.stdout));
+  writeFileSync(join(root, ".claude", "settings.json"), JSON.stringify({ hooks: { PreToolUse: [{ matcher: "Edit|Write", hooks: [{ type: "command", command: "npx --yes -p pattern-mcp pattern-check-gate-hook" }] }] } }), "utf8");
+  writeFileSync(join(root, ".github", "workflows", "pattern-gate.yml"), "      - run: npx --yes -p pattern-mcp pattern-check-gate verify --files a.tsx\n", "utf8");
+  const good = doctor(root);
+  check("no warning once both use the -p pattern-mcp form", !/pre-0\.19\.1/.test(good.stdout) && !/pattern-gate\.yml runs/.test(good.stdout) && /Gate hook installed/.test(good.stdout));
   rmSync(root, { recursive: true, force: true });
 }
 
