@@ -36,6 +36,7 @@ import {
 import { instrument } from "@posthog/mcp";
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
+import { attachVerificationToReceipt, type ReceiptVerification, type VerificationClause, type VerificationItem } from "./gate-receipt.js";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
@@ -737,6 +738,20 @@ const SWEEP_LEDGER_LIVENESS_TOOL_NAME = "sweep_ledger_liveness";
 const BACKFILL_LEDGER_SNAPSHOT_REF_TOOL_NAME = "backfill_ledger_snapshot_ref";
 const REGISTER_DESIGN_SYSTEM_TOOL_NAME = "register_design_system";
 const GET_FIGMA_EVIDENCE_TOOL_NAME = "get_figma_evidence";
+const VERIFY_COMPONENT_TOOL_NAME = "verify_component";
+
+const VERIFY_COMPONENT_INPUT_SCHEMA = {
+  type: "object",
+  properties: {
+    project_id: { type: "string", description: "The project_id used in recommend_component for this component." },
+    file_path: {
+      type: "string",
+      description:
+        "Path of the BUILT component file, relative to the project root. Must be the same file_path passed to recommend_component (that is how the ledger entry and its checklist are found).",
+    },
+  },
+  required: ["project_id", "file_path"],
+} as const;
 
 const GET_FIGMA_EVIDENCE_INPUT_SCHEMA = {
   type: "object",
@@ -757,6 +772,7 @@ const CORE_TOOL_NAMES = new Set([
   TOOL_NAME,
   EXTRACT_REQUIREMENTS_TOOL_NAME,
   RECORD_DECISION_TOOL_NAME,
+  VERIFY_COMPONENT_TOOL_NAME,
 ]);
 
 const INPUT_SCHEMA = {
@@ -1716,6 +1732,221 @@ function buildFigmaEvidenceBlock(
       ? `\n\nDetailed Figma evidence for the ${lines.length} most relevant candidates (exact values read from the design file; use them to judge size, spacing and composition requirements instead of assuming they are unknown):\n${lines.join("\n")}`
       : "";
   return { block, names };
+}
+
+// ---------------------------------------------------------------------
+// verify_component (Phase 5): per-item check of a BUILT file against the
+// checklist recorded for it, with server-verified quotes.
+// ---------------------------------------------------------------------
+const VERIFY_MAX_FILE_CHARS = 80_000;
+const VERIFICATIONS_PATH = process.env.PATTERN_LEDGER_VERIFICATIONS_PATH ?? join(homedir(), ".pattern", "ledger_verifications.jsonl");
+/**
+ * A forbidden-thing search term as a regex that does not match inside a
+ * longer identifier: "dir" must not hit "flexDirection" or "direction",
+ * while "dir=" (ends in punctuation) still anchors only on the left.
+ */
+export function absentTermRegex(term: string): RegExp {
+  const esc = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const word = /\w/;
+  return new RegExp(`${word.test(term[0]) ? "(?<![A-Za-z0-9_])" : ""}${esc}${word.test(term[term.length - 1]) ? "(?![A-Za-z0-9_])" : ""}`, "i");
+}
+export function stripCodeComments(text: string): string {
+  return text.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|\s)\/\/[^\n]*/g, "$1");
+}
+const squash = (t: string) => t.replace(/\s+/g, " ").trim();
+
+function buildVerifySystemPrompt(): string {
+  return `You are the post-build verification step of a UI component judgment tool. You are given a requirement checklist and the source of a component that was built to satisfy it. Decide, for EACH checklist item, whether the source satisfies it.
+
+Rules:
+- Judge only what the source code says. You cannot run it or see it render, so anything that depends on rendered appearance or runtime behavior you cannot see in the code is "unverified", not "pass".
+- "pass": the code clearly does it. "fail": the code clearly does not, or contradicts it. "unverified": cannot be decided from the source.
+- Many checklist items are COMPOUND ("Escape cancels, focus returns to the trigger, visible focus ring"). Split every item into its atomic clauses (1 to 6, each a short phrase naming one thing the code must do) and judge EACH clause separately. An item is only as good as its weakest clause: do not let one satisfied clause stand in for the others. A single-requirement item has exactly one clause.
+- For each clause, "pass" and a "fail" that rests on code that is present need "evidence": ONE contiguous snippet copied verbatim from the source (<= 200 characters, exact characters, no paraphrase, no ellipsis) that shows that clause specifically. For a "fail" because something is simply absent, use "" as evidence.
+- A clause that says something must be ABSENT ("no Tailwind classes", "LTR only, no RTL handling") cannot be quoted. Instead of "evidence", give "absent": 1 to 5 literal strings that would appear in the source if the forbidden thing were present (e.g. ["className=", "tw-", "rtl", "dir="]). The server searches the file for them: the clause passes only if none occur, and fails if any does. Choose strings specific enough not to appear innocently (comments are ignored by the search, but strings, identifiers and prop names are not).
+- Be strict about numbers: if a clause states a size, spacing, radius or count and the code uses a different value, that clause fails, quoting the differing code.
+Do not give credit for intent or comments. A TODO or a comment claiming it works is not a pass.
+
+Also list "divergences": up to 5 places where the source departs from the chosen design or from the Figma evidence given (a different size, spacing, radius, missing sub-component, extra behavior). One short sentence each, citing both values. Empty list if none.
+
+Respond with ONLY a single JSON object, no prose, no markdown fences:
+{
+  "items": [ { "index": 1, "clauses": [ { "clause": "short phrase", "status": "pass" | "fail" | "unverified", "evidence": "verbatim snippet or empty", "absent": ["only for must-be-absent clauses"] } ] } ],
+  "divergences": [ "string" ]
+}
+Return one entry per checklist item, using the item's number as "index".`;
+}
+
+export interface VerifyComponentResult {
+  ledger_entry_id: string;
+  file_path: string;
+  file_sha256: string;
+  summary: ReceiptVerification["summary"];
+  items: VerificationItem[];
+  divergences: string[];
+  receipt: { updated: boolean; feature_id?: string };
+  _meta: NonNullable<JudgmentResult["_meta"]>;
+}
+
+/**
+ * Turns the model's raw per-item answers into verified items. Pure and
+ * exported for offline testing: a "pass" is only kept when its quote is
+ * actually in the file; any other unsupported claim becomes "unverified".
+ */
+export function reconcileVerification(
+  checklist: string[],
+  raw: unknown,
+  fileText: string
+): VerificationItem[] {
+  const haystack = squash(fileText);
+  type RawItem = { index?: unknown; clauses?: unknown; status?: unknown; evidence?: unknown; clause?: unknown };
+  const byIndex = new Map<number, RawItem>();
+  if (Array.isArray(raw)) {
+    for (const r of raw as RawItem[]) {
+      const idx = typeof r?.index === "number" ? r.index : Number.NaN;
+      if (Number.isInteger(idx) && idx >= 1 && idx <= checklist.length && !byIndex.has(idx)) byIndex.set(idx, r);
+    }
+  }
+  // A claim is only as good as its quote: a pass needs a quote that is
+  // really in the file; a fail that cites code needs that code to be there.
+  const judge = (label: string, r: { status?: unknown; evidence?: unknown; absent?: unknown } | undefined): VerificationClause => {
+    // A must-be-absent clause is decided by the server, not the model: search
+    // the file for the strings the model says would betray the forbidden thing.
+    if (Array.isArray(r?.absent)) {
+      const terms = (r!.absent as unknown[]).filter((t): t is string => typeof t === "string" && t.trim().length >= 2).map((t) => t.trim()).slice(0, 5);
+      if (terms.length > 0) {
+        // Comments don't count as the forbidden thing being present (a note
+        // saying "no RTL" or "Dir=None" is not RTL handling). Line comments
+        // only strip when preceded by start/whitespace, so "http://" in a
+        // string can't swallow the rest of its line.
+        const code = stripCodeComments(fileText);
+        const matcher = (t: string) => absentTermRegex(t);
+        const hit = terms.find((t) => matcher(t).test(code));
+        const line = hit ? code.split("\n").find((l) => matcher(hit).test(l)) : undefined;
+        return hit
+          ? { clause: label, status: "fail", evidence: `found "${hit}" in: ${squash(line ?? "").slice(0, 120)}` }
+          : { clause: label, status: "pass", evidence: `absent: ${terms.map((t) => `"${t}"`).join(", ")}` };
+      }
+    }
+    const evidence = typeof r?.evidence === "string" ? squash(r.evidence).slice(0, 240) : "";
+    const quoted = evidence !== "" && haystack.includes(evidence);
+    let status: VerificationClause["status"] =
+      r?.status === "pass" || r?.status === "fail" || r?.status === "unverified" ? r.status : "unverified";
+    if (status === "pass" && !quoted) status = "unverified";
+    if (status === "fail" && evidence !== "" && !quoted) status = "unverified";
+    return { clause: label, status, evidence: status === "unverified" ? "" : evidence };
+  };
+  return checklist.map((item, i) => {
+    const r = byIndex.get(i + 1);
+    // Accept the older flat shape (one status/evidence per item) as a single clause.
+    const rawClauses: Array<{ clause?: unknown; status?: unknown; evidence?: unknown; absent?: unknown }> =
+      Array.isArray(r?.clauses) && (r!.clauses as unknown[]).length > 0
+        ? (r!.clauses as Array<{ clause?: unknown; status?: unknown; evidence?: unknown; absent?: unknown }>).slice(0, 6)
+        : r
+          ? [{ clause: item, status: r.status, evidence: r.evidence }]
+          : [];
+    const clauses = rawClauses.map((c, k) => judge(typeof c?.clause === "string" && c.clause.trim() ? squash(c.clause).slice(0, 160) : `clause ${k + 1}`, c));
+    if (clauses.length === 0) return { item, status: "unverified" as const, evidence: "" };
+    const status: VerificationItem["status"] = clauses.some((c) => c.status === "fail")
+      ? "fail"
+      : clauses.every((c) => c.status === "pass")
+        ? "pass"
+        : "unverified";
+    const decisive = clauses.find((c) => c.status === status && c.evidence) ?? clauses.find((c) => c.evidence);
+    return { item, status, evidence: decisive?.evidence ?? "", clauses };
+  });
+}
+
+async function runVerifyComponent(input: { project_id: string; file_path: string }): Promise<VerifyComponentResult> {
+  const rel = normalizeRelPath(input.file_path);
+  const abs = resolveWithinRoot(PROJECT_ROOT, rel);
+  if (!abs) throw new Error(`file_path "${input.file_path}" must be a relative path within the project root (${PROJECT_ROOT}).`);
+  if (!existsSync(abs) || !statSync(abs).isFile()) throw new Error(`No file found at "${rel}" (resolved to ${abs}). Build the component first.`);
+  const fileText = readFileSync(abs, "utf8");
+  if (fileText.length > VERIFY_MAX_FILE_CHARS) {
+    throw new Error(`"${rel}" is ${fileText.length} characters, over the ${VERIFY_MAX_FILE_CHARS} verify limit. Split the component, or verify its main file.`);
+  }
+
+  const entry = readLedgerEntries(input.project_id)
+    .filter((e) => e.file_path && normalizeRelPath(e.file_path) === rel)
+    .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
+    .pop();
+  if (!entry) {
+    throw new Error(
+      `No ledger entry for project "${input.project_id}" is attached to "${rel}". Pass this file_path to recommend_component (or record_component_decision) first so there is a checklist to verify against.`
+    );
+  }
+  if (!entry.checklist || entry.checklist.length === 0) {
+    throw new Error(`The ledger entry for "${rel}" has no checklist (verdict ${entry.verdict}, reason ${entry.reason}); nothing to verify against.`);
+  }
+  if (!ANTHROPIC_API_KEY) throw new Error(MISSING_API_KEY_MESSAGE);
+
+  // Design facts to detect divergence against, when the project's design
+  // system is a Figma registration with stored evidence.
+  const registration = getRegisteredDesignSystem(input.project_id);
+  const evidence = registration ? buildFigmaEvidenceBlock(registration, entry.component_need, entry.checklist) : { block: "", names: [] as string[] };
+  const designBlock =
+    `\n\nChosen design: ${entry.chosen_candidate ?? "(none -- custom build)"}; verdict recorded: ${entry.verdict} (${entry.coverage ?? "no coverage"}).` + evidence.block;
+
+  const userMessage = `component_need: ${entry.component_need}\ndomain: ${entry.domain}\n\nChecklist:\n${entry.checklist
+    .map((c, i) => `${i + 1}. ${c}`)
+    .join("\n")}${designBlock}\n\nSource of ${rel}:\n<<<FILE\n${fileText}\nFILE>>>`;
+
+  const data = await streamAnthropicMessage({
+    model: MODEL,
+    max_tokens: 16384,
+    ...scoringThinkingParams(),
+    system: [{ type: "text", text: buildVerifySystemPrompt(), cache_control: { type: "ephemeral" } }],
+    messages: [{ role: "user", content: userMessage }],
+  });
+  if (data.stop_reason === "max_tokens") throw new Error("Verification response was truncated (stop_reason: max_tokens); retry.");
+  const text = data.content.filter((b) => b.type === "text").map((b) => b.text ?? "").join("\n").trim();
+  if (!text) throw new Error(`Verification response had no text (stop_reason: ${data.stop_reason ?? "unknown"}).`);
+  let parsed: { items?: unknown; divergences?: unknown };
+  try {
+    parsed = JSON.parse(extractJson(text));
+  } catch {
+    throw new Error("Verification response did not parse as JSON; retry.");
+  }
+
+  const items = reconcileVerification(entry.checklist, parsed.items, fileText);
+  const divergences = Array.isArray(parsed.divergences)
+    ? (parsed.divergences as unknown[]).filter((d): d is string => typeof d === "string" && d.trim() !== "").map((d) => squash(d).slice(0, 300)).slice(0, 5)
+    : [];
+  const summary = {
+    pass: items.filter((i) => i.status === "pass").length,
+    fail: items.filter((i) => i.status === "fail").length,
+    unverified: items.filter((i) => i.status === "unverified").length,
+    total: items.length,
+  };
+  const fileSha = createHash("sha256").update(fileText).digest("hex");
+  const verification: ReceiptVerification = { verified_at: new Date().toISOString(), file_sha256: fileSha, summary, items, divergences };
+
+  // Overlay line (append-only, like the other ledger overlays) + the
+  // committed receipt, when the gate already minted one for this file.
+  try {
+    mkdirSync(dirname(VERIFICATIONS_PATH), { recursive: true });
+    appendFileSync(VERIFICATIONS_PATH, JSON.stringify({ ledger_entry_id: entry.id, project_id: input.project_id, file_path: rel, ...verification }) + "\n", "utf8");
+  } catch (err) {
+    console.error(JSON.stringify({ diagnostic: "verification_log_write_failed", message: String((err as Error)?.message ?? err) }));
+  }
+  let receipt: { updated: boolean; feature_id?: string } = { updated: false };
+  try {
+    receipt = attachVerificationToReceipt(PROJECT_ROOT, rel, verification);
+  } catch (err) {
+    console.error(JSON.stringify({ diagnostic: "receipt_verification_write_failed", message: String((err as Error)?.message ?? err) }));
+  }
+
+  return {
+    ledger_entry_id: entry.id,
+    file_path: rel,
+    file_sha256: fileSha,
+    summary,
+    items,
+    divergences,
+    receipt,
+    _meta: buildMeta(data.timings, data.usage),
+  };
 }
 
 export type ChecklistBasis = "figma-evidenced" | "inferred" | "general-practice";
@@ -4849,6 +5080,20 @@ const ALL_TOOLS = [
       inputSchema: BACKFILL_LEDGER_SNAPSHOT_REF_INPUT_SCHEMA,
     },
     {
+      name: VERIFY_COMPONENT_TOOL_NAME,
+      description:
+        "Run AFTER building the component. Checks the built file against the " +
+        "requirement checklist recorded by recommend_component for that file_path, " +
+        "item by item: pass / fail / unverified, each backed by a verbatim quote " +
+        "from the file that the server confirms is really in it (an unquotable " +
+        "pass is downgraded to unverified). Also lists divergences from the " +
+        "chosen design (e.g. a size or spacing that differs from the Figma values). " +
+        "Writes the outcome into the committed receipt (schema v2) when one exists. " +
+        "Judges what the code says, not how it renders; it does not run the component. " +
+        "Costs one model call (typically a few cents).",
+      inputSchema: VERIFY_COMPONENT_INPUT_SCHEMA,
+    },
+    {
       name: GET_FIGMA_EVIDENCE_TOOL_NAME,
       description:
         "Returns the raw Figma facts captured when a Figma design system was " +
@@ -5179,6 +5424,25 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         content: [{ type: "text", text: `Error: ${message}` }],
         isError: true,
       };
+    }
+  }
+
+  if (request.params.name === VERIFY_COMPONENT_TOOL_NAME) {
+    const args = (request.params.arguments ?? {}) as { project_id?: string; file_path?: string };
+    try {
+      if (!args.project_id || !args.file_path) throw new Error("project_id and file_path are required.");
+      if (sessionCallCount >= SESSION_CALL_CAP) {
+        throw new Error(
+          `Session call cap (${SESSION_CALL_CAP}) reached. This protects against runaway costs on your API key. Restart the MCP server to reset the counter, or set PATTERN_SESSION_CAP to raise the limit.`
+        );
+      }
+      sessionCallCount++;
+      const result = await runVerifyComponent({ project_id: args.project_id, file_path: args.file_path });
+      return { content: [{ type: "text", text: JSON.stringify(result) }] };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (/Anthropic API error \d+/.test(message)) captureApiError({ tool: VERIFY_COMPONENT_TOOL_NAME, message });
+      return { content: [{ type: "text", text: `Error: ${message}` }], isError: true };
     }
   }
 
