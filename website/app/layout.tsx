@@ -23,9 +23,9 @@ const nunito = Nunito({
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://usepattern.sh"),
-  title: "Pattern: stop your AI agent from rebuilding components you already have",
+  title: "Pattern: your agent answers to your design system",
   description:
-    "Your agent doesn't know what's in your design system, so it often builds something new when a good one exists. Pattern checks first and tells the agent what to reuse and what's worth building.",
+    "Before your agent builds a screen, Pattern checks the request against your own design system, reuses what fits, and lists exactly what's missing. Afterwards it checks the code and shows the proof.",
   twitter: {
     card: "summary_large_image",
   },

@@ -12,28 +12,28 @@ const ROWS: { need: string; verdict: string; file: string; cost: string; stillIn
     need: "Price breakdown with fees and taxes",
     verdict: "Build new",
     file: "app/checkout/PriceBreakdown.tsx",
-    cost: "$0.19",
+    cost: "$0.04",
     stillIn: "Yes",
   },
   {
     need: "Host earnings dashboard",
     verdict: "Reuse",
     file: "app/host/Earnings.tsx",
-    cost: "$0.24",
+    cost: "$0.00",
     stillIn: "Yes",
   },
   {
     need: "Cancellation policy display",
     verdict: "Build custom",
     file: "app/stay/CancellationPolicy.tsx",
-    cost: "$0.16",
+    cost: "$0.05",
     stillIn: "No, component replaced",
   },
   {
     need: "Host and guest messaging thread",
     verdict: "Use existing",
     file: "not recorded",
-    cost: "$0.22",
+    cost: "$0.03",
     stillIn: "Can't check, no file",
   },
 ];
@@ -59,7 +59,7 @@ export function ReceiptLedger() {
               <div style={{ display: "grid", gap: 10, maxWidth: 560 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
                   <Mark size={20} />
-                  <span style={{ ...LABEL, color: "rgba(255,255,255,.55)" }}>03</span>
+                  <span style={{ ...LABEL, color: "rgba(255,255,255,.55)" }}>05</span>
                 </div>
                 <h2 style={{ margin: 0, fontSize: "clamp(22px, 3.4vw, 28px)", fontWeight: 500, color: "#fff", lineHeight: 1.15 }}>
                   Keep a record of why,{" "}
@@ -135,9 +135,10 @@ export function ReceiptLedger() {
 
             <p style={{ margin: 0, fontSize: "var(--text-caption)", color: "rgba(255,255,255,.5)" }}>
               Every decision is saved with what was checked, what was decided, what it cost, and whether the
-              component is still in your code today. Each one is tied to a specific version of your code and
-              can be attached to a pull request, so reviewers get the reasoning along with the code. A file
-              shows as &ldquo;not recorded&rdquo; when the agent answered before any file was written.
+              finished file was verified. If the file changes afterwards, the check is marked stale. Each one
+              is tied to a specific version of your code and can be attached to a pull request, so reviewers
+              get the reasoning along with the code. A file shows as &ldquo;not recorded&rdquo; when the agent
+              answered before any file was written.
             </p>
           </div>
         </Reveal>

@@ -5,16 +5,16 @@ import { Reveal } from "./ui";
 
 const ITEMS: { h: string; p: string }[] = [
   {
-    h: "It guesses.",
-    p: "Without your design system in view, the agent works from the prompt alone, so a new component is the easy default.",
+    h: "It works from the prompt alone.",
+    p: "Without your design system in view, building something new is the easy default.",
   },
   {
     h: "The choice is invisible.",
     p: "Whether to reuse or rebuild gets decided quietly inside a generated file, and nobody reviews a decision they never saw.",
   },
   {
-    h: "It adds up.",
-    p: "Duplicates collect over time, and each one has to be maintained, restyled, and eventually cleaned up by someone.",
+    h: "Telling it to check doesn't last.",
+    p: "It depends on someone remembering, every time, on every machine.",
   },
 ];
 
@@ -41,6 +41,12 @@ export function Problem() {
             </Reveal>
           ))}
         </div>
+        <Reveal delay={220}>
+          <p style={{ ...BODY, fontSize: "var(--text-body-md)", margin: 0, maxWidth: 620 }}>
+            Duplicates collect, and each one has to be maintained, restyled, and eventually cleaned up by
+            someone.
+          </p>
+        </Reveal>
       </div>
     </section>
   );

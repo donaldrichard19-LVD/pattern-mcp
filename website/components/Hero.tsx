@@ -17,11 +17,9 @@ const VERDICT_LINES = [
   '  "confidence": "high",',
   '  "reason": "scored",',
   '  "coverage": "2/8 (25%)",',
-  '  "computed_at": "2026-08-25",',
-  '  "recommendation": {',
-  '    "source": null,',
-  '    "reference": null',
-  "  },",
+  '  "computed_at": "2026-10-02",',
+  '  "requirements_checked": [ ...8 items ],',
+  '  "recommendation": { "source": null },',
   '  "ensemble": { "triggered": false }',
   "}",
 ];
@@ -103,7 +101,7 @@ function VerdictCard() {
         )}
       </div>
       <div style={{ padding: "9px 16px", borderTop: "1px solid var(--border-subtle)", ...MONO, fontSize: 11, color: "var(--text-tertiary)" }}>
-        Checked against your design system &middot; 11s &middot; $0.19
+        Checked against your design system &middot; 12s &middot; $0.03
       </div>
     </div>
   );
@@ -141,16 +139,15 @@ export function Hero() {
                 textWrap: "pretty",
               }}
             >
-              Your agent keeps building{" "}
-              <span style={{ color: "var(--text-accent)" }}>components you already have.</span>
+              Your agent answers to{" "}
+              <span style={{ color: "var(--text-accent)" }}>your design system.</span>
             </h1>
           </Reveal>
           <Reveal delay={60}>
             <p style={{ ...BODY, maxWidth: 520, fontSize: "var(--text-body-lg)" }}>
-              Ask for a price breakdown and it will usually write one from scratch, even when your design
-              system has something close. You find out in code review, or months later when there are three
-              versions of the same thing. Pattern checks before the agent builds, so the answer is already on
-              the table when it starts writing code.
+              Before your agent builds a screen, Pattern checks the request against your own design system,
+              reuses what fits, and lists exactly what&apos;s missing. Afterwards it checks the code and shows
+              the proof. You don&apos;t have to ask it to.
             </p>
           </Reveal>
           <Reveal delay={100}>

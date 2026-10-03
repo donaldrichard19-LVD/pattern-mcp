@@ -34,14 +34,14 @@ export function MakeItRequired() {
       >
         <Reveal>
           <div style={{ display: "grid", gap: 14 }}>
-            <span style={LABEL}>02</span>
+            <span style={LABEL}>04</span>
             <h2 style={{ ...H2, fontSize: "clamp(24px, 3.6vw, 30px)" }}>
               Make the check a rule <span style={{ color: "var(--text-accent)" }}>once you trust it.</span>
             </h2>
             <p style={{ ...BODY, fontSize: "var(--text-body-md)" }}>
-              You can turn on a setting so the agent can&apos;t create a new component until Pattern has
-              answered. If something slips past on someone&apos;s machine, the same check runs again on the
-              pull request.
+              Turn on a setting and the agent can&apos;t create a new component until Pattern has answered
+              (on your machine, in Claude Code). The same check runs on every pull request, whichever agent
+              wrote it.
             </p>
             <CopyBlock label="turn on the required check" lines={COMMAND_LINES} />
           </div>

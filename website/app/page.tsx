@@ -5,6 +5,8 @@ import { Hero } from "@/components/Hero";
 import { IntegrationsStrip } from "@/components/IntegrationsStrip";
 import { Problem } from "@/components/Problem";
 import { MakeItRequired } from "@/components/MakeItRequired";
+import { OneAuthority } from "@/components/OneAuthority";
+import { ProofSection } from "@/components/ProofSection";
 import { ReceiptLedger } from "@/components/ReceiptLedger";
 import { TopBar } from "@/components/TopBar";
 import { TrustGrid } from "@/components/TrustGrid";
@@ -16,7 +18,9 @@ export default function Home() {
       <Hero />
       <Problem />
       <IntegrationsStrip />
+      <OneAuthority />
       <AskBeforeBuilding />
+      <ProofSection />
       <MakeItRequired />
       <ReceiptLedger />
       <TrustGrid />
