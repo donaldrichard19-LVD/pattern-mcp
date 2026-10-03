@@ -14,7 +14,23 @@ is recorded in an auditable ledger you can verify later.
 
 [Website](https://usepattern.sh) · [npm](https://www.npmjs.com/package/pattern-mcp) · [Report an issue](https://github.com/donaldrichard19-LVD/pattern-mcp/issues/new/choose)
 
-**Current release: v0.19.2** fixes the CI workflow template (`templates/github-workflows/pattern-gate.yml`)
+**Current release: v0.20.0** makes the agent use Pattern on its own. You no longer
+have to say "use Pattern": the server now sends the agent short usage
+instructions when it connects (building or prototyping UI, especially from a Figma
+link, mockup or screenshot; skip trivial primitives and small edits), and
+`npx pattern-mcp init` offers to install a Claude Code skill that says the same.
+In a headless test (Claude Code, tool search on, n=2 per cell), agents used Pattern
+unprompted in 6 of 6 UI-building runs with the instructions, against 0 of 6
+without, and in 0 of 8 runs on a small typo fix. Also new: `register_design_system`
+now refuses to replace a project's design system with a *different* source unless
+you pass `replace: true` (an agent that could not tell a design system was
+registered had replaced a real Figma registration with a one-folder scan), and
+`extract_requirements` reports whether a design system is registered. If you
+installed a Pattern skill before 0.18 it still tells the agent to search shadcn/ui
+and Mobbin; `init` offers to update it. Set `PATTERN_NO_INSTRUCTIONS=1` to turn the
+instructions off.
+
+**v0.19.2** fixes the CI workflow template (`templates/github-workflows/pattern-gate.yml`)
 shipped in 0.19.1 and earlier: it put the list of changed files straight into the
 shell script, so a PR that added more than one file failed (the shell ran the
 second file name as a command) and a hostile file name could inject shell. The
