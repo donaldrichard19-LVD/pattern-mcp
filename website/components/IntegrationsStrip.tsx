@@ -12,7 +12,7 @@ export function IntegrationsStrip() {
       <div className="pt-sec" style={{ ...SECTION, display: "grid", gap: 28 }}>
         <Reveal>
           <h2 style={{ ...H2, fontSize: "clamp(22px, 3.2vw, 26px)", maxWidth: 640 }}>
-            Pattern is a check between the need and the code.{" "}
+            Pattern is a check between the design and the code.{" "}
             <span style={{ color: "var(--text-accent)" }}>It works where you build.</span>
           </h2>
         </Reveal>
