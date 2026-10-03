@@ -19,6 +19,7 @@ import { homedir, platform } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SKILL_NAME } from "./agent-guidance.js";
+import { findPatternEntry, patternServersInClaudeList, type ClaudeListServer } from "./server-entry.js";
 import { askLine, closeRl, confirm, type PromptOptions } from "./prompt.js";
 
 export type ConnectOptions = PromptOptions;
@@ -49,16 +50,18 @@ function hasCommand(cmd: string, versionFlag = "--version"): boolean {
   }
 }
 
-function claudeCodeAlreadyConnected(): boolean {
+// Pattern servers Claude Code already has, under ANY name (a hand-made entry
+// for a dev checkout is "connected" too), with whether each one is healthy.
+function claudeCodePatternServers(): ClaudeListServer[] {
   try {
     const out = execFileSync("claude", ["mcp", "list"], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
       timeout: 10000,
     });
-    return /^pattern\b/m.test(out);
+    return patternServersInClaudeList(out);
   } catch {
-    return false;
+    return [];
   }
 }
 
@@ -66,8 +69,20 @@ async function setupClaudeCode(apiKey: string | null, options: ConnectOptions): 
   if (!hasCommand("claude")) return;
   console.log("\nClaude Code detected (`claude` on PATH).");
 
-  if (claudeCodeAlreadyConnected()) {
-    console.log("  Already connected (`claude mcp list` shows pattern) -- skipping.");
+  const existing = claudeCodePatternServers();
+  if (existing.length > 0) {
+    const names = existing.map((s) => `"${s.name}"`).join(", ");
+    if (existing.some((s) => s.ok)) {
+      console.log(`  Already connected (\`claude mcp list\` shows Pattern as ${names}) -- skipping.`);
+    } else {
+      console.log(
+        `  Pattern is already registered as ${names}, but Claude Code reports it failed to connect.\n` +
+          "  Not adding a second server. Run `npx -p pattern-mcp pattern doctor` to see why; the usual cause is a\n" +
+          "  local checkout without node_modules. To use the published package instead, re-add it under the same name:\n" +
+          `    claude mcp remove ${existing[0].name} -s user && claude mcp add -s user ${existing[0].name} -- npx --yes pattern-mcp@latest\n` +
+          "  (add -e ANTHROPIC_API_KEY=... and any other keys it had).",
+      );
+    }
     return;
   }
 
@@ -187,8 +202,9 @@ async function mergeServerConfig(
   }
 
   const servers = { ...(config.mcpServers ?? {}) } as Record<string, unknown>;
-  if (servers.pattern) {
-    console.log(`\n${label}: pattern already configured in ${path} -- skipping.`);
+  const already = findPatternEntry(servers);
+  if (already) {
+    console.log(`\n${label}: Pattern already configured in ${path} (as "${already.name}") -- skipping.`);
     return;
   }
 
@@ -217,7 +233,7 @@ async function mergeServerConfig(
 function clientConfigHasPattern(path: string | null): boolean {
   if (!path) return false;
   const { config } = readJsonConfig(path);
-  return Boolean((config.mcpServers as Record<string, unknown> | undefined)?.pattern);
+  return findPatternEntry(config.mcpServers) !== null;
 }
 
 // Best-effort, read-only check across every client Pattern knows how to
@@ -233,7 +249,7 @@ function clientConfigHasPattern(path: string | null): boolean {
 // when it isn't).
 export function isAnyClientConnected(root: string): boolean {
   return (
-    claudeCodeAlreadyConnected() ||
+    claudeCodePatternServers().length > 0 ||
     clientConfigHasPattern(claudeDesktopConfigPath()) ||
     clientConfigHasPattern(join(root, ".cursor", "mcp.json"))
   );

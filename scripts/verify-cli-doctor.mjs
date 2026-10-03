@@ -23,7 +23,7 @@ mkdirSync(home, { recursive: true }); mkdirSync(root, { recursive: true });
 writeFileSync(join(root, "package.json"), JSON.stringify({ name: "fixture-app" }));
 writeFileSync(join(root, ".env"), "TYPESAFE_API_KEY=abc\nFIGMA_ACCESS_TOKEN=figd_zzz\n");
 const GOOD = "figd_" + "a".repeat(30);
-writeFileSync(join(home, ".claude.json"), JSON.stringify({ mcpServers: { "my-dev-pattern": { command: "node", args: ["/x/ui-component-judgment-mcp/dist/index.js"], env: { ANTHROPIC_API_KEY: "sk-test", FIGMA_ACCESS_TOKEN: GOOD } } } }));
+writeFileSync(join(home, ".claude.json"), JSON.stringify({ mcpServers: { "my-dev-pattern": { command: "npx", args: ["--yes", "pattern-mcp@latest"], env: { ANTHROPIC_API_KEY: "sk-test", FIGMA_ACCESS_TOKEN: GOOD } } } }));
 process.env.PATTERN_DESIGN_SYSTEMS_PATH = join(tmp, "ds.json");
 
 console.log("figmaTokenProblem");
