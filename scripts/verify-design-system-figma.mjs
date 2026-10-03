@@ -152,7 +152,7 @@ async function connect(extra = {}) {
   return c;
 }
 const parse = (r) => { const text = r.content?.[0]?.text ?? ""; try { return { isError: !!r.isError, body: JSON.parse(text), text }; } catch { return { isError: !!r.isError, body: null, text }; } };
-const reg = (c, args) => c.callTool({ name: "register_design_system", arguments: args });
+const reg = (c, args) => c.callTool({ name: "register_design_system", arguments: { replace: true, ...args } });
 
 const client = await connect();
 

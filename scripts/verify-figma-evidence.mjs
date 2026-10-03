@@ -96,7 +96,7 @@ check("missing selector -> isError", (await call("get_figma_evidence", { project
 
 console.log("re-registering from a non-Figma source clears stale evidence");
 writeFileSync(join(root, "m.json"), JSON.stringify([{ name: "Card", props: ["title"] }]));
-await call("register_design_system", { project_id: "p", manifest_path: "m.json", summarize: false });
+await call("register_design_system", { project_id: "p", manifest_path: "m.json", summarize: false, replace: true });
 check("evidence file removed", !existsSync(join(root, "figma_evidence", "p.json")));
 
 await client.close();

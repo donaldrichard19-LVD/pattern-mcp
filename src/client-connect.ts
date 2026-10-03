@@ -17,6 +17,8 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { SKILL_NAME } from "./agent-guidance.js";
 import { askLine, closeRl, confirm, type PromptOptions } from "./prompt.js";
 
 export type ConnectOptions = PromptOptions;
@@ -93,6 +95,64 @@ async function setupClaudeCode(apiKey: string | null, options: ConnectOptions): 
   } catch {
     console.log("  `claude mcp add` failed -- see output above, or add it manually (README's Claude Code section).");
   }
+}
+
+// The Claude Code skill that makes the agent reach for Pattern on its own when
+// it is about to build UI (see agent-guidance.ts). Installed per user so it
+// applies in every project; SKILL.md ships in the package root and is the
+// single source (it is also the repo's tool-orientation doc).
+export function packagedSkillPath(): string {
+  return join(dirname(fileURLToPath(import.meta.url)), "..", "SKILL.md");
+}
+
+/**
+ * Copies SKILL.md to <home>/.claude/skills/pattern/SKILL.md after confirming.
+ * Never overwrites a file that is not a Pattern skill; replaces an older
+ * Pattern one only when the content differs. Returns what happened.
+ */
+export async function installPatternSkill(
+  options: ConnectOptions,
+  home: string = homedir(),
+): Promise<"installed" | "updated" | "current" | "skipped" | "foreign" | "missing"> {
+  const source = packagedSkillPath();
+  if (!existsSync(source)) return "missing";
+  const body = readFileSync(source, "utf8");
+  const target = join(home, ".claude", "skills", SKILL_NAME, "SKILL.md");
+
+  let existing: string | null = null;
+  try {
+    existing = readFileSync(target, "utf8");
+  } catch {
+    // not installed yet
+  }
+  if (existing !== null) {
+    if (!new RegExp(`^---[\\s\\S]*?\\nname:\\s*${SKILL_NAME}\\s*\\n`).test(existing)) {
+      console.log(`  ${target} exists and is not a Pattern skill -- leaving it alone.`);
+      return "foreign";
+    }
+    if (existing === body) {
+      console.log("  Pattern skill already installed and current.");
+      return "current";
+    }
+  }
+
+  console.log(
+    "\nPattern skill: lets Claude Code use Pattern on its own when it is about to build UI,\n" +
+      "so you never have to say \"use Pattern\".",
+  );
+  const ok = await confirm(
+    `  ${existing === null ? "Install" : "Update"} it at ${target}?`,
+    options,
+    true,
+  );
+  if (!ok) {
+    console.log("  Skipped.");
+    return "skipped";
+  }
+  mkdirSync(dirname(target), { recursive: true });
+  writeFileSync(target, body, "utf8");
+  console.log("  Written. Restart Claude Code so it picks up the skill.");
+  return existing === null ? "installed" : "updated";
 }
 
 interface McpServersConfig {
@@ -285,6 +345,7 @@ export async function runConnect(root: string, options: ConnectOptions): Promise
     if (hasCommand("claude")) {
       anyDetected = true;
       await setupClaudeCode(apiKey, options);
+      await installPatternSkill(options);
     }
     if (claudeDesktopConfigPath() && existsSync(dirname(claudeDesktopConfigPath()!))) {
       anyDetected = true;
@@ -309,13 +370,12 @@ export async function runConnect(root: string, options: ConnectOptions): Promise
   }
 
   console.log(
-    "\nDone. Ask your agent to list its MCP tools and look for recommend_component.\n" +
-      "\nNext: Pattern judges components against YOUR design system, so register one first.\n" +
-      "Ask your agent to call register_design_system with one of:\n" +
-      "  figma_file_key      a Figma file (needs FIGMA_ACCESS_TOKEN)\n" +
-      "  directory_path      your components folder\n" +
-      "  manifest_path       a JSON manifest or Storybook index\n" +
-      "Until one is registered for your project_id, recommend_component returns an error saying so.",
+    "\nDone. Restart your client. From now on your agent uses Pattern on its own when it is\n" +
+      "about to build UI; you do not need to ask for it.\n" +
+      "\nPattern judges components against YOUR design system, so it needs one registered:\n" +
+      "  - paste a Figma link when you ask for UI (set FIGMA_ACCESS_TOKEN in the server's env), or\n" +
+      "  - point it at your components folder or a manifest.\n" +
+      "Your agent registers it the first time. Until then recommend_component returns an error saying so.",
   );
 }
 
