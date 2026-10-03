@@ -9,17 +9,17 @@ const ITEMS: { glyph: string; h: string; p: string }[] = [
   {
     glyph: "?",
     h: "It tells you when it isn't sure",
-    p: "Close calls get a second look. If the checks disagree, you see low confidence instead of a confident wrong answer.",
-  },
-  {
-    glyph: "↗",
-    h: "Its links are real",
-    p: "A direct link means Pattern opened that exact screen. Otherwise it tells you the link only goes to a browse page.",
+    p: "Close calls get a second look. If the runs disagree, you see low confidence and which requirements they split on, not a confident wrong answer.",
   },
   {
     glyph: "$",
     h: "You see what each call costs",
-    p: "Time, tokens, and dollars appear next to every decision instead of sitting in a monthly usage total.",
+    p: "Time, tokens and dollars appear next to every decision. A match takes about a second and costs nothing; a full check with a build list usually runs a few cents.",
+  },
+  {
+    glyph: "–",
+    h: "It tells you what it didn't check",
+    p: "\u201cUnverified\u201d means look at this. Pattern checks what the code says, not how it renders, and never claims a design file proves what it can't.",
   },
 ];
 

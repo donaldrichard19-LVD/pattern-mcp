@@ -22,6 +22,11 @@ export function Close() {
             <span style={{ color: "var(--text-accent)" }}>Let&apos;s make sure it chooses well.</span>
           </h2>
         </Reveal>
+        <Reveal delay={80}>
+          <p style={{ margin: 0, fontSize: "var(--text-body-md)", color: "var(--text-secondary)" }}>
+            Install it once. Then just ask for UI.
+          </p>
+        </Reveal>
         <Reveal delay={100}>
           <div style={{ display: "grid", gap: 14, justifyItems: "center" }}>
             <div style={{ display: "flex", gap: 14, flexWrap: "wrap", justifyContent: "center", alignItems: "center" }}>

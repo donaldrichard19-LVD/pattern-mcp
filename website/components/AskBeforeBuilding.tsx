@@ -97,17 +97,23 @@ export function AskBeforeBuilding() {
       >
         <Reveal>
           <div style={{ display: "grid", gap: 14 }}>
-            <span style={LABEL}>01</span>
+            <span style={LABEL}>02</span>
             <h2 style={{ ...H2, fontSize: "clamp(24px, 3.6vw, 30px)" }}>
-              Ask first, <span style={{ color: "var(--text-accent)" }}>so the agent isn&apos;t guessing.</span>
+              Just ask for the screen.{" "}
+              <span style={{ color: "var(--text-accent)" }}>Pattern is already in the loop.</span>
             </h2>
             <p style={{ ...BODY, fontSize: "var(--text-body-md)" }}>
-              Pattern breaks a vague request into a checklist of what the component needs to do, then compares
-              that list to what your design system has. The agent gets a plain answer: use this one, or build
-              these specific missing pieces.
+              When your agent connects, Pattern tells it to check before it builds UI, especially when you hand
+              it a Figma link, a mockup or a screenshot. Buttons and small edits are left alone. Then it
+              compares a checklist of what the component must do with what your design system has.
             </p>
             <p style={{ ...BODY, fontSize: "var(--text-body-md)" }}>
-              Common basics like buttons and inputs are answered on your machine at no cost.
+              In a small Claude Code test, agents ran the check on their own in 6 of 6 UI builds, and skipped
+              it on a typo fix 8 of 8 times.
+            </p>
+            <p style={{ ...BODY, fontSize: "var(--text-caption)", color: "var(--text-tertiary)" }}>
+              A model can still ignore instructions. The rule in step 04 makes the check mandatory. Common
+              basics like buttons and inputs are answered on your machine at no cost.
             </p>
           </div>
         </Reveal>

@@ -1,0 +1,156 @@
+{
+  "schema_version": 2,
+  "feature_id": "e31ecff0",
+  "file_path": "website/components/ProofSection.tsx",
+  "ledger_entry_id": "e45c4565-170c-4f2a-bfe9-095105ece204",
+  "verdict": "custom_build",
+  "chosen_candidate": null,
+  "snapshot_ref": "f9b8ec820ebb7c2837c12ac52e93b8d6aef58e6e",
+  "checked_at": "2026-10-03T02:15:08.168Z",
+  "manual_override": false,
+  "override_reason": null,
+  "verification": {
+    "verified_at": "2026-10-03T02:17:11.781Z",
+    "file_sha256": "6b05817c9ca22d4118add1b034da7622c9b822bb39cce2808314fc357119043a",
+    "summary": {
+      "pass": 3,
+      "fail": 0,
+      "unverified": 5,
+      "total": 8
+    },
+    "items": [
+      {
+        "item": "Two-column section layout: left heading/copy, right before/after panel",
+        "status": "pass",
+        "evidence": "gridTemplateColumns: \"1fr 1fr\", gap: 48, alignItems: \"start\"",
+        "clauses": [
+          {
+            "clause": "Two-column layout (grid with two columns)",
+            "status": "pass",
+            "evidence": "gridTemplateColumns: \"1fr 1fr\", gap: 48, alignItems: \"start\""
+          },
+          {
+            "clause": "Left column has heading and copy",
+            "status": "pass",
+            "evidence": "<h2 style={{ ...H2, fontSize: \"clamp(24px, 3.6vw, 30px)\" }}>"
+          },
+          {
+            "clause": "Right column has before/after panel",
+            "status": "pass",
+            "evidence": "Before: where each requirement comes from"
+          }
+        ]
+      },
+      {
+        "item": "'Before' list with colored chip per tag type (Figma/inferred/general practice)",
+        "status": "unverified",
+        "evidence": "",
+        "clauses": [
+          {
+            "clause": "'Before' list rendered with items",
+            "status": "unverified",
+            "evidence": ""
+          },
+          {
+            "clause": "Each item tagged with a colored chip per tag type",
+            "status": "unverified",
+            "evidence": ""
+          }
+        ]
+      },
+      {
+        "item": "Chip coloring via CSS variable tokens per tag type",
+        "status": "unverified",
+        "evidence": "",
+        "clauses": [
+          {
+            "clause": "Chip coloring implemented via CSS variable tokens per tag type",
+            "status": "unverified",
+            "evidence": ""
+          }
+        ]
+      },
+      {
+        "item": "'After' list item with check/help icon driven by verified state",
+        "status": "unverified",
+        "evidence": "",
+        "clauses": [
+          {
+            "clause": "'After' list item shows check or help icon driven by verified state",
+            "status": "unverified",
+            "evidence": ""
+          }
+        ]
+      },
+      {
+        "item": "Exactly one unverified item distinguished visually",
+        "status": "pass",
+        "evidence": "{ ok: false, text: \"Styled from tokens.ts\" }",
+        "clauses": [
+          {
+            "clause": "Exactly one unverified item in the list",
+            "status": "pass",
+            "evidence": "{ ok: false, text: \"Styled from tokens.ts\" }"
+          },
+          {
+            "clause": "Unverified item visually distinguished",
+            "status": "pass",
+            "evidence": "unverified: look at this"
+          }
+        ]
+      },
+      {
+        "item": "Monospace code quote inline with requirement text",
+        "status": "pass",
+        "evidence": "<code style={{ ...MONO, fontSize: 11, color: \"var(--text-secondary)\"",
+        "clauses": [
+          {
+            "clause": "Monospace code quote inline with requirement text",
+            "status": "pass",
+            "evidence": "<code style={{ ...MONO, fontSize: 11, color: \"var(--text-secondary)\""
+          }
+        ]
+      },
+      {
+        "item": "Accessible labeling for icons/chips beyond color/shape",
+        "status": "unverified",
+        "evidence": "<span style={SR_ONLY}>{c.ok ? \"Verified: \" : \"Unverified: \"}</span>",
+        "clauses": [
+          {
+            "clause": "Icons have accessible labeling beyond color/shape",
+            "status": "pass",
+            "evidence": "<span style={SR_ONLY}>{c.ok ? \"Verified: \" : \"Unverified: \"}</span>"
+          },
+          {
+            "clause": "Chips have accessible labeling beyond color/shape",
+            "status": "unverified",
+            "evidence": ""
+          }
+        ]
+      },
+      {
+        "item": "Inline style + CSS variable token styling with responsive column stacking",
+        "status": "unverified",
+        "evidence": "style={{ ...SECTION, display: \"grid\", gridTemplateColumns: \"1fr 1fr\", gap: 48, alignItems: \"start\" }}",
+        "clauses": [
+          {
+            "clause": "Inline style objects used for styling",
+            "status": "pass",
+            "evidence": "style={{ ...SECTION, display: \"grid\", gridTemplateColumns: \"1fr 1fr\", gap: 48, alignItems: \"start\" }}"
+          },
+          {
+            "clause": "CSS variable tokens used for styling",
+            "status": "pass",
+            "evidence": "borderTop: \"1px solid var(--border-subtle)\""
+          },
+          {
+            "clause": "Responsive column stacking implemented",
+            "status": "unverified",
+            "evidence": ""
+          }
+        ]
+      }
+    ],
+    "divergences": []
+  }
+}
