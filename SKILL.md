@@ -33,9 +33,14 @@ README's [Tool tiers](./README.md#tool-tiers).
 
 ## Workflow (follow this order)
 
-1. `register_design_system` once per project.
-2. `extract_requirements({component_need, domain, project_id})` -- review or
-   edit the checklist (optional; skip to let `recommend_component` extract).
+1. `extract_requirements({component_need, domain, project_id})` -- its
+   `design_system.registered` field says whether the project has a design
+   system. Review or edit the checklist.
+2. Only if it is not registered: `register_design_system` (a Figma file key, the
+   components folder the user names, or a manifest), then extract again so the
+   checklist uses the design's real values. Never register on your own when one
+   exists: a different source replaces the user's design system (the call now
+   refuses unless `replace: true`).
 3. `recommend_component({..., project_id, checklist, file_path})` -- pass
    `file_path` NOW, before writing the file.
 4. Build.
@@ -45,7 +50,7 @@ README's [Tool tiers](./README.md#tool-tiers).
 
 ## Tools
 
-### `register_design_system` (call once per project, first)
+### `register_design_system` (once per project, only when none is registered)
 
 Registers the project's own design system -- a Figma file
 (`figma_file_key` with `FIGMA_ACCESS_TOKEN`, or `figma_json_path`), a

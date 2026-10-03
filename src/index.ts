@@ -1186,6 +1186,11 @@ const REGISTER_DESIGN_SYSTEM_INPUT_SCHEMA = {
       description:
         "Two different things. (1) directory_path: ON BY DEFAULT when ANTHROPIC_API_KEY is set: writes a short (2-3 sentence) capability summary for each scanned file with Claude Haiku and stores it on the registration -- a big accuracy/confidence gain for the Jev design-system scorer (PATTERN_SCORER=jev) and harmless for the default one. This SENDS up to 8000 characters of each source file that needs a summary to api.anthropic.com; pass false (or set PATTERN_NO_SUMMARIES=1) to keep registration fully local. true refuses (leaving the previous registration untouched) when there is no key or no directory_path; unset never refuses, it just skips. Costs about 0.2 cents per file (capped at PATTERN_SUMMARY_MAX_FILES, default 200 files). Summaries are cached by file content: re-registering only pays for files that changed, and unchanged files keep their summary even with summarize: false. (2) figma_file_key: OPT-IN ONLY (summarize: true; never default) -- renders each registered design with Figma's images API and has Claude Haiku write a 2-sentence VISION caption of it (chart type, what is drawn, tooltips/legends/toggles), stored as the candidate's summary. Text and layer names can't say what is drawn, and on a real file this raised needs matched from ~17/27 to 23/27 with a clean score gap. It SENDS IMAGES OF YOUR DESIGNS to api.anthropic.com and asks Figma to render them with your token; needs ANTHROPIC_API_KEY and FIGMA_ACCESS_TOKEN; costs under a tenth of a cent per design; refused with figma_json_path (fully local).",
     },
+    replace: {
+      type: "boolean",
+      description:
+        "Optional, default false. A project that already has a design system registered will NOT have it swapped for a DIFFERENT source (another file, folder, manifest or Figma file) unless this is true -- the call returns an error describing the existing registration instead. Re-registering the SAME source (a refresh) never needs it. Only pass true when the user has asked to switch design systems.",
+    },
     include_candidates: {
       type: "boolean",
       description:
@@ -2024,6 +2029,13 @@ async function runVerifyComponent(input: { project_id: string; file_path: string
   };
 }
 
+/** Lets a caller tell "registered" from "not registered" without trying to register (which could replace). */
+function designSystemStatus(projectId: string | undefined): { design_system?: { registered: boolean; source_kind?: string; candidate_count?: number } } {
+  if (!projectId) return {};
+  const reg = getRegisteredDesignSystem(projectId);
+  return { design_system: reg ? { registered: true, source_kind: reg.source_kind, candidate_count: reg.candidate_count } : { registered: false } };
+}
+
 export type ChecklistBasis = "figma-evidenced" | "inferred" | "general-practice";
 
 export interface ChecklistItem {
@@ -2039,6 +2051,8 @@ export interface ExtractionResult {
   checklist_items: ChecklistItem[];
   /** Set when stored Figma evidence for this project was shown to the extractor. */
   grounded_in: { project_id: string; candidates: string[] } | null;
+  /** Only when project_id was passed: whether a design system is registered for it, so the caller knows whether registering is needed. */
+  design_system?: { registered: boolean; source_kind?: string; candidate_count?: number };
   extraction_confidence: "high" | "medium" | "low";
   _meta: NonNullable<JudgmentResult["_meta"]>;
 }
@@ -2063,6 +2077,7 @@ async function runExtraction(input: { component_need: string; domain: string; pr
         checklist: [],
         checklist_items: [],
         grounded_in: null,
+        ...designSystemStatus(input.project_id),
         extraction_confidence: "high",
         _meta: {
           total_ms: elapsedMs,
@@ -2149,6 +2164,7 @@ async function runExtraction(input: { component_need: string; domain: string; pr
       checklist: items.map((i) => i.item),
       checklist_items: items,
       grounded_in: grounded && input.project_id ? { project_id: input.project_id, candidates: evidence.names } : null,
+      ...designSystemStatus(input.project_id),
       extraction_confidence: estimateExtractionConfidence(input.component_need),
       _meta: buildMeta(data.timings, data.usage),
     },
@@ -2889,6 +2905,8 @@ export function registerDesignSystem(input: {
   figma_mode?: "components" | "frames";
   figma_pages?: string[];
   figma_exclude_pages?: string[];
+  /** Allow replacing an existing registration with a different source. */
+  replace?: boolean;
   // Internal: an already-fetched Figma file (the handler's figma_file_key
   // path), with the label to store as source_path.
   figma_file?: unknown;
@@ -3010,6 +3028,18 @@ export function registerDesignSystem(input: {
   };
 
   const file = readDesignSystems();
+  // An agent that cannot tell whether a design system is registered may try to
+  // register one "to be safe"; with a different source that would silently
+  // destroy the real one (and its stored Figma evidence). Refuse unless asked.
+  const existing = file[input.project_id];
+  if (existing && !input.replace && (existing.source_kind !== sourceKind || existing.source_path !== sourcePath)) {
+    throw new Error(
+      `Project "${input.project_id}" already has a design system registered (${existing.source_kind}: ${existing.source_path}, ${existing.candidate_count} components). ` +
+        `Registering ${sourceKind}: ${sourcePath} would REPLACE it. Do not do that on your own: use the existing registration as is. ` +
+        `If the user has asked to switch design systems, call register_design_system again with replace: true. ` +
+        `(Re-registering the same source to refresh it needs no flag.)`
+    );
+  }
   file[input.project_id] = registration;
   writeDesignSystems(file);
   writeFigmaEvidence(input.project_id, figmaEvidence);
@@ -5625,6 +5655,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       figma_exclude_pages?: string[];
       summarize?: boolean;
       include_candidates?: boolean;
+      replace?: boolean;
     };
 
     try {
@@ -5670,6 +5701,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           figma_mode: args.figma_mode,
           figma_pages: args.figma_pages,
           figma_exclude_pages: args.figma_exclude_pages,
+          replace: args.replace,
         };
       }
       const registration = registerDesignSystem(registerInput);

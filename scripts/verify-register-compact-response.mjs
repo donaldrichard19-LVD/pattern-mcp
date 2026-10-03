@@ -58,7 +58,7 @@ const env = { ...process.env, PATTERN_NO_AUTOSTART: "", PATTERN_TELEMETRY: "0", 
   PATTERN_TELEMETRY_NOTICE_PATH: join(tmp, "tn"), PATTERN_ENFORCEMENT_NOTICE_PATH: join(tmp, "en"), PATTERN_CONNECT_NOTICE_PATH: join(tmp, "cn"), PATTERN_PROJECT_ROOT: tmp };
 const client = new Client({ name: "verify-reg-compact", version: "0.0.0" }, { capabilities: {} });
 await client.connect(new StdioClientTransport({ command: "node", args: [join(dist, "index.js")], env }));
-const reg = async (args) => { const r = await client.callTool({ name: "register_design_system", arguments: { project_id: "p", ...args } }); return { err: !!r.isError, body: r.isError ? r.content[0].text : JSON.parse(r.content[0].text) }; };
+const reg = async (args) => { const r = await client.callTool({ name: "register_design_system", arguments: { project_id: "p", replace: true, ...args } }); return { err: !!r.isError, body: r.isError ? r.content[0].text : JSON.parse(r.content[0].text) }; };
 const a = await reg({ manifest_path: "m30.json" });
 check("30-candidate manifest: summary by default", !a.err && !("candidates" in a.body.registration) && a.body.registration.candidates_omitted === 30 && a.body.registration.candidate_count === 30);
 check("echoes the resolved root and design-systems path", a.body.resolved?.project_root === tmp && a.body.resolved?.design_systems_path === dsPath);

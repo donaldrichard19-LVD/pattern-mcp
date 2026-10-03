@@ -197,7 +197,7 @@ console.log("=== 1. Hand-authored manifest (top-level array) ===");
 {
   const result = await client.callTool({
     name: "register_design_system",
-    arguments: { project_id: "hand-authored-project", manifest_path: "hand-authored-manifest.json" },
+    arguments: { replace: true, project_id: "hand-authored-project", manifest_path: "hand-authored-manifest.json" },
   });
   const { isError, body } = parseResult(result);
   check("no error", !isError);
@@ -215,7 +215,7 @@ console.log("\n=== 2. Hand-authored manifest wrapped in {components: [...]} ==="
 {
   const result = await client.callTool({
     name: "register_design_system",
-    arguments: { project_id: "wrapped-project", manifest_path: "manifest-wrapped.json" },
+    arguments: { replace: true, project_id: "wrapped-project", manifest_path: "manifest-wrapped.json" },
   });
   const { isError, body } = parseResult(result);
   check("no error", !isError);
@@ -227,7 +227,7 @@ console.log("\n=== 3. Storybook-exported index (entries map, title-grouped) ==="
 {
   const result = await client.callTool({
     name: "register_design_system",
-    arguments: { project_id: "storybook-project", manifest_path: "storybook-index.json" },
+    arguments: { replace: true, project_id: "storybook-project", manifest_path: "storybook-index.json" },
   });
   const { isError, body } = parseResult(result);
   check("no error", !isError);
@@ -241,7 +241,7 @@ console.log("\n=== 4. Malformed manifest: unrecognized shape ===");
 {
   const result = await client.callTool({
     name: "register_design_system",
-    arguments: { project_id: "malformed-project", manifest_path: "malformed-manifest.json" },
+    arguments: { replace: true, project_id: "malformed-project", manifest_path: "malformed-manifest.json" },
   });
   const { isError, raw } = parseResult(result);
   check("returns isError", isError === true);
@@ -252,7 +252,7 @@ console.log("\n=== 5. Malformed manifest: not valid JSON ===");
 {
   const result = await client.callTool({
     name: "register_design_system",
-    arguments: { project_id: "not-json-project", manifest_path: "not-json.json" },
+    arguments: { replace: true, project_id: "not-json-project", manifest_path: "not-json.json" },
   });
   const { isError, raw } = parseResult(result);
   check("returns isError", isError === true);
@@ -263,7 +263,7 @@ console.log("\n=== 6. Malformed manifest: entry missing required name ===");
 {
   const result = await client.callTool({
     name: "register_design_system",
-    arguments: { project_id: "missing-name-project", manifest_path: "missing-name.json" },
+    arguments: { replace: true, project_id: "missing-name-project", manifest_path: "missing-name.json" },
   });
   const { isError, raw } = parseResult(result);
   check("returns isError", isError === true);
@@ -274,7 +274,7 @@ console.log("\n=== 7. Directory scan: parsing heuristics ===");
 {
   const result = await client.callTool({
     name: "register_design_system",
-    arguments: { project_id: "directory-scan-project", directory_path: "components" },
+    arguments: { replace: true, project_id: "directory-scan-project", directory_path: "components" },
   });
   const { isError, body } = parseResult(result);
   check("no error", !isError);
@@ -306,13 +306,13 @@ console.log("\n=== 8. Exactly one of manifest_path/directory_path is required ==
 {
   const both = await client.callTool({
     name: "register_design_system",
-    arguments: { project_id: "both-project", manifest_path: "hand-authored-manifest.json", directory_path: "components" },
+    arguments: { replace: true, project_id: "both-project", manifest_path: "hand-authored-manifest.json", directory_path: "components" },
   });
   check("both provided -> isError", parseResult(both).isError === true);
 
   const neither = await client.callTool({
     name: "register_design_system",
-    arguments: { project_id: "neither-project" },
+    arguments: { replace: true, project_id: "neither-project" },
   });
   check("neither provided -> isError", parseResult(neither).isError === true);
 }
@@ -321,7 +321,7 @@ console.log("\n=== 9. Path escaping the project root is rejected ===");
 {
   const absolute = await client.callTool({
     name: "register_design_system",
-    arguments: { project_id: "escape-project", manifest_path: "/etc/hosts" },
+    arguments: { replace: true, project_id: "escape-project", manifest_path: "/etc/hosts" },
   });
   const { isError, raw } = parseResult(absolute);
   check("absolute manifest_path -> isError", isError === true);
@@ -329,7 +329,7 @@ console.log("\n=== 9. Path escaping the project root is rejected ===");
 
   const traversal = await client.callTool({
     name: "register_design_system",
-    arguments: { project_id: "escape-project-2", directory_path: "../../etc" },
+    arguments: { replace: true, project_id: "escape-project-2", directory_path: "../../etc" },
   });
   check("directory_path escaping root -> isError", parseResult(traversal).isError === true);
 }
@@ -338,11 +338,11 @@ console.log("\n=== 10. Re-registering the same project_id overwrites, doesn't me
 {
   await client.callTool({
     name: "register_design_system",
-    arguments: { project_id: "overwrite-project", manifest_path: "hand-authored-manifest.json" },
+    arguments: { replace: true, project_id: "overwrite-project", manifest_path: "hand-authored-manifest.json" },
   });
   await client.callTool({
     name: "register_design_system",
-    arguments: { project_id: "overwrite-project", directory_path: "components" },
+    arguments: { replace: true, project_id: "overwrite-project", directory_path: "components" },
   });
   const stored = JSON.parse(readFileSync(designSystemsPath, "utf8"));
   check("stored registration reflects only the second (directory_scan) call", stored["overwrite-project"]?.source_kind === "directory_scan");
