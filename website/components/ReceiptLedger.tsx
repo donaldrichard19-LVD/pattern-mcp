@@ -135,10 +135,9 @@ export function ReceiptLedger() {
 
             <p style={{ margin: 0, fontSize: "var(--text-caption)", color: "rgba(255,255,255,.5)" }}>
               Every decision is saved with what was checked, what was decided, what it cost, and whether the
-              finished file was verified. If the file changes afterwards, the check is marked stale. Each one
-              is tied to a specific version of your code and can be attached to a pull request, so reviewers
-              get the reasoning along with the code. A file shows as &ldquo;not recorded&rdquo; when the agent
-              answered before any file was written.
+              finished file was verified. Each record is tied to a version of your code and goes stale if the
+              file changes. Attach it to a pull request and reviewers get the reasoning with the code. A file
+              shows as &ldquo;not recorded&rdquo; when the agent answered before any file was written.
             </p>
           </div>
         </Reveal>

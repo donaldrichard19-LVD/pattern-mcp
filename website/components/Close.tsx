@@ -18,8 +18,8 @@ export function Close() {
         </Reveal>
         <Reveal delay={60}>
           <h2 style={{ ...H2, fontSize: "clamp(26px, 4.4vw, 36px)", maxWidth: 640 }}>
-            Your agent is going to keep choosing components.{" "}
-            <span style={{ color: "var(--text-accent)" }}>Let&apos;s make sure it chooses well.</span>
+            Your agent picks a component for every screen it builds.{" "}
+            <span style={{ color: "var(--text-accent)" }}>Make it pick from yours.</span>
           </h2>
         </Reveal>
         <Reveal delay={80}>
@@ -31,7 +31,7 @@ export function Close() {
           <div style={{ display: "grid", gap: 14, justifyItems: "center" }}>
             <div style={{ display: "flex", gap: 14, flexWrap: "wrap", justifyContent: "center", alignItems: "center" }}>
               <Button href="/#install" size="lg">
-                Get started
+                Install Pattern
               </Button>
               <div style={{ width: 260 }}>
                 <CopyBlock label="install command" lines={INSTALL_LINES} />

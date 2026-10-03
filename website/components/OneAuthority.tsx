@@ -25,8 +25,8 @@ export function OneAuthority() {
             </h2>
             <p style={{ ...BODY, fontSize: "var(--text-body-md)" }}>
               Register your Figma file, your components folder, or a manifest, once. From then on Pattern judges
-              every request against that and nothing else: no outside libraries, no generic best guess. The agent
-              gets a plain answer: reuse this component, or build these specific missing pieces.
+              every request against that source alone. It never falls back to outside libraries or a generic
+              guess. The agent gets a plain answer: reuse this component, or build these missing pieces.
             </p>
             <p style={{ ...BODY, fontSize: "var(--text-body-md)", color: "var(--text-tertiary)" }}>
               Search tools hand an agent a list and leave the decision to it. Pattern makes the decision against

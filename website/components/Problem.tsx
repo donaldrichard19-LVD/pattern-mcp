@@ -26,8 +26,8 @@ export function Problem() {
           <div style={{ display: "grid", gap: 10 }}>
             <span style={LABEL}>The problem</span>
             <h2 style={{ ...H2, fontSize: "clamp(24px, 3.6vw, 30px)", maxWidth: 620 }}>
-              The agent isn&apos;t careless.{" "}
-              <span style={{ color: "var(--text-accent)" }}>It just can&apos;t see what you have.</span>
+              Your agent can&apos;t see{" "}
+              <span style={{ color: "var(--text-accent)" }}>the components you already built.</span>
             </h2>
           </div>
         </Reveal>
@@ -43,8 +43,7 @@ export function Problem() {
         </div>
         <Reveal delay={220}>
           <p style={{ ...BODY, fontSize: "var(--text-body-md)", margin: 0, maxWidth: 620 }}>
-            Duplicates collect, and each one has to be maintained, restyled, and eventually cleaned up by
-            someone.
+            Every duplicate has to be maintained, restyled, and eventually cleaned up by someone.
           </p>
         </Reveal>
       </div>

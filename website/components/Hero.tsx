@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type CSSProperties } from "react";
-import { BODY, LABEL, MONO, PANEL, SECTION } from "./tokens";
+import { BODY, MONO, PANEL, SECTION } from "./tokens";
 import { Button, Chip, CopyBlock, Reveal } from "./ui";
 
 // `init --yes` (not the bare server command) so this is safe for a coding
@@ -124,9 +124,6 @@ export function Hero() {
       >
         <div style={{ display: "grid", gap: 22 }}>
           <Reveal>
-            <span style={LABEL}>For teams building UI with AI agents</span>
-          </Reveal>
-          <Reveal>
             <h1
               style={{
                 margin: 0,
@@ -145,15 +142,15 @@ export function Hero() {
           </Reveal>
           <Reveal delay={60}>
             <p style={{ ...BODY, maxWidth: 520, fontSize: "var(--text-body-lg)" }}>
-              Before your agent builds a screen, Pattern checks the request against your own design system,
-              reuses what fits, and lists exactly what&apos;s missing. Afterwards it checks the code and shows
-              the proof. You don&apos;t have to ask it to.
+              Before your agent builds a screen, Pattern has it look through your design system. It reuses
+              what fits and tells you what&apos;s missing. When the build is done, it checks the code and shows
+              you the proof.
             </p>
           </Reveal>
           <Reveal delay={100}>
             <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
               <Button href="#install" size="lg">
-                Get started
+                Install Pattern
               </Button>
             </div>
           </Reveal>
