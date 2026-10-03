@@ -23,13 +23,14 @@ import { dirname, isAbsolute, join, resolve as resolvePath } from "node:path";
 import { deriveProjectId } from "./project-id.js";
 import { fetchFigmaFile } from "./design-system-figma.js";
 import { GATE_INIT_COMMAND, GATE_NPX, isLegacyGateInvocation } from "./gate-commands.js";
+import { diagnoseLocalEntry, findPatternEntry } from "./server-entry.js";
 
 type Level = "ok" | "warn" | "fail";
 interface Line { level: Level; text: string }
 
 const KEYS = ["ANTHROPIC_API_KEY", "TYPESAFE_API_KEY", "FIGMA_ACCESS_TOKEN"] as const;
 
-interface ServerEntry { source: string; env: Record<string, string> }
+interface ServerEntry { source: string; name?: string; command?: unknown; args?: unknown; env: Record<string, string> }
 
 function readText(path: string): string | null {
   try {
@@ -54,14 +55,9 @@ export function findServerEntries(root: string, home = homedir()): ServerEntry[]
   const found: ServerEntry[] = [];
   // Named "pattern" by the connect wizard, but a hand-made entry can have any
   // name (e.g. a dev checkout), so also match on what it launches.
-  const pick = (servers: any): any => {
-    if (!servers || typeof servers !== "object") return undefined;
-    if (servers.pattern) return servers.pattern;
-    return Object.values(servers).find((e: any) => /pattern-mcp|ui-component-judgment-mcp/.test(JSON.stringify([e?.command, e?.args])));
-  };
   const add = (source: string, servers: any) => {
-    const entry = pick(servers);
-    if (entry && typeof entry === "object") found.push({ source, env: entry.env && typeof entry.env === "object" ? entry.env : {} });
+    const hit = findPatternEntry(servers);
+    if (hit) found.push({ source, name: hit.name, command: hit.entry.command, args: hit.entry.args, env: hit.entry.env && typeof hit.entry.env === "object" ? (hit.entry.env as Record<string, string>) : {} });
   };
   const claude = readJson(join(home, ".claude.json"));
   if (claude) {
@@ -125,7 +121,9 @@ export async function runDoctor(root: string, opts: { online: boolean; projectId
   }
   const entry = entries[0];
   if (entry) {
-    out.push({ level: "ok", text: `Server entry: ${entry.source}` });
+    out.push({ level: "ok", text: `Server entry: ${entry.source}${entry.name && entry.name !== "pattern" ? ` (named "${entry.name}")` : ""}` });
+    const local = diagnoseLocalEntry({ command: entry.command, args: entry.args });
+    if (local) out.push({ level: "fail", text: `This server entry cannot start: ${local.problem}. Fix: ${local.fix}` });
     for (const k of KEYS) {
       const present = typeof entry.env[k] === "string" && entry.env[k].length > 0;
       const why = { ANTHROPIC_API_KEY: "recommend_component scoring", TYPESAFE_API_KEY: "Jev fast matching", FIGMA_ACCESS_TOKEN: "figma_file_key registration" }[k];
