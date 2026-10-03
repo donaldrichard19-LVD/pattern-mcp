@@ -39,9 +39,9 @@ export function OneAuthority() {
             <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--border-subtle)", ...MONO, fontSize: 11, color: "var(--text-tertiary)" }}>
               register once per project
             </div>
-            <div style={{ display: "grid" }}>
+            <ul style={{ display: "grid", listStyle: "none", margin: 0, padding: 0 }}>
               {SOURCES.map((s, i) => (
-                <div
+                <li
                   key={s.h}
                   style={{
                     display: "flex",
@@ -51,14 +51,14 @@ export function OneAuthority() {
                     borderTop: i === 0 ? "none" : "1px solid var(--border-subtle)",
                   }}
                 >
-                  <s.icon size={18} style={{ flexShrink: 0, marginTop: 2, color: "var(--text-accent)" }} />
+                  <s.icon size={18} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2, color: "var(--text-accent)" }} />
                   <div style={{ display: "grid", gap: 2 }}>
                     <span style={{ fontSize: "var(--text-body-md)", color: "var(--text-primary)", fontWeight: 500 }}>{s.h}</span>
                     <span style={{ fontSize: "var(--text-body-sm)", color: "var(--text-secondary)" }}>{s.p}</span>
                   </div>
-                </div>
+                </li>
               ))}
-            </div>
+            </ul>
             <div style={{ padding: "10px 14px", borderTop: "1px solid var(--border-subtle)", ...MONO, fontSize: 11, color: "var(--text-tertiary)" }}>
               every request is judged against this, and nothing else
             </div>

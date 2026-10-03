@@ -20,9 +20,24 @@ const CHECKS: { ok: boolean; text: string; quote?: string }[] = [
   { ok: false, text: "Styled from tokens.ts" },
 ];
 
+// Text for screen readers only: status must not depend on an icon's shape or colour.
+const SR_ONLY: React.CSSProperties = {
+  position: "absolute",
+  width: 1,
+  height: 1,
+  padding: 0,
+  margin: -1,
+  overflow: "hidden",
+  clip: "rect(0, 0, 0, 0)",
+  whiteSpace: "nowrap",
+  border: 0,
+};
+
 function Row({ children }: { children: React.ReactNode }) {
-  return <div style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: "var(--text-body-sm)" }}>{children}</div>;
+  return <li style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: "var(--text-body-sm)" }}>{children}</li>;
 }
+
+const LIST: React.CSSProperties = { display: "grid", gap: 10, listStyle: "none", margin: 0, padding: 0 };
 
 export function ProofSection() {
   return (
@@ -61,27 +76,33 @@ export function ProofSection() {
             </div>
             <div style={{ padding: 14, display: "grid", gap: 10 }}>
               <span style={{ ...MONO, fontSize: 11, color: "var(--text-tertiary)" }}>Before: where each requirement comes from</span>
-              {REQS.map((r) => (
-                <Row key={r.text}>
-                  <span style={{ flexShrink: 0, display: "inline-block", width: 136 }}>
-                    <Chip tone={r.tone}>{r.tag}</Chip>
-                  </span>
-                  <span style={{ color: "var(--text-primary)", paddingTop: 3 }}>{r.text}</span>
-                </Row>
-              ))}
+              <ul style={LIST}>
+                {REQS.map((r) => (
+                  <Row key={r.text}>
+                    <span style={{ flexShrink: 0, display: "inline-block", width: 136 }}>
+                      <Chip tone={r.tone}>{r.tag}</Chip>
+                    </span>
+                    <span style={{ color: "var(--text-primary)", paddingTop: 3 }}>{r.text}</span>
+                  </Row>
+                ))}
+              </ul>
             </div>
             <div style={{ height: 1, background: "var(--border-subtle)" }} />
             <div style={{ padding: 14, display: "grid", gap: 10 }}>
               <span style={{ ...MONO, fontSize: 11, color: "var(--text-tertiary)" }}>After: checked against the built file</span>
+              <ul style={LIST}>
               {CHECKS.map((c) => (
                 <Row key={c.text}>
                   {c.ok ? (
-                    <Check size={15} style={{ flexShrink: 0, marginTop: 2, color: "var(--text-success)" }} />
+                    <Check size={15} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2, color: "var(--text-success)" }} />
                   ) : (
-                    <HelpCircle size={15} style={{ flexShrink: 0, marginTop: 2, color: "var(--text-tertiary)" }} />
+                    <HelpCircle size={15} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2, color: "var(--text-tertiary)" }} />
                   )}
                   <div style={{ display: "grid", gap: 3, minWidth: 0 }}>
-                    <span style={{ color: c.ok ? "var(--text-primary)" : "var(--text-tertiary)" }}>{c.text}</span>
+                    <span style={{ color: c.ok ? "var(--text-primary)" : "var(--text-tertiary)" }}>
+                      <span style={SR_ONLY}>{c.ok ? "Verified: " : "Unverified: "}</span>
+                      {c.text}
+                    </span>
                     {c.quote ? (
                       <code style={{ ...MONO, fontSize: 11, color: "var(--text-secondary)", wordBreak: "break-word", fontVariantLigatures: "none", fontFeatureSettings: '"liga" 0, "calt" 0' }}>{c.quote}</code>
                     ) : (
@@ -90,6 +111,7 @@ export function ProofSection() {
                   </div>
                 </Row>
               ))}
+              </ul>
             </div>
             <div style={{ padding: "10px 14px", borderTop: "1px solid var(--border-subtle)", ...MONO, fontSize: 11, color: "var(--text-tertiary)" }}>
               a quote is shown only if the server found it in the file
