@@ -9,7 +9,7 @@ const ITEMS: { glyph: string; h: string; p: string }[] = [
   {
     glyph: "?",
     h: "It tells you when it isn't sure",
-    p: "Close calls get a second look. If the runs disagree, you see low confidence and which requirements they split on, not a confident wrong answer.",
+    p: "Close calls get a second look. If the runs disagree, you see low confidence and the requirements they split on.",
   },
   {
     glyph: "$",
@@ -19,7 +19,7 @@ const ITEMS: { glyph: string; h: string; p: string }[] = [
   {
     glyph: "–",
     h: "It tells you what it didn't check",
-    p: "\u201cUnverified\u201d means look at this. Pattern checks what the code says, not how it renders, and never claims a design file proves what it can't.",
+    p: "\u201cUnverified\u201d means look at this. Pattern reads the code but can't see how it renders, and it never claims a design file proves what it can't.",
   },
 ];
 

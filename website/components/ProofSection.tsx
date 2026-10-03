@@ -65,7 +65,7 @@ export function ProofSection() {
               on the model&apos;s word.
             </p>
             <p style={{ ...BODY, fontSize: "var(--text-caption)", color: "var(--text-tertiary)" }}>
-              It checks what the code says, not how it renders.
+              It reads the code. It can&apos;t judge how the page renders.
             </p>
           </div>
         </Reveal>

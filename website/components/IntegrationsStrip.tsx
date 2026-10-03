@@ -19,7 +19,7 @@ export function IntegrationsStrip() {
         <Reveal delay={30}>
           <p style={{ margin: 0, maxWidth: 640, fontSize: "var(--text-body-md)", lineHeight: "var(--leading-body)", color: "var(--text-secondary)" }}>
             Before your agent builds a component, Pattern looks at what your design system already offers and
-            tells the agent whether to reuse something or build what&apos;s missing, along with the reason.
+            tells the agent whether to reuse or build what&apos;s missing, with the reason.
           </p>
         </Reveal>
         <Reveal delay={60}>
