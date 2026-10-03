@@ -14,7 +14,16 @@ is recorded in an auditable ledger you can verify later.
 
 [Website](https://usepattern.sh) · [npm](https://www.npmjs.com/package/pattern-mcp) · [Report an issue](https://github.com/donaldrichard19-LVD/pattern-mcp/issues/new/choose)
 
-**Current release: v0.20.0** makes the agent use Pattern on its own. You no longer
+**Current release: v0.20.1** makes `init` and `doctor` recognise a Pattern server under
+any name. Before, `init` looked only for a server named `pattern`, so next to a
+hand-made entry (say a dev checkout registered as `ui-component-judgment`) it
+added a second, keyless server; and `doctor` called an entry that could not start
+fine. Now both recognise an entry by what it runs (or by a local checkout's
+package name), `init` skips an existing one (and, if Claude Code reports it
+failing, explains instead of duplicating), and `doctor` reports an entry that
+cannot start, such as a checkout with no `node_modules`, as a failure with the fix.
+
+**v0.20.0** makes the agent use Pattern on its own. You no longer
 have to say "use Pattern": the server now sends the agent short usage
 instructions when it connects (building or prototyping UI, especially from a Figma
 link, mockup or screenshot; skip trivial primitives and small edits), and
