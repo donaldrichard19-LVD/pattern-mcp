@@ -41,10 +41,12 @@ export interface WizardState {
   designSystem: { source: string; candidateCount: number } | null;
   gate: "set up" | "skipped" | "not asked";
   summaries: number | null;
+  /** True when the user said their design system is not in Figma, so step 2 has nothing to do. */
+  figmaNotNeeded: boolean;
 }
 
 export function newWizardState(): WizardState {
-  return { anthropicKey: "missing", figmaToken: "missing", clientConnected: false, skill: null, designSystem: null, gate: "not asked", summaries: null };
+  return { anthropicKey: "missing", figmaToken: "missing", clientConnected: false, skill: null, designSystem: null, gate: "not asked", summaries: null, figmaNotNeeded: false };
 }
 
 // Accepts a bare key or any figma.com/design|file|proto|board URL.
@@ -186,6 +188,7 @@ export async function runKeysSteps(
     state.figmaToken = f.status;
     if (f.value) env.FIGMA_ACCESS_TOKEN = f.value;
   } else {
+    state.figmaNotNeeded = true;
     console.log("  Skipped.");
   }
   return env;
@@ -351,16 +354,30 @@ export async function runDesignSystemStep(
   }
 }
 
+// The five steps announced in wizardIntro, in order. Optional ones count: a step
+// the user chose not to do (enforcement) is still a step that is not done yet.
+export function stepsDone(state: WizardState): boolean[] {
+  return [
+    state.anthropicKey === "valid" || state.anthropicKey === "unverified",
+    state.figmaToken === "valid" || state.figmaToken === "unverified" || state.figmaNotNeeded,
+    state.clientConnected,
+    state.designSystem !== null,
+    state.gate === "set up",
+  ];
+}
+
 export function wizardSummary(state: WizardState, projectId: string): string {
   const mark = (ok: boolean) => (ok ? "[x]" : "[ ]");
+  const done = stepsDone(state).filter(Boolean).length;
   const keyLine = state.anthropicKey === "valid" ? "Anthropic key checked" : state.anthropicKey === "unverified" ? "Anthropic key saved (not confirmed)" : state.anthropicKey === "invalid" ? "Anthropic key saved but looks wrong" : "Anthropic key not set";
   const lines = [
-    "\nSetup summary",
-    `  ${mark(state.anthropicKey === "valid" || state.anthropicKey === "unverified")} ${keyLine}`,
-    `  ${mark(state.clientConnected)} Client connected`,
-    `  ${mark(state.skill === "installed" || state.skill === "updated" || state.skill === "current")} Agent skill installed`,
-    `  ${mark(state.designSystem !== null)} Design system registered${state.designSystem ? ` (${state.designSystem.candidateCount} components${state.summaries ? `, ${state.summaries} summarised` : ""}, project "${projectId}")` : ""}`,
-    `  ${mark(state.gate === "set up")} Enforcement ${state.gate === "set up" ? "on" : "off (optional)"}`,
+    `\nSetup: ${done} of ${WIZARD_STEPS} steps done`,
+    `  ${mark(state.anthropicKey === "valid" || state.anthropicKey === "unverified")} 1. ${keyLine}`,
+    `  ${mark(stepsDone(state)[1])} 2. ${state.figmaToken === "missing" && state.figmaNotNeeded ? "Figma token not needed" : state.figmaToken === "missing" ? "Figma token not set" : "Figma token saved"}`,
+    `  ${mark(state.clientConnected)} 3. Client connected`,
+    `      ${mark(state.skill === "installed" || state.skill === "updated" || state.skill === "current")} Agent skill installed`,
+    `  ${mark(state.designSystem !== null)} 4. Design system registered${state.designSystem ? ` (${state.designSystem.candidateCount} components${state.summaries ? `, ${state.summaries} summarised` : ""}, project "${projectId}")` : ""}`,
+    `  ${mark(state.gate === "set up")} 5. Enforcement ${state.gate === "set up" ? "on" : "off (optional, turn it on any time)"}`,
   ];
   const todo: string[] = [];
   if (state.anthropicKey === "missing" || state.anthropicKey === "invalid") todo.push("Add ANTHROPIC_API_KEY to the Pattern server's env block in your client config.");

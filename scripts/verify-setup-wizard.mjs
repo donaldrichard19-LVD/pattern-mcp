@@ -88,6 +88,12 @@ console.log("3. guessComponentsDir + summary");
   s.designSystem = { source: "src/components", candidateCount: 7 };
   const done = wiz.wizardSummary(s, "p");
   check("complete summary shows count and a try-it line", done.includes("7 components") && done.includes("Try it"));
+  check("key, client and design system = 3 of 5 (figma not yet answered, enforcement off)", done.includes("Setup: 3 of 5 steps done"));
+  s.figmaNotNeeded = true;
+  check("key, no-figma, client and design system = 4 of 5", wiz.wizardSummary(s, "p").includes("Setup: 4 of 5 steps done"));
+  s.gate = "set up";
+  check("all five = 5 of 5", wiz.wizardSummary(s, "p").includes("Setup: 5 of 5 steps done"));
+  check("empty state = 0 of 5", empty.includes("Setup: 0 of 5 steps done"));
 }
 
 console.log("4. real init: register a components folder, no enforcement");
@@ -113,7 +119,7 @@ console.log("4. real init: register a components folder, no enforcement");
   const store = JSON.parse(readFileSync(join(home, ".pattern", "design_systems.json"), "utf8"));
   const ids = Object.keys(store);
   check("registration saved under one project id", ids.length === 1 && store[ids[0]].candidates.length === 2);
-  check("summary marks client and design system done", result.stdout.includes("[x] Client connected") && result.stdout.includes("[x] Design system registered"));
+  check("summary marks client and design system done", result.stdout.includes("[x] 3. Client connected") && result.stdout.includes("[x] 4. Design system registered") && result.stdout.includes("Setup: 3 of 5 steps done"));
   check("enforcement offered and skipped by default", result.stdout.includes("Skipped. Turn it on any time"));
   check("did not write a gate hook", !/pattern-check-gate-hook/.test(result.stdout) && !(() => { try { readFileSync(join(root, ".claude", "settings.json")); return true; } catch { return false; } })());
 
