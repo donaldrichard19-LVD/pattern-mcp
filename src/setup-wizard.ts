@@ -12,8 +12,8 @@ import { askLine, confirm, promptText, type PromptOptions } from "./prompt.js";
 export type WizardEnv = Record<string, string>;
 
 export type RegisterRequest =
-  | { kind: "figma"; fileKey: string; token: string; replace?: boolean }
-  | { kind: "directory"; path: string; replace?: boolean; summarizeWithKey?: string }
+  | { kind: "figma"; fileKey: string; token: string; replace?: boolean; excludePages?: string[] }
+  | { kind: "directory"; path: string; replace?: boolean; summarizeWith?: { apiKey: string; workspaceId?: string } }
   | { kind: "manifest"; path: string; replace?: boolean };
 
 export interface RegisterResult {
@@ -56,20 +56,27 @@ export function parseFigmaFileKey(input: string): string | null {
   return /^[A-Za-z0-9]{10,}$/.test(text) ? text : null;
 }
 
-export type KeyCheck = { status: "valid" | "invalid" | "unverified"; message: string };
+export type KeyCheck = { status: "valid" | "invalid" | "unverified"; message: string; needsWorkspace?: boolean };
 
-export async function checkAnthropicKey(key: string, fetchImpl: typeof fetch = fetch): Promise<KeyCheck> {
+export async function checkAnthropicKey(key: string, fetchImpl: typeof fetch = fetch, workspaceId?: string): Promise<KeyCheck> {
   if (!/^sk-ant-/.test(key)) {
     return { status: "invalid", message: 'does not start with "sk-ant-" (bad paste?)' };
   }
   const base = process.env.PATTERN_ANTHROPIC_URL ?? "https://api.anthropic.com";
   try {
     const res = await fetchImpl(`${base}/v1/models?limit=1`, {
-      headers: { "x-api-key": key, "anthropic-version": "2023-06-01" },
+      headers: { "x-api-key": key, "anthropic-version": "2023-06-01", ...(workspaceId ? { "anthropic-workspace-id": workspaceId } : {}) },
       signal: AbortSignal.timeout(15_000),
     });
     if (res.ok) return { status: "valid", message: "accepted by the Anthropic API" };
     if (res.status === 401 || res.status === 403) return { status: "invalid", message: `rejected by the Anthropic API (${res.status})` };
+    if (res.status === 400) {
+      // Keys that are not scoped to a workspace must send the workspace id with every request.
+      const body = typeof res.text === "function" ? await res.text().catch(() => "") : "";
+      if (/workspace/i.test(body)) {
+        return { status: workspaceId ? "invalid" : "unverified", needsWorkspace: !workspaceId, message: workspaceId ? "the Anthropic API did not accept that workspace id" : "this key is not scoped to a workspace, so Anthropic needs a workspace id with it" };
+      }
+    }
     return { status: "unverified", message: `the Anthropic API answered ${res.status}, so the key could not be confirmed` };
   } catch (err) {
     return { status: "unverified", message: `could not reach the Anthropic API (${err instanceof Error ? err.message : String(err)})` };
@@ -114,7 +121,7 @@ async function askKey(
   hint: string,
   check: (k: string) => Promise<KeyCheck>,
   options: PromptOptions,
-): Promise<{ value: string | null; status: WizardState["anthropicKey"] }> {
+): Promise<{ value: string | null; status: WizardState["anthropicKey"]; needsWorkspace?: boolean }> {
   for (let attempt = 0; attempt < 3; attempt++) {
     const answer = (await askLine(`${hint ? `${hint}\n` : ""}  Paste your ${label}, or press Enter to skip: `)).trim();
     if (!answer) return { value: null, status: "missing" };
@@ -122,6 +129,7 @@ async function askKey(
     const result = await check(answer);
     console.log(result.status === "valid" ? `ok (${result.message}).` : `${result.message}.`);
     if (result.status === "valid") return { value: answer, status: "valid" };
+    if (result.needsWorkspace) return { value: answer, status: "unverified", needsWorkspace: true };
     const keep = await confirm(
       result.status === "invalid" ? "  That key looks wrong. Use it anyway?" : "  Could not confirm it. Use it anyway?",
       options,
@@ -149,6 +157,22 @@ export async function runKeysSteps(
   const a = await askKey("ANTHROPIC_API_KEY", "", (k) => checkAnthropicKey(k, fetchImpl), options);
   state.anthropicKey = a.status;
   if (a.value) env.ANTHROPIC_API_KEY = a.value;
+  if (a.value && a.needsWorkspace) {
+    console.log("  Anthropic keys that are not tied to one workspace must be sent with a workspace id (wrkspc_...,");
+    console.log("  from console.anthropic.com > Settings > Workspaces). Pattern passes it as ANTHROPIC_WORKSPACE_ID.");
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const id = (await askLine("  Paste the workspace id, or press Enter to skip: ")).trim();
+      if (!id) break;
+      process.stdout.write("  Checking it... ");
+      const again = await checkAnthropicKey(a.value, fetchImpl, id);
+      console.log(again.status === "valid" ? "ok (key and workspace accepted)." : `${again.message}.`);
+      if (again.status === "valid") {
+        env.ANTHROPIC_WORKSPACE_ID = id;
+        state.anthropicKey = "valid";
+        break;
+      }
+    }
+  }
 
   stepHeader(2, WIZARD_STEPS, "Figma token (optional)");
   const usesFigma = await confirm("  Is your design system in Figma?", options, false);
@@ -197,15 +221,38 @@ function toRootRelative(root: string, input: string): { rel: string } | { error:
   return { rel: rel || "." };
 }
 
+// The registrar's "over the N limit" error lists the biggest pages as
+// `"Name" (count), ...`. Pull them out so the wizard can offer to skip them.
+export function parseOversizedPages(message: string): { name: string; count: number }[] | null {
+  if (!/over the \d+ limit/.test(message)) return null;
+  const tail = message.split("Biggest pages:")[1];
+  if (!tail) return null;
+  const pages: { name: string; count: number }[] = [];
+  for (const m of tail.matchAll(/"([^"]+)" \((\d+)\)/g)) pages.push({ name: m[1], count: Number(m[2]) });
+  return pages.length > 0 ? pages : null;
+}
+
 async function registerWithReplacePrompt(
   deps: WizardDeps,
   req: RegisterRequest,
   options: PromptOptions,
+  depth = 0,
 ): Promise<RegisterResult | null> {
   try {
     return await deps.register(req);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    const pages = req.kind === "figma" ? parseOversizedPages(message) : null;
+    if (pages && req.kind === "figma" && depth < 2) {
+      console.log("  That file has too many components to score (icon libraries are the usual cause). Biggest pages:");
+      for (const p of pages) console.log(`    ${p.name} (${p.count})`);
+      const icons = pages.filter((p) => /icon/i.test(p.name)).map((p) => p.name);
+      const raw = await promptText("  Pages to leave out, comma-separated", icons.join(", "), options);
+      const exclude = raw.split(",").map((x) => x.trim()).filter(Boolean);
+      if (exclude.length === 0) return null;
+      console.log("  Fetching again without them...");
+      return registerWithReplacePrompt(deps, { ...req, excludePages: [...(req.excludePages ?? []), ...exclude] }, options, depth + 1);
+    }
     if (/replace: true/.test(message)) {
       console.log(`  A different design system is already registered for "${deps.projectId}".`);
       const ok = await confirm("  Replace it with this one? (the old one is overwritten)", options, false);
@@ -276,7 +323,7 @@ export async function runDesignSystemStep(
           "  noticeably more accurate. That sends up to 8000 characters of each component file to\n" +
           "  api.anthropic.com (Claude Haiku), about 0.2 cents per file, cached so re-runs only pay for changes.",
       );
-      if (next.kind === "directory" && (await confirm("  Write summaries?", options, true))) next.summarizeWithKey = key;
+      if (next.kind === "directory" && (await confirm("  Write summaries?", options, true))) next.summarizeWith = { apiKey: key, workspaceId: env.ANTHROPIC_WORKSPACE_ID ?? process.env.ANTHROPIC_WORKSPACE_ID };
     }
   } else {
     console.log("  Skipped. Until one is registered, recommend_component returns an error saying so.");

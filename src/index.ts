@@ -2873,7 +2873,8 @@ function readCandidateSource(scanRoot: string, rel: string): string | null {
 async function summarizeRegistration(
   registration: DesignSystemRegistration,
   // The init wizard collects the key after this module loaded, so it passes it in.
-  apiKey: string | undefined = ANTHROPIC_API_KEY
+  apiKey: string | undefined = ANTHROPIC_API_KEY,
+  workspaceId: string | undefined = ANTHROPIC_WORKSPACE_ID
 ): Promise<SummarizeStats & { estimated_cost_usd: number; model: string }> {
   const scanRoot = resolveWithinRoot(PROJECT_ROOT, registration.source_path);
   if (!scanRoot) throw new Error(`source_path "${registration.source_path}" is outside the project root.`);
@@ -2881,7 +2882,7 @@ async function summarizeRegistration(
   const stats = await summarizeCandidates(
     registration.candidates,
     (rel) => readCandidateSource(scanRoot, rel),
-    makeAnthropicSummaryCall(apiKey!, ANTHROPIC_WORKSPACE_ID || undefined),
+    makeAnthropicSummaryCall(apiKey!, workspaceId || undefined),
     reused
   );
   const file = readDesignSystems();
@@ -5787,7 +5788,7 @@ const IDLE_CONNECT_NUDGE_MS = 20_000;
 
 // Registration for the init wizard: the same registerDesignSystem core the
 // tool uses, called in-process. For a folder, the wizard may also ask for
-// Haiku capability summaries (req.summarizeWithKey is the key it just
+// Haiku capability summaries (req.summarizeWith is the key it just
 // collected, which this process's ANTHROPIC_API_KEY constant cannot know).
 async function registerForWizard(req: WizardRegisterRequest): Promise<WizardRegisterResult> {
   const projectId = deriveProjectId(PROJECT_ROOT);
@@ -5797,6 +5798,7 @@ async function registerForWizard(req: WizardRegisterRequest): Promise<WizardRegi
           project_id: projectId,
           figma_file: await fetchFigmaFile(req.fileKey, req.token),
           figma_source_label: `figma:${req.fileKey}`,
+          figma_exclude_pages: req.excludePages,
           replace: req.replace,
         })
       : registerDesignSystem({
@@ -5808,9 +5810,9 @@ async function registerForWizard(req: WizardRegisterRequest): Promise<WizardRegi
     candidateCount: registration.candidates.length,
     source: req.kind === "figma" ? `Figma file ${req.fileKey}` : req.path,
   };
-  if (req.kind === "directory" && req.summarizeWithKey) {
+  if (req.kind === "directory" && req.summarizeWith) {
     try {
-      const stats = await summarizeRegistration(registration, req.summarizeWithKey);
+      const stats = await summarizeRegistration(registration, req.summarizeWith.apiKey, req.summarizeWith.workspaceId);
       result.summaries = { generated: stats.generated, costUsd: stats.estimated_cost_usd };
     } catch (err) {
       // The registration is already saved; a summary failure only costs match quality.

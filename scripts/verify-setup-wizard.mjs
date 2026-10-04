@@ -45,11 +45,30 @@ check("anthropic 401 invalid", (await wiz.checkAnthropicKey("sk-ant-x", fakeFetc
 check("anthropic wrong prefix invalid without a request", (await wiz.checkAnthropicKey("nope", throwingFetch)).status === "invalid");
 check("anthropic offline unverified", (await wiz.checkAnthropicKey("sk-ant-x", throwingFetch)).status === "unverified");
 check("anthropic 500 unverified", (await wiz.checkAnthropicKey("sk-ant-x", fakeFetch(500))).status === "unverified");
+{
+  const wsBody = async () => ({ ok: false, status: 400, text: async () => '{"error":{"message":"This API key is not scoped to a workspace, so this request must include the anthropic-workspace-id header"}}' });
+  const r = await wiz.checkAnthropicKey("sk-ant-x", wsBody);
+  check("anthropic 400 about workspace asks for a workspace id", r.status === "unverified" && r.needsWorkspace === true);
+  let sent = null;
+  const ok = async (_u, init) => { sent = init.headers["anthropic-workspace-id"]; return { ok: true, status: 200 }; };
+  const r2 = await wiz.checkAnthropicKey("sk-ant-x", ok, "wrkspc_123");
+  check("workspace id is sent as a header and accepted", r2.status === "valid" && sent === "wrkspc_123");
+  const r3 = await wiz.checkAnthropicKey("sk-ant-x", wsBody, "wrkspc_bad");
+  check("a rejected workspace id is invalid, not asked again", r3.status === "invalid" && !r3.needsWorkspace);
+}
 check("figma valid", (await wiz.checkFigmaToken("figd_abc", fakeFetch(200))).status === "valid");
 check("figma 403 invalid", (await wiz.checkFigmaToken("figd_abc", fakeFetch(403))).status === "invalid");
 check("figma wrong prefix invalid", (await wiz.checkFigmaToken("abc", throwingFetch)).status === "invalid");
 check("figma with space invalid", (await wiz.checkFigmaToken("figd_a bc", throwingFetch)).status === "invalid");
 check("figma offline unverified", (await wiz.checkFigmaToken("figd_abc", throwingFetch)).status === "unverified");
+
+console.log("2b. parseOversizedPages");
+{
+  const msg = '"figma:x" produced 14220 candidates, over the 3000 limit (PATTERN_FIGMA_MAX_CANDIDATES). Biggest pages: "Tabler Icons" (4963), "Remix Icons" (1654), "Buttons" (40). Icon libraries are the usual cause';
+  const pages = wiz.parseOversizedPages(msg);
+  check("parses names and counts", pages?.length === 3 && pages[0].name === "Tabler Icons" && pages[0].count === 4963);
+  check("ignores other errors", wiz.parseOversizedPages("Figma returned 403") === null);
+}
 
 console.log("3. guessComponentsDir + summary");
 {
