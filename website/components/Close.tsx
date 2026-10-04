@@ -1,11 +1,19 @@
 "use client";
 
 import { DOCS, REPO } from "./constants";
-import { H2, SECTION } from "./tokens";
+import { BODY, H2, LABEL, PANEL, SECTION } from "./tokens";
 import { Button, CopyBlock, Divider, Mark, Wordmark } from "./ui";
 import { Reveal } from "./ui";
 
 const INSTALL_LINES = ["npx pattern-mcp init --yes"];
+
+const SETUP_STEPS: { h: string; p: string }[] = [
+  { h: "Add your Anthropic key.", p: "Pattern checks it on the spot, so a bad paste shows up now and not in the middle of a build." },
+  { h: "Add a Figma token, if your design system lives in Figma.", p: "It gets the same check." },
+  { h: "Connect your tools.", p: "Pattern is added to Claude Code, Claude Desktop or Cursor, along with a skill that tells your agent to check before it builds UI." },
+  { h: "Register your design system.", p: "Paste a Figma link or point it at your components folder. If a Figma file is huge, the setup offers to leave out the icon pages." },
+  { h: "Turn on the required check, or leave it for later.", p: "It is optional and off by default." },
+];
 
 export function Close() {
   return (
@@ -26,6 +34,21 @@ export function Close() {
           <p style={{ margin: 0, fontSize: "var(--text-body-md)", color: "var(--text-secondary)" }}>
             Install it once. Then just ask for UI.
           </p>
+        </Reveal>
+        <Reveal delay={90}>
+          <div style={{ ...PANEL, background: "var(--surface-sunken)", padding: "22px 24px", maxWidth: 560, width: "100%", textAlign: "left", display: "grid", gap: 14 }}>
+            <span style={LABEL}>One command starts a guided setup</span>
+            <ol style={{ margin: 0, paddingLeft: 20, display: "grid", gap: 10 }}>
+              {SETUP_STEPS.map((st) => (
+                <li key={st.h} style={{ ...BODY, fontSize: "var(--text-body-sm)" }}>
+                  <span style={{ color: "var(--text-primary)", fontWeight: 500 }}>{st.h}</span> {st.p}
+                </li>
+              ))}
+            </ol>
+            <p style={{ ...BODY, fontSize: "var(--text-body-sm)", margin: 0 }}>
+              You finish with a checklist of what is ready and what is left, and a first prompt to try.
+            </p>
+          </div>
         </Reveal>
         <Reveal delay={100}>
           <div style={{ display: "grid", gap: 14, justifyItems: "center" }}>
