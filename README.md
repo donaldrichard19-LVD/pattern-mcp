@@ -14,7 +14,16 @@ is recorded in an auditable ledger you can verify later.
 
 [Website](https://usepattern.sh) · [npm](https://www.npmjs.com/package/pattern-mcp) · [Report an issue](https://github.com/donaldrichard19-LVD/pattern-mcp/issues/new/choose)
 
-**Current release: v0.20.1** makes `init` and `doctor` recognise a Pattern server under
+**Current release: v0.21.0** turns `npx pattern-mcp init` into a guided setup. It lists
+five steps up front: your Anthropic key, a Figma token (if you use Figma), connecting
+your client, registering your design system, and the optional required check. Keys are
+checked as you paste them (including keys that need an Anthropic workspace id), a
+Figma link or components folder is registered on the spot (a huge Figma file offers to
+leave out icon pages; a folder can get Haiku summaries after you agree to what is
+sent), and the run ends with "Setup: N of 5 steps done" and what to do next.
+`init --yes` still skips every step that needs your input.
+
+**v0.20.1** makes `init` and `doctor` recognise a Pattern server under
 any name. Before, `init` looked only for a server named `pattern`, so next to a
 hand-made entry (say a dev checkout registered as `ui-component-judgment`) it
 added a second, keyless server; and `doctor` called an entry that could not start
