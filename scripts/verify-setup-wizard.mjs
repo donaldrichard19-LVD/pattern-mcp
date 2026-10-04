@@ -115,6 +115,70 @@ console.log("4. real init: register a components folder, no enforcement");
   rmSync(home, { recursive: true, force: true });
 }
 
+console.log("5. real init with a (fake) Anthropic: key checked, summaries written after consent");
+{
+  const { createServer } = await import("node:http");
+  const { spawn } = await import("node:child_process");
+  const seen = { models: 0, messages: 0, bodies: [] };
+  const server = createServer((req, res) => {
+    let body = "";
+    req.on("data", (c) => (body += c));
+    req.on("end", () => {
+      res.setHeader("content-type", "application/json");
+      if (req.url.startsWith("/v1/models")) {
+        seen.models++;
+        res.end(JSON.stringify({ data: [] }));
+      } else {
+        seen.messages++;
+        seen.bodies.push(body);
+        res.end(JSON.stringify({ content: [{ type: "text", text: "A stub summary of this component." }], usage: { input_tokens: 100, output_tokens: 20 } }));
+      }
+    });
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const root = mkdtempSync(join(tmpdir(), "pattern-wiz-root-"));
+  const home = mkdtempSync(join(tmpdir(), "pattern-wiz-home-"));
+  mkdirSync(join(root, ".cursor"), { recursive: true });
+  mkdirSync(join(root, "src", "components"), { recursive: true });
+  writeFileSync(join(root, "src", "components", "Button.tsx"), "export function Button(props: { label: string }) { return <button>{props.label}</button>; }\n");
+  writeFileSync(join(root, "src", "components", "Modal.tsx"), "export function Modal(props: { open: boolean }) { return props.open ? <div role=\"dialog\" /> : null; }\n");
+  // key, no figma, write cursor config, default ds choice, default path, summaries: yes, enforcement: no
+  const runWith = (stdin, extra = {}) =>
+    new Promise((resolve) => {
+      const p = spawn("node", [indexPath, "init"], {
+        env: { ...process.env, PATTERN_PROJECT_ROOT: root, HOME: home, PATTERN_TELEMETRY: "0", PATH: "/usr/bin:/bin", ANTHROPIC_API_KEY: "", PATTERN_ANTHROPIC_URL: base, PATTERN_SUMMARY_API_URL: `${base}/v1/messages`, ...extra },
+      });
+      let out = "";
+      p.stdout.on("data", (d) => (out += d));
+      p.stderr.on("data", (d) => (out += d));
+      p.on("close", (code) => resolve({ code, out }));
+      p.stdin.end(stdin);
+    });
+  const r = await runWith("sk-ant-fake-key\n\ny\n\n\n\n\n");
+  check("exits 0", r.code === 0);
+  check("key was checked against the API", seen.models === 1 && r.out.includes("accepted by the Anthropic API"));
+  check("disclosure shown before summaries", r.out.includes("sends up to 8000 characters"));
+  check("one summary call per component", seen.messages === 2);
+  check("reports summaries written", /Wrote 2 summaries/.test(r.out));
+  const store = JSON.parse(readFileSync(join(home, ".pattern", "design_systems.json"), "utf8"));
+  const cands = Object.values(store)[0].candidates;
+  check("summaries saved on the registration", cands.length === 2 && cands.every((c) => typeof c.summary === "string" && c.summary.includes("stub summary")));
+  check("summary line in the checklist", r.out.includes("2 summarised"));
+  const cfg = JSON.parse(readFileSync(join(root, ".cursor", "mcp.json"), "utf8"));
+  check("key written to the client config", cfg.mcpServers.pattern.env.ANTHROPIC_API_KEY === "sk-ant-fake-key");
+
+  console.log("   declining summaries sends nothing");
+  rmSync(join(home, ".pattern"), { recursive: true, force: true });
+  const before = seen.messages;
+  const d = await runWith("sk-ant-fake-key\n\n\n\nn\n\n");
+  check("no summary calls when declined", seen.messages === before);
+  check("registered without summaries", /Registered 2 components/.test(d.out) && !d.out.includes("Wrote "));
+  server.close();
+  rmSync(root, { recursive: true, force: true });
+  rmSync(home, { recursive: true, force: true });
+}
+
 if (failures > 0) {
   console.error(`\n${failures} check(s) failed.`);
   process.exit(1);

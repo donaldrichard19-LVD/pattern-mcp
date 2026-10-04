@@ -13,12 +13,16 @@ export type WizardEnv = Record<string, string>;
 
 export type RegisterRequest =
   | { kind: "figma"; fileKey: string; token: string; replace?: boolean }
-  | { kind: "directory"; path: string; replace?: boolean }
+  | { kind: "directory"; path: string; replace?: boolean; summarizeWithKey?: string }
   | { kind: "manifest"; path: string; replace?: boolean };
 
 export interface RegisterResult {
   candidateCount: number;
   source: string;
+  /** Present when capability summaries were written. */
+  summaries?: { generated: number; costUsd: number };
+  /** Present when summaries were attempted and failed; the registration itself is saved. */
+  summaryError?: string;
 }
 
 export interface WizardDeps {
@@ -36,10 +40,11 @@ export interface WizardState {
   skill: string | null;
   designSystem: { source: string; candidateCount: number } | null;
   gate: "set up" | "skipped" | "not asked";
+  summaries: number | null;
 }
 
 export function newWizardState(): WizardState {
-  return { anthropicKey: "missing", figmaToken: "missing", clientConnected: false, skill: null, designSystem: null, gate: "not asked" };
+  return { anthropicKey: "missing", figmaToken: "missing", clientConnected: false, skill: null, designSystem: null, gate: "not asked", summaries: null };
 }
 
 // Accepts a bare key or any figma.com/design|file|proto|board URL.
@@ -262,7 +267,17 @@ export async function runDesignSystemStep(
       console.log(`  ${rel.error} Skipping.`);
       return;
     }
-    req = { kind, path: rel.rel };
+    const next: RegisterRequest = { kind, path: rel.rel };
+    req = next;
+    const key = env.ANTHROPIC_API_KEY ?? process.env.ANTHROPIC_API_KEY;
+    if (kind === "directory" && key && process.env.PATTERN_NO_SUMMARIES !== "1") {
+      console.log(
+        "  Pattern can write a short summary of what each component does, which makes matching\n" +
+          "  noticeably more accurate. That sends up to 8000 characters of each component file to\n" +
+          "  api.anthropic.com (Claude Haiku), about 0.2 cents per file, cached so re-runs only pay for changes.",
+      );
+      if (next.kind === "directory" && (await confirm("  Write summaries?", options, true))) next.summarizeWithKey = key;
+    }
   } else {
     console.log("  Skipped. Until one is registered, recommend_component returns an error saying so.");
     return;
@@ -277,6 +292,13 @@ export async function runDesignSystemStep(
   }
   state.designSystem = { source: result.source, candidateCount: result.candidateCount };
   console.log(`  Registered ${result.candidateCount} component${result.candidateCount === 1 ? "" : "s"} from ${result.source} for project "${deps.projectId}".`);
+  if (result.summaries) {
+    console.log(`  Wrote ${result.summaries.generated} summar${result.summaries.generated === 1 ? "y" : "ies"} (about $${result.summaries.costUsd.toFixed(3)}).`);
+    state.summaries = result.summaries.generated;
+  }
+  if (result.summaryError) {
+    console.log(`  Summaries failed (${result.summaryError}). The registration is saved and works without them; ask your agent to re-register to retry.`);
+  }
   if (result.candidateCount === 0) {
     console.log("  Zero components were found, so every request will come back as \"build new\". Check the path or page names.");
   }
@@ -290,7 +312,7 @@ export function wizardSummary(state: WizardState, projectId: string): string {
     `  ${mark(state.anthropicKey === "valid" || state.anthropicKey === "unverified")} ${keyLine}`,
     `  ${mark(state.clientConnected)} Client connected`,
     `  ${mark(state.skill === "installed" || state.skill === "updated" || state.skill === "current")} Agent skill installed`,
-    `  ${mark(state.designSystem !== null)} Design system registered${state.designSystem ? ` (${state.designSystem.candidateCount} components, project "${projectId}")` : ""}`,
+    `  ${mark(state.designSystem !== null)} Design system registered${state.designSystem ? ` (${state.designSystem.candidateCount} components${state.summaries ? `, ${state.summaries} summarised` : ""}, project "${projectId}")` : ""}`,
     `  ${mark(state.gate === "set up")} Enforcement ${state.gate === "set up" ? "on" : "off (optional)"}`,
   ];
   const todo: string[] = [];
