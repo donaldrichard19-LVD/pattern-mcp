@@ -55,6 +55,8 @@ import {
 } from "./telemetry.js";
 import { offerEnforcementSetupOnce } from "./init-enforcement.js";
 import { connectInstructionsText, offerClientConnectSetupOnce, runConnect } from "./client-connect.js";
+import { deriveProjectId } from "./project-id.js";
+import type { RegisterRequest as WizardRegisterRequest, RegisterResult as WizardRegisterResult } from "./setup-wizard.js";
 import { collapseForJev, rankWithJev } from "./design-system-jev.js";
 import { describeFigma, fetchFigmaFile, formatFigmaEvidence, parseFigmaFile, rankFigmaCandidates, type FigmaCandidateInfo, type FigmaEvidence } from "./design-system-figma.js";
 import { captionFigmaDesigns, carryOverCaptions } from "./design-system-figma-captions.js";
@@ -2869,7 +2871,10 @@ function readCandidateSource(scanRoot: string, rel: string): string | null {
 // summary for every scanned file still missing a valid one, then persist.
 // Sends up to 8000 chars of each such source file to Anthropic.
 async function summarizeRegistration(
-  registration: DesignSystemRegistration
+  registration: DesignSystemRegistration,
+  // The init wizard collects the key after this module loaded, so it passes it in.
+  apiKey: string | undefined = ANTHROPIC_API_KEY,
+  workspaceId: string | undefined = ANTHROPIC_WORKSPACE_ID
 ): Promise<SummarizeStats & { estimated_cost_usd: number; model: string }> {
   const scanRoot = resolveWithinRoot(PROJECT_ROOT, registration.source_path);
   if (!scanRoot) throw new Error(`source_path "${registration.source_path}" is outside the project root.`);
@@ -2877,7 +2882,7 @@ async function summarizeRegistration(
   const stats = await summarizeCandidates(
     registration.candidates,
     (rel) => readCandidateSource(scanRoot, rel),
-    makeAnthropicSummaryCall(ANTHROPIC_API_KEY!, ANTHROPIC_WORKSPACE_ID || undefined),
+    makeAnthropicSummaryCall(apiKey!, workspaceId || undefined),
     reused
   );
   const file = readDesignSystems();
@@ -5781,6 +5786,42 @@ const IDLE_CONNECT_NUDGE_MS = 20_000;
 // are registered near the top of this file now, before PACKAGE_VERSION's
 // definition -- see the comment there for why.
 
+// Registration for the init wizard: the same registerDesignSystem core the
+// tool uses, called in-process. For a folder, the wizard may also ask for
+// Haiku capability summaries (req.summarizeWith is the key it just
+// collected, which this process's ANTHROPIC_API_KEY constant cannot know).
+async function registerForWizard(req: WizardRegisterRequest): Promise<WizardRegisterResult> {
+  const projectId = deriveProjectId(PROJECT_ROOT);
+  const registration =
+    req.kind === "figma"
+      ? registerDesignSystem({
+          project_id: projectId,
+          figma_file: await fetchFigmaFile(req.fileKey, req.token),
+          figma_source_label: `figma:${req.fileKey}`,
+          figma_exclude_pages: req.excludePages,
+          replace: req.replace,
+        })
+      : registerDesignSystem({
+          project_id: projectId,
+          ...(req.kind === "directory" ? { directory_path: req.path } : { manifest_path: req.path }),
+          replace: req.replace,
+        });
+  const result: WizardRegisterResult = {
+    candidateCount: registration.candidates.length,
+    source: req.kind === "figma" ? `Figma file ${req.fileKey}` : req.path,
+  };
+  if (req.kind === "directory" && req.summarizeWith) {
+    try {
+      const stats = await summarizeRegistration(registration, req.summarizeWith.apiKey, req.summarizeWith.workspaceId);
+      result.summaries = { generated: stats.generated, costUsd: stats.estimated_cost_usd };
+    } catch (err) {
+      // The registration is already saved; a summary failure only costs match quality.
+      result.summaryError = err instanceof Error ? err.message : String(err);
+    }
+  }
+  return result;
+}
+
 async function main() {
   // `npx pattern-mcp init` -- the connect wizard -- exits without ever
   // starting the server. Checked before anything else so it can't be
@@ -5788,7 +5829,11 @@ async function main() {
   const argv = process.argv.slice(2);
   if (argv[0] === "init") {
     captureCliStarted("init", PACKAGE_VERSION);
-    await runConnect(PROJECT_ROOT, { yes: argv.includes("--yes") });
+    await runConnect(
+      PROJECT_ROOT,
+      { yes: argv.includes("--yes") },
+      { wizard: { projectId: deriveProjectId(PROJECT_ROOT), register: registerForWizard } },
+    );
     await shutdownTelemetry();
     // Explicit exit, not a bare return -- shutdownTelemetry races a
     // bounded timeout (see telemetry.ts) so this always reaches here
