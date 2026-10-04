@@ -46,7 +46,7 @@ export function Close() {
               ))}
             </ol>
             <p style={{ ...BODY, fontSize: "var(--text-body-sm)", margin: 0 }}>
-              You finish with a checklist of what is ready and what is left, and a first prompt to try.
+              The setup lists all five steps up front, then shows which are done and which come next, so you can see where you are.
             </p>
           </div>
         </Reveal>
