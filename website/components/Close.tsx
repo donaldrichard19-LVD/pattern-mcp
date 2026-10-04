@@ -46,7 +46,7 @@ export function Close() {
               ))}
             </ol>
             <p style={{ ...BODY, fontSize: "var(--text-body-sm)", margin: 0 }}>
-              The setup lists all five steps up front, then shows which are done and which come next, so you can see where you are.
+              The setup lists all five steps up front, then shows how many are done and which come next, so you can see where you are.
             </p>
           </div>
         </Reveal>
@@ -86,7 +86,7 @@ export function Close() {
         {/* Vercel deploys this website/ directory in isolation, so it can't read
             the pattern-mcp package's version at build time -- update this literal
             by hand alongside each pattern-mcp release. */}
-        <span style={{ fontSize: "var(--text-caption)", color: "var(--text-tertiary)" }}>v0.20.1 &middot; MIT &middot; Don Richard</span>
+        <span style={{ fontSize: "var(--text-caption)", color: "var(--text-tertiary)" }}>v0.21.0 &middot; MIT &middot; Don Richard</span>
       </div>
     </footer>
   );
