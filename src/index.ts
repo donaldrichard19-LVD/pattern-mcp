@@ -55,6 +55,8 @@ import {
 } from "./telemetry.js";
 import { offerEnforcementSetupOnce } from "./init-enforcement.js";
 import { connectInstructionsText, offerClientConnectSetupOnce, runConnect } from "./client-connect.js";
+import { deriveProjectId } from "./project-id.js";
+import type { RegisterRequest as WizardRegisterRequest, RegisterResult as WizardRegisterResult } from "./setup-wizard.js";
 import { collapseForJev, rankWithJev } from "./design-system-jev.js";
 import { describeFigma, fetchFigmaFile, formatFigmaEvidence, parseFigmaFile, rankFigmaCandidates, type FigmaCandidateInfo, type FigmaEvidence } from "./design-system-figma.js";
 import { captionFigmaDesigns, carryOverCaptions } from "./design-system-figma-captions.js";
@@ -5781,6 +5783,28 @@ const IDLE_CONNECT_NUDGE_MS = 20_000;
 // are registered near the top of this file now, before PACKAGE_VERSION's
 // definition -- see the comment there for why.
 
+// Registration for the init wizard: the same registerDesignSystem core the
+// tool uses, called in-process. Capability summaries are not written here
+// (they need the key in THIS process's env, which the wizard only just
+// collected); a later register_design_system call from the agent adds them.
+async function registerForWizard(req: WizardRegisterRequest): Promise<WizardRegisterResult> {
+  const projectId = deriveProjectId(PROJECT_ROOT);
+  const registration =
+    req.kind === "figma"
+      ? registerDesignSystem({
+          project_id: projectId,
+          figma_file: await fetchFigmaFile(req.fileKey, req.token),
+          figma_source_label: `figma:${req.fileKey}`,
+          replace: req.replace,
+        })
+      : registerDesignSystem({
+          project_id: projectId,
+          ...(req.kind === "directory" ? { directory_path: req.path } : { manifest_path: req.path }),
+          replace: req.replace,
+        });
+  return { candidateCount: registration.candidates.length, source: req.kind === "figma" ? `Figma file ${req.fileKey}` : req.path };
+}
+
 async function main() {
   // `npx pattern-mcp init` -- the connect wizard -- exits without ever
   // starting the server. Checked before anything else so it can't be
@@ -5788,7 +5812,11 @@ async function main() {
   const argv = process.argv.slice(2);
   if (argv[0] === "init") {
     captureCliStarted("init", PACKAGE_VERSION);
-    await runConnect(PROJECT_ROOT, { yes: argv.includes("--yes") });
+    await runConnect(
+      PROJECT_ROOT,
+      { yes: argv.includes("--yes") },
+      { wizard: { projectId: deriveProjectId(PROJECT_ROOT), register: registerForWizard } },
+    );
     await shutdownTelemetry();
     // Explicit exit, not a bare return -- shutdownTelemetry races a
     // bounded timeout (see telemetry.ts) so this always reaches here

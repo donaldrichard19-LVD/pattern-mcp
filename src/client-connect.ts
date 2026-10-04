@@ -19,8 +19,21 @@ import { homedir, platform } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SKILL_NAME } from "./agent-guidance.js";
+import { deriveProjectId } from "./project-id.js";
 import { findPatternEntry, patternServersInClaudeList, type ClaudeListServer } from "./server-entry.js";
 import { askLine, closeRl, confirm, type PromptOptions } from "./prompt.js";
+import { runInit } from "./init-enforcement.js";
+import {
+  newWizardState,
+  runDesignSystemStep,
+  runKeysSteps,
+  WIZARD_STEPS,
+  wizardIntro,
+  wizardSummary,
+  type WizardDeps,
+  type WizardEnv,
+  type WizardState,
+} from "./setup-wizard.js";
 
 export type ConnectOptions = PromptOptions;
 
@@ -65,7 +78,7 @@ function claudeCodePatternServers(): ClaudeListServer[] {
   }
 }
 
-async function setupClaudeCode(apiKey: string | null, options: ConnectOptions): Promise<void> {
+async function setupClaudeCode(env: WizardEnv, options: ConnectOptions, state: WizardState): Promise<void> {
   if (!hasCommand("claude")) return;
   console.log("\nClaude Code detected (`claude` on PATH).");
 
@@ -74,6 +87,7 @@ async function setupClaudeCode(apiKey: string | null, options: ConnectOptions): 
     const names = existing.map((s) => `"${s.name}"`).join(", ");
     if (existing.some((s) => s.ok)) {
       console.log(`  Already connected (\`claude mcp list\` shows Pattern as ${names}) -- skipping.`);
+      state.clientConnected = true;
     } else {
       console.log(
         `  Pattern is already registered as ${names}, but Claude Code reports it failed to connect.\n` +
@@ -93,7 +107,7 @@ async function setupClaudeCode(apiKey: string | null, options: ConnectOptions): 
   );
 
   const args = ["mcp", "add", "pattern"];
-  if (apiKey) args.push("-e", `ANTHROPIC_API_KEY=${apiKey}`);
+  for (const [k, v] of Object.entries(env)) args.push("-e", `${k}=${v}`);
   if (everywhere) args.push("--scope", "user");
   args.push("--", SERVER_COMMAND, ...SERVER_ARGS);
 
@@ -107,6 +121,7 @@ async function setupClaudeCode(apiKey: string | null, options: ConnectOptions): 
   try {
     execFileSync("claude", args, { stdio: "inherit", timeout: 15000 });
     console.log("  Connected. Verify with `claude mcp list`.");
+    state.clientConnected = true;
   } catch {
     console.log("  `claude mcp add` failed -- see output above, or add it manually (README's Claude Code section).");
   }
@@ -192,8 +207,9 @@ function readJsonConfig(path: string): { config: McpServersConfig; existed: bool
 async function mergeServerConfig(
   label: string,
   path: string,
-  apiKey: string | null,
+  env: WizardEnv,
   options: ConnectOptions,
+  state: WizardState,
 ): Promise<void> {
   const { config, existed, valid } = readJsonConfig(path);
   if (existed && !valid) {
@@ -205,11 +221,12 @@ async function mergeServerConfig(
   const already = findPatternEntry(servers);
   if (already) {
     console.log(`\n${label}: Pattern already configured in ${path} (as "${already.name}") -- skipping.`);
+    state.clientConnected = true;
     return;
   }
 
   const entry: Record<string, unknown> = { command: SERVER_COMMAND, args: [...SERVER_ARGS] };
-  if (apiKey) entry.env = { ANTHROPIC_API_KEY: apiKey };
+  if (Object.keys(env).length > 0) entry.env = { ...env };
 
   console.log(`\n${existed ? "Merging into" : "Creating"} ${label} config at ${path}:`);
   console.log(
@@ -228,6 +245,7 @@ async function mergeServerConfig(
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, JSON.stringify(merged, null, 2) + "\n", "utf8");
   console.log(`Written. Restart ${label} to pick it up.`);
+  state.clientConnected = true;
 }
 
 function clientConfigHasPattern(path: string | null): boolean {
@@ -270,7 +288,7 @@ function claudeDesktopConfigPath(): string | null {
   }
 }
 
-async function setupClaudeDesktop(apiKey: string | null, options: ConnectOptions): Promise<void> {
+async function setupClaudeDesktop(env: WizardEnv, options: ConnectOptions, state: WizardState): Promise<void> {
   const path = claudeDesktopConfigPath();
   if (!path) return;
   // Only offer this if Claude Desktop's own config directory already
@@ -278,7 +296,7 @@ async function setupClaudeDesktop(apiKey: string | null, options: ConnectOptions
   // without a CLI to query directly (unlike Claude Code's `claude
   // --version`).
   if (!existsSync(dirname(path))) return;
-  await mergeServerConfig("Claude Desktop", path, apiKey, options);
+  await mergeServerConfig("Claude Desktop", path, env, options, state);
 }
 
 // Cursor has no CLI to query and no reliable global config location
@@ -287,9 +305,9 @@ async function setupClaudeDesktop(apiKey: string | null, options: ConnectOptions
 // directory already present is real evidence Cursor has opened this
 // project, without guessing at a global install marker that doesn't
 // exist. Project-scoped `.cursor/mcp.json`, matching the README.
-async function setupCursor(root: string, apiKey: string | null, options: ConnectOptions): Promise<void> {
+async function setupCursor(root: string, env: WizardEnv, options: ConnectOptions, state: WizardState): Promise<void> {
   if (!existsSync(join(root, ".cursor"))) return;
-  await mergeServerConfig("Cursor", join(root, ".cursor", "mcp.json"), apiKey, options);
+  await mergeServerConfig("Cursor", join(root, ".cursor", "mcp.json"), env, options, state);
 }
 
 // Codex CLI's global config is TOML (~/.codex/config.toml), which this
@@ -309,7 +327,8 @@ async function setupCursor(root: string, apiKey: string | null, options: Connect
 // export is the one method that works the same way across every Codex
 // version and every other client here, since it never depends on a
 // client-specific config format at all.
-function offerCodexInstructions(apiKey: string | null): void {
+function offerCodexInstructions(env: WizardEnv): void {
+  const apiKey = env.ANTHROPIC_API_KEY ?? null;
   if (!existsSync(join(homedir(), ".codex"))) return;
   const lines = [
     "\nCodex CLI detected (~/.codex exists). Pattern doesn't auto-write Codex's",
@@ -340,40 +359,38 @@ function offerCodexInstructions(apiKey: string | null): void {
   console.log(lines.join("\n"));
 }
 
-async function promptApiKey(options: ConnectOptions): Promise<string | null> {
-  if (options.yes) return null;
-  console.log(
-    "\nYour ANTHROPIC_API_KEY can be written into whichever client configs you set up\n" +
-      "below (visible in plain text there and as you type it now), or you can skip\n" +
-      "and add it yourself later -- see README's \"Add your Anthropic API key\".",
-  );
-  const answer = (await askLine("Paste your ANTHROPIC_API_KEY now, or press Enter to skip: ")).trim();
-  return answer || null;
+export interface RunConnectExtras {
+  /** Design-system registration + project id for the guided steps; without it those steps are skipped. */
+  wizard?: WizardDeps;
+  fetchImpl?: typeof fetch;
 }
 
-export async function runConnect(root: string, options: ConnectOptions): Promise<void> {
-  console.log("Connecting Pattern to your MCP client(s)...");
+export async function runConnect(root: string, options: ConnectOptions, extras: RunConnectExtras = {}): Promise<void> {
+  const state = newWizardState();
+  const wizard = extras.wizard;
+  console.log(options.yes ? "Connecting Pattern to your MCP client(s)..." : wizardIntro());
 
   try {
-    const apiKey = await promptApiKey(options);
+    const env = await runKeysSteps(options, state, extras.fetchImpl);
 
+    if (!options.yes) console.log(`\n[3/${WIZARD_STEPS}] Connect your client`);
     let anyDetected = false;
     if (hasCommand("claude")) {
       anyDetected = true;
-      await setupClaudeCode(apiKey, options);
-      await installPatternSkill(options);
+      await setupClaudeCode(env, options, state);
+      state.skill = await installPatternSkill(options);
     }
     if (claudeDesktopConfigPath() && existsSync(dirname(claudeDesktopConfigPath()!))) {
       anyDetected = true;
-      await setupClaudeDesktop(apiKey, options);
+      await setupClaudeDesktop(env, options, state);
     }
     if (existsSync(join(root, ".cursor"))) {
       anyDetected = true;
-      await setupCursor(root, apiKey, options);
+      await setupCursor(root, env, options, state);
     }
     if (existsSync(join(homedir(), ".codex"))) {
       anyDetected = true;
-      offerCodexInstructions(apiKey);
+      offerCodexInstructions(env);
     }
 
     if (!anyDetected) {
@@ -381,18 +398,26 @@ export async function runConnect(root: string, options: ConnectOptions): Promise
         "\nNo supported MCP client was detected on this machine automatically.\n" + connectInstructionsText(),
       );
     }
+
+    if (wizard) {
+      await runDesignSystemStep(root, wizard, env, state, options);
+      if (!options.yes) {
+        console.log(`\n[5/${WIZARD_STEPS}] Enforcement (optional)`);
+        console.log("  A project hook plus a CI check that stops a new component shipping without a recorded Pattern decision.");
+        if (await confirm("  Set that up now?", options, false)) {
+          await runInit(root, options);
+          state.gate = "set up";
+        } else {
+          state.gate = "skipped";
+          console.log("  Skipped. Turn it on any time with: npx -p pattern-mcp pattern-check-gate init");
+        }
+      }
+    }
   } finally {
     closeRl();
   }
 
-  console.log(
-    "\nDone. Restart your client. From now on your agent uses Pattern on its own when it is\n" +
-      "about to build UI; you do not need to ask for it.\n" +
-      "\nPattern judges components against YOUR design system, so it needs one registered:\n" +
-      "  - paste a Figma link when you ask for UI (set FIGMA_ACCESS_TOKEN in the server's env), or\n" +
-      "  - point it at your components folder or a manifest.\n" +
-      "Your agent registers it the first time. Until then recommend_component returns an error saying so.",
-  );
+  console.log(wizardSummary(state, wizard?.projectId ?? deriveProjectId(root)));
 }
 
 // Option 1/#1 from the activation-funnel discussion: piggybacks on the
