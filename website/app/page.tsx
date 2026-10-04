@@ -8,6 +8,7 @@ import { MakeItRequired } from "@/components/MakeItRequired";
 import { OneAuthority } from "@/components/OneAuthority";
 import { ProofSection } from "@/components/ProofSection";
 import { ReceiptLedger } from "@/components/ReceiptLedger";
+import { Setup } from "@/components/Setup";
 import { TopBar } from "@/components/TopBar";
 import { TrustGrid } from "@/components/TrustGrid";
 
@@ -24,6 +25,7 @@ export default function Home() {
       <MakeItRequired />
       <ReceiptLedger />
       <TrustGrid />
+      <Setup />
       <FounderNote />
       <Close />
     </div>
