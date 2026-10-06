@@ -8,7 +8,6 @@ const FAQS: [string, string][] = [
   ["Who is Pattern for?", "Anyone whose agent builds UI against a design system: designers, engineers, and teams reviewing agent-written pull requests."],
   ["Which agents does it work with?", "Claude Code, Cursor, and Codex. The required check on your machine is Claude Code only. The pull request check works with any agent."],
   ["Do I need Figma?", "No. Connect a Figma file, a components folder, a Storybook export, or a JSON manifest."],
-  ["What does Haiku do?", "It writes a text summary of each design, which your agent references while it builds."],
   [
     "How do I set it up?",
     "Run one command. Pattern walks you through five steps: add your Anthropic key, add a Figma token if you use Figma, connect your tools, register your design system, and turn on the required check (optional, off by default). Each key is checked on the spot.",
