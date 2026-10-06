@@ -45,14 +45,15 @@ export function CopyBlock({ lines, label, height }: { lines: string[]; label: st
     trackClick("install_command_copied", { label });
   };
   return (
-    <div style={{ ...PANEL, overflow: "hidden" }}>
+    <div style={{ border: "1px solid var(--border-subtle)", borderRadius: "var(--radius-md)", overflow: "hidden", background: "#fff" }}>
       <div
         style={{
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
           gap: 12,
-          padding: "9px 12px",
+          padding: "7px 12px",
+          background: "var(--surface-sunken)",
           borderBottom: "1px solid var(--border-subtle)",
         }}
       >
@@ -63,11 +64,10 @@ export function CopyBlock({ lines, label, height }: { lines: string[]; label: st
             ...MONO,
             fontSize: 11,
             cursor: "pointer",
-            padding: "4px 10px",
-            borderRadius: 999,
-            border: "1px solid var(--border-subtle)",
-            background: "#fff",
-            color: "var(--text-secondary)",
+            padding: "2px 0",
+            border: 0,
+            background: "transparent",
+            color: "var(--text-accent)",
           }}
         >
           {done ? "copied" : "copy"}
@@ -75,10 +75,56 @@ export function CopyBlock({ lines, label, height }: { lines: string[]; label: st
       </div>
       <pre
         className="pt-json pt-scroll-x"
-        style={{ margin: 0, padding: 12, height, ...MONO, fontSize: 12, lineHeight: 1.6, color: "var(--text-primary)", overflow: "auto" }}
+        style={{ margin: 0, padding: "12px 14px", height, ...MONO, fontSize: 13, lineHeight: 1.6, color: "var(--text-primary)", overflow: "auto" }}
       >
-        {text}
+        {lines.map((l, i) => (
+          <div key={i}>
+            <span style={{ color: "var(--text-tertiary)" }}>$ </span>
+            {l}
+          </div>
+        ))}
       </pre>
+    </div>
+  );
+}
+
+export function SegTabs<T extends string>({
+  value,
+  onChange,
+  options,
+}: {
+  value: T;
+  onChange: (v: T) => void;
+  options: [T, string][];
+}) {
+  return (
+    <div
+      role="tablist"
+      style={{ display: "inline-flex", padding: 2, background: "#fff", border: "1px solid var(--border-subtle)", borderRadius: 6, gap: 2 }}
+    >
+      {options.map(([v, label]) => {
+        const on = v === value;
+        return (
+          <button
+            key={v}
+            role="tab"
+            aria-selected={on}
+            onClick={() => onChange(v)}
+            style={{
+              border: 0,
+              cursor: "pointer",
+              padding: "5px 10px",
+              borderRadius: 4,
+              fontSize: 12,
+              fontWeight: 500,
+              background: on ? "var(--text-primary)" : "transparent",
+              color: on ? "#fff" : "var(--text-secondary)",
+            }}
+          >
+            {label}
+          </button>
+        );
+      })}
     </div>
   );
 }

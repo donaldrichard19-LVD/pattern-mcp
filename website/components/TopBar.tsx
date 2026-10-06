@@ -12,6 +12,7 @@ import { Button, Mark, Wordmark } from "./ui";
 // etc. don't exist yet and need a real home before those links go live. This
 // avoids shipping dead first-party routes in the meantime.
 const NAV: [string, string][] = [
+  ["Reference", DOCS],
   ["Docs", DOCS],
   ["Changelog", REPO + "/releases"],
 ];
@@ -65,7 +66,7 @@ export function TopBar() {
   }, [isMobile]);
 
   return (
-    <header style={{ position: "sticky", top: 0, zIndex: 30, background: "#fff", borderBottom: "1px solid var(--border-subtle)" }}>
+    <header style={{ position: "sticky", top: 0, zIndex: 30, background: "rgba(255,255,255,0.92)", backdropFilter: "blur(10px)", borderBottom: "1px solid var(--border-subtle)" }}>
       <div className="pt-sec pt-bar" style={{ ...SECTION, height: 72, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
         <a href="#top" style={{ display: "flex", alignItems: "center", gap: 9, textDecoration: "none" }}>
           <Mark size={24} />
@@ -74,12 +75,12 @@ export function TopBar() {
         {!isMobile && (
           <nav style={{ display: "flex", alignItems: "center", gap: 26, fontSize: "var(--text-body-sm)" }}>
             {NAV.map(([t, h]) => (
-              <a key={h} href={h} target="_blank" rel="noreferrer" style={{ color: "var(--text-secondary)" }}>
+              <a key={t} href={h} target="_blank" rel="noreferrer" style={{ color: "var(--text-secondary)" }}>
                 {t}
               </a>
             ))}
             <StarLink />
-            <Button href="#install" size="sm">
+            <Button href="#install" size="sm" style={{ background: "var(--text-primary)", borderColor: "var(--text-primary)", borderRadius: 8 }}>
               Get started
             </Button>
           </nav>
@@ -113,7 +114,7 @@ export function TopBar() {
         <div style={{ borderTop: "1px solid var(--border-subtle)", background: "#fff", padding: "6px 20px 14px", display: "grid", gap: 2 }}>
           {NAV.map(([t, h]) => (
             <a
-              key={h}
+              key={t}
               href={h}
               target="_blank"
               rel="noreferrer"

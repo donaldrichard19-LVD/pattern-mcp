@@ -1,25 +1,27 @@
 import { AskBeforeBuilding } from "@/components/AskBeforeBuilding";
 import { Close } from "@/components/Close";
+import { Cost } from "@/components/Cost";
+import { Faq } from "@/components/Faq";
 import { FounderNote } from "@/components/FounderNote";
+import { Grid } from "@/components/Grid";
 import { Hero } from "@/components/Hero";
-import { IntegrationsStrip } from "@/components/IntegrationsStrip";
-import { Problem } from "@/components/Problem";
 import { MakeItRequired } from "@/components/MakeItRequired";
-import { ReceiptLedger } from "@/components/ReceiptLedger";
+import { SeeTheProof } from "@/components/SeeTheProof";
+import { Setup } from "@/components/Setup";
 import { TopBar } from "@/components/TopBar";
-import { TrustGrid } from "@/components/TrustGrid";
 
 export default function Home() {
   return (
     <div style={{ background: "#fff" }}>
       <TopBar />
       <Hero />
-      <Problem />
-      <IntegrationsStrip />
+      <Grid />
       <AskBeforeBuilding />
+      <SeeTheProof />
       <MakeItRequired />
-      <ReceiptLedger />
-      <TrustGrid />
+      <Cost />
+      <Setup />
+      <Faq />
       <FounderNote />
       <Close />
     </div>

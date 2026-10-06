@@ -25,7 +25,7 @@ export const metadata: Metadata = {
   metadataBase: new URL("https://usepattern.sh"),
   title: "Pattern: stop your AI agent from rebuilding components you already have",
   description:
-    "Your agent doesn't know what's in your design system, so it often builds something new when a good one exists. Pattern checks first and tells the agent what to reuse and what's worth building.",
+    "Pattern checks each request against your design system before your agent builds. It reuses what fits, lists what's missing, and verifies the code afterward.",
   twitter: {
     card: "summary_large_image",
   },
