@@ -19,7 +19,7 @@ export function Grid() {
     <section style={{ borderTop: "1px solid var(--border-subtle)", background: "var(--surface-sunken)" }}>
       <div className="pt-sec pt-pad-y" style={{ ...SECTION, padding: "80px 32px" }}>
         <Reveal>
-          <h2 style={{ ...H2, marginBottom: 40, maxWidth: "18em", lineHeight: 1.1 }}>Manage entire process between the design system and shipped code.</h2>
+          <h2 style={{ ...H2, marginBottom: 40, maxWidth: "18em", lineHeight: 1.1 }}>Manage the entire process between the design system and shipped code.</h2>
         </Reveal>
         <div
           style={{
