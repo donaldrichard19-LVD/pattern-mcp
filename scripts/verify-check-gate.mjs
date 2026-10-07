@@ -650,6 +650,36 @@ console.log("13e. pattern doctor warns about the pre-0.19.1 hook command and wor
   rmSync(root, { recursive: true, force: true });
 }
 
+console.log("13f. the hook denies a Bash command that creates a new UI component file, and only that");
+{
+  const root = mkdtempSync(join(tmpdir(), "pattern-check-gate-test-"));
+  mkdirSync(join(root, "web"), { recursive: true });
+  writeFileSync(join(root, "web", "Existing.tsx"), "export const A = 1;\n", "utf8");
+  const hookPath = fileURLToPath(new URL("../dist/check-gate-hook.js", import.meta.url));
+  const runHook = (command) =>
+    spawnSync("node", [hookPath], {
+      input: JSON.stringify({ tool_name: "Bash", tool_input: { command }, cwd: root }),
+      encoding: "utf8",
+    });
+  const denied = (r) => /"permissionDecision":"deny"/.test(r.stdout);
+
+  const heredoc = runHook("cat > web/New.tsx <<'EOF'\nexport const B = 1;\nEOF");
+  check("heredoc into a new .tsx is denied", denied(heredoc));
+  check("denial tells the agent to use the Write tool", /Write tool/.test(heredoc.stdout));
+  check("tee into a new .jsx is denied", denied(runHook("echo x | tee web/New.jsx")));
+  check("python open(...,'w') on a new .tsx is denied", denied(runHook(`python3 -c "open('web/N.tsx','w').write('x')"`)));
+  check("writing an existing .tsx is allowed (same as Edit)", !denied(runHook("cat > web/Existing.tsx <<EOF\nx\nEOF")));
+  check("reading a .tsx is allowed", !denied(runHook("cat web/Existing.tsx")));
+  check("non-UI shell commands are allowed", !denied(runHook("npx tsc --noEmit 2>&1 | head")));
+  const off = spawnSync("node", [hookPath], {
+    input: JSON.stringify({ tool_name: "Bash", tool_input: { command: "cat > web/New.tsx <<EOF" }, cwd: root }),
+    encoding: "utf8",
+    env: { ...process.env, PATTERN_NO_ENFORCEMENT_HOOK: "1" },
+  });
+  check("PATTERN_NO_ENFORCEMENT_HOOK disables the Bash rule too", !denied(off));
+  rmSync(root, { recursive: true, force: true });
+}
+
 function runCheckGate(args, stdin, extraEnv = {}) {
   const cliPath = fileURLToPath(new URL("../dist/check-gate.js", import.meta.url));
   return spawnSync("node", [cliPath, ...args], {
