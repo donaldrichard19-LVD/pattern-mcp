@@ -124,7 +124,7 @@ async function shippedCandidates(sys) {
   const t = new StdioClientTransport({ command: "node", args: [join(root, "dist/index.js")], env: { ...process.env, PATTERN_PROJECT_ROOT: home(REAL[sys].root), PATTERN_DESIGN_SYSTEMS_PATH: join(tmpdir(), `ds-eval-${sys}.json`), PATTERN_TOOLS: "full", PATTERN_NO_SUMMARIES: "1" } });
   const c = new Client({ name: "ds-eval", version: "1" }, { capabilities: {} });
   await c.connect(t);
-  const r = await c.callTool({ name: "register_design_system", arguments: { project_id: `eval-${sys}`, directory_path: REAL[sys].rel } });
+  const r = await c.callTool({ name: "register_design_system", arguments: { project_id: `eval-${sys}`, directory_path: REAL[sys].rel, include_candidates: true } });
   await c.close();
   return JSON.parse(r.content[0].text).registration.candidates;
 }

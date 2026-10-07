@@ -55,12 +55,24 @@ interface FigmaNode {
   description?: string;
   children?: FigmaNode[];
   componentPropertyDefinitions?: Record<string, { type?: string; variantOptions?: string[] }>;
+  // Layout / content fields used only by extractFigmaEvidence.
+  layoutMode?: string;
+  itemSpacing?: number;
+  paddingLeft?: number;
+  paddingRight?: number;
+  paddingTop?: number;
+  paddingBottom?: number;
+  cornerRadius?: number;
+  primaryAxisAlignItems?: string;
+  counterAxisAlignItems?: string;
+  characters?: string;
+  componentId?: string;
 }
 
 interface FigmaFile {
   document?: FigmaNode;
-  components?: Record<string, { description?: string }>;
-  componentSets?: Record<string, { description?: string }>;
+  components?: Record<string, { description?: string; name?: string; componentSetId?: string }>;
+  componentSets?: Record<string, { description?: string; name?: string }>;
 }
 
 const DESCRIPTION_CAP = 500;
@@ -87,6 +99,132 @@ function parseVariantName(name: string): Record<string, string> {
   return out;
 }
 
+/** One node of a candidate's stored structure tree (trimmed; no fills/effects). */
+export interface FigmaEvidenceNode {
+  name: string;
+  type: string;
+  size?: { w: number; h: number };
+  /** TEXT nodes: the literal characters (capped). */
+  text?: string;
+  /** INSTANCE nodes: the name of the main component this is a copy of. */
+  instance_of?: string;
+  children?: FigmaEvidenceNode[];
+}
+
+/**
+ * Raw design facts for one component, kept locally so a scorer or caller can
+ * look at what Figma actually says (size, auto-layout, padding, gap, radius,
+ * nested instances, text) instead of a one-line summary.
+ */
+export interface FigmaEvidence {
+  node_id: string;
+  name: string;
+  /** The node the facts below were read from: the first variant of a set, or the component itself. */
+  source_node: string;
+  size?: { w: number; h: number };
+  layout?: {
+    direction?: "horizontal" | "vertical";
+    gap?: number;
+    padding?: { top: number; right: number; bottom: number; left: number };
+    radius?: number;
+    main_align?: string;
+    cross_align?: string;
+  };
+  /** Distinct main-component names used inside (e.g. Button, Icon) -- the dependency list. */
+  instances: string[];
+  /** Distinct text contents inside, in document order. */
+  texts: string[];
+  tree: FigmaEvidenceNode;
+  truncated: boolean;
+}
+
+const EVIDENCE_MAX_DEPTH = 5;
+const EVIDENCE_MAX_NODES = 80;
+const EVIDENCE_TEXT_CAP = 120;
+
+/** Read the layout facts and structure tree for a COMPONENT / COMPONENT_SET node. */
+export function extractFigmaEvidence(
+  node: FigmaNode,
+  id: string,
+  // Resolves an INSTANCE's componentId to the name a designer would use: the
+  // parent set's name ("Button"), not the variant's ("Variant=Outline, Size=lg").
+  componentName: (componentId: string) => string | undefined
+): FigmaEvidence {
+  // A set's variants are its COMPONENT children; describe the first (the
+  // default in Figma's ordering). A standalone component is its own source.
+  const source = node.type === "COMPONENT_SET" ? (node.children ?? []).find((c) => c.type === "COMPONENT") ?? node : node;
+  const instances = new Set<string>();
+  const texts: string[] = [];
+  let count = 0;
+  let truncated = false;
+
+  const walk = (n: FigmaNode, depth: number): FigmaEvidenceNode | undefined => {
+    if (count >= EVIDENCE_MAX_NODES) {
+      truncated = true;
+      return undefined;
+    }
+    count++;
+    const out: FigmaEvidenceNode = { name: (n.name ?? "").trim(), type: n.type ?? "UNKNOWN" };
+    const size = sizeOf(n);
+    if (size) out.size = size;
+    if (n.type === "TEXT" && typeof n.characters === "string") {
+      const t = n.characters.replace(/\s+/g, " ").trim().slice(0, EVIDENCE_TEXT_CAP);
+      if (t) {
+        out.text = t;
+        if (!texts.includes(t)) texts.push(t);
+      }
+    }
+    if (n.type === "INSTANCE") {
+      const mainName = n.componentId ? componentName(n.componentId) : undefined;
+      if (mainName) {
+        out.instance_of = mainName;
+        instances.add(mainName);
+      }
+    }
+    if (n.children && n.children.length > 0) {
+      if (depth >= EVIDENCE_MAX_DEPTH) truncated = true;
+      else {
+        const kids: FigmaEvidenceNode[] = [];
+        for (const c of n.children) {
+          const k = walk(c, depth + 1);
+          if (k) kids.push(k);
+        }
+        if (kids.length > 0) out.children = kids;
+      }
+    }
+    return out;
+  };
+
+  const tree = walk(source, 0) ?? { name: (source.name ?? "").trim(), type: source.type ?? "UNKNOWN" };
+  const layout: NonNullable<FigmaEvidence["layout"]> = {};
+  if (source.layoutMode === "HORIZONTAL") layout.direction = "horizontal";
+  else if (source.layoutMode === "VERTICAL") layout.direction = "vertical";
+  if (typeof source.itemSpacing === "number") layout.gap = source.itemSpacing;
+  if ([source.paddingTop, source.paddingRight, source.paddingBottom, source.paddingLeft].some((v) => typeof v === "number")) {
+    layout.padding = {
+      top: source.paddingTop ?? 0,
+      right: source.paddingRight ?? 0,
+      bottom: source.paddingBottom ?? 0,
+      left: source.paddingLeft ?? 0,
+    };
+  }
+  if (typeof source.cornerRadius === "number") layout.radius = source.cornerRadius;
+  if (source.primaryAxisAlignItems) layout.main_align = source.primaryAxisAlignItems;
+  if (source.counterAxisAlignItems) layout.cross_align = source.counterAxisAlignItems;
+
+  return {
+    node_id: id,
+    name: (node.name ?? "").trim(),
+    source_node: source.id ?? id,
+    size: sizeOf(source),
+    ...(Object.keys(layout).length > 0 ? { layout } : {}),
+    instances: [...instances],
+    texts,
+    tree,
+    truncated,
+  };
+}
+
 export interface FigmaParseOptions {
   /** "components" (default): defined COMPONENT / COMPONENT_SET nodes. "frames": named designs on pages. */
   mode?: "components" | "frames";
@@ -107,8 +245,18 @@ export function parseFigmaFile(
   raw: unknown,
   sourceLabel: string,
   options: FigmaParseOptions = {}
-): { candidates: FigmaCandidate[]; stats: FigmaParseStats } {
+): { candidates: FigmaCandidate[]; stats: FigmaParseStats; evidence: Record<string, FigmaEvidence> } {
   const file = raw as FigmaFile;
+  // A failed download saved as "the file" is the most common way to land here:
+  // Figma's error body is {"status": 403, "err": "Invalid token"}. Say so,
+  // instead of the generic "doesn't look like a Figma file" below.
+  const apiError = raw as { status?: unknown; err?: unknown } | null;
+  if (apiError && typeof apiError === "object" && typeof apiError.status === "number" && typeof apiError.err === "string" && !file.document) {
+    throw new Error(
+      `"${sourceLabel}" is a Figma API error response (status ${apiError.status}: ${apiError.err}), not a file -- the download failed. ` +
+        `Fix the cause (for ${apiError.status === 403 ? "403: an invalid token or one without file_content:read access" : "this status: see Figma's message above"}) and download it again; do not paste tokens into a chat.`
+    );
+  }
   if (!file || typeof file !== "object" || !file.document || !Array.isArray(file.document.children)) {
     throw new Error(
       `"${sourceLabel}" doesn't look like a Figma file response (expected a top-level "document" with "children" pages). ` +
@@ -117,8 +265,9 @@ export function parseFigmaFile(
   }
 
   const stats: FigmaParseStats = { pages: 0, component_sets: 0, standalone_components: 0, skipped_private: 0 };
-  if (options.mode === "frames") return { candidates: parseFigmaFrames(file, options.pages, options.excludePages), stats };
+  if (options.mode === "frames") return { candidates: parseFigmaFrames(file, options.pages, options.excludePages), stats, evidence: {} };
   const candidates: FigmaCandidate[] = [];
+  const evidence: Record<string, FigmaEvidence> = {};
   type Frame = { node: FigmaNode; page: string | null; section: string | null };
   const stack: Frame[] = [];
   for (const page of [...file.document.children].reverse()) {
@@ -165,6 +314,10 @@ export function parseFigmaFile(
         file_path: null,
         figma: { node_id: id, page, section, variants, properties, size: sizeOf(node) },
       });
+      evidence[id] = extractFigmaEvidence(node, id, (cid) => {
+        const comp = file.components?.[cid];
+        return (comp?.componentSetId ? file.componentSets?.[comp.componentSetId]?.name : undefined) ?? comp?.name;
+      });
       if (type === "COMPONENT_SET") stats.component_sets++;
       else stats.standalone_components++;
       continue; // never descend: a set's children are its variants
@@ -176,7 +329,7 @@ export function parseFigmaFile(
     for (const child of [...(node.children ?? [])].reverse()) stack.push({ node: child, page, section: nextSection });
   }
 
-  return { candidates, stats };
+  return { candidates, stats, evidence };
 }
 
 /** One-line human/model-readable description of a Figma candidate's structure. */
@@ -212,7 +365,7 @@ export async function fetchFigmaFile(fileKey: string, token: string): Promise<un
   } catch (err) {
     throw new Error(`Could not reach the Figma API: ${err instanceof Error ? err.message : String(err)}`);
   }
-  if (res.status === 403) throw new Error("Figma refused the request (403): check that FIGMA_ACCESS_TOKEN is valid and can read this file.");
+  if (res.status === 403) throw new Error("Figma refused the request (403): check that FIGMA_ACCESS_TOKEN is valid (plain ASCII, starting figd_) and can read this file (file_content:read).");
   if (res.status === 404) throw new Error(`Figma file "${fileKey}" was not found (404): check the file key.`);
   if (!res.ok) throw new Error(`Figma API error ${res.status}: ${(await res.text()).slice(0, 200)}`);
   return res.json();
@@ -309,4 +462,67 @@ function parseFigmaFrames(file: FigmaFile, pageFilter: string[] | undefined, exc
     }
   }
   return out;
+}
+
+const STOPWORDS = new Set(["the","and","for","with","that","this","from","when","shown","before","after","into","only","not","are","has","have","its","any","per","can","e.g","eg","user","users","item","items","slot","state","states","variant","variants","using","used","use"]);
+const tokens = (text: string): string[] =>
+  [...new Set(text.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 3 && !STOPWORDS.has(w)))];
+
+/**
+ * Cheap lexical ranking of Figma candidates against a need + checklist. Used
+ * ONLY to choose which few candidates get their full stored evidence appended
+ * to the scoring prompt; every candidate still reaches the scorer, so a weak
+ * ranking costs some missed detail, never a missed match. Name hits weigh 3x.
+ */
+export function rankFigmaCandidates(
+  candidates: { name: string; description: string | null; figma?: FigmaCandidateInfo }[],
+  need: string,
+  checklist: string[] | undefined,
+  k: number
+): number[] {
+  if (k <= 0) return [];
+  const q = tokens([need, ...(checklist ?? [])].join(" "));
+  const scored = candidates.map((c, i) => {
+    const name = new Set(tokens(c.name));
+    const rest = new Set(tokens([c.description ?? "", c.figma?.page ?? "", c.figma?.section ?? "", ...(c.figma?.texts ?? [])].join(" ")));
+    let score = 0;
+    for (const w of q) {
+      // Prefix match both ways so "dialog" finds "Dialogs" and "tab" finds "Tabs".
+      if ([...name].some((n) => n === w || n.startsWith(w) || w.startsWith(n))) score += 3;
+      else if ([...rest].some((n) => n === w)) score += 1;
+    }
+    return { i, score };
+  });
+  return scored
+    .filter((x) => x.score > 0)
+    .sort((a, b) => b.score - a.score || a.i - b.i)
+    .slice(0, k)
+    .map((x) => x.i);
+}
+
+/** Compact, scorer-facing rendering of one stored evidence record (sizes, layout, dependencies, text, outline). */
+export function formatFigmaEvidence(e: FigmaEvidence): string {
+  const parts: string[] = [];
+  if (e.size) parts.push(`size ${e.size.w}x${e.size.h}`);
+  const l = e.layout;
+  if (l) {
+    const bits = [
+      l.direction ? `${l.direction} auto-layout` : null,
+      l.gap !== undefined ? `gap ${l.gap}` : null,
+      l.padding ? `padding T${l.padding.top} R${l.padding.right} B${l.padding.bottom} L${l.padding.left}` : null,
+      l.radius !== undefined ? `radius ${l.radius}` : null,
+    ].filter(Boolean);
+    if (bits.length > 0) parts.push(bits.join(", "));
+  }
+  if (e.instances.length > 0) parts.push(`uses components: ${e.instances.join(", ")}`);
+  if (e.texts.length > 0) parts.push(`text: ${e.texts.slice(0, 8).join(" | ")}`);
+  const outline = (n: FigmaEvidenceNode, depth: number): string => {
+    if (depth > 2) return "";
+    const label = n.instance_of ? `${n.name}<${n.instance_of}>` : n.name;
+    const kids = (n.children ?? []).map((c) => outline(c, depth + 1)).filter(Boolean);
+    return kids.length > 0 ? `${label}(${kids.join(", ")})` : label;
+  };
+  const tree = (e.tree.children ?? []).map((c) => outline(c, 1)).filter(Boolean).join(", ");
+  if (tree) parts.push(`layers: ${tree.slice(0, 400)}`);
+  return `FIGMA EVIDENCE (read from the first variant "${e.source_node}"): ${parts.join("; ")}`;
 }

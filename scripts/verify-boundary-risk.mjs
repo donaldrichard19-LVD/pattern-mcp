@@ -1,0 +1,35 @@
+#!/usr/bin/env node
+// Offline: isNearVerdictBoundary generalizes the 8-item boundary set.
+process.env.PATTERN_NO_AUTOSTART = "1";
+process.env.PATTERN_TELEMETRY = "0";
+const m = await import("../dist/index.js");
+const risky = (t) => [...Array(t + 1).keys()].filter((x) => m.isNearVerdictBoundary(x, t));
+let fail = 0;
+const check = (name, ok) => { console.log(`${ok ? "PASS" : "FAIL"} ${name}`); if (!ok) fail++; };
+check("8 items == legacy set {3,4,6,7}", risky(8).join() === [...m.BOUNDARY_RISK_MET_COUNTS_FOR_8_ITEMS].sort().join());
+check("9 items == {3,4,7,8}", risky(9).join() === "3,4,7,8");
+check("5/9 (dialog need) skips the ensemble", !m.isNearVerdictBoundary(5, 9));
+check("10 items == {3,4,7,8}", risky(10).join() === "3,4,7,8");
+const mk = (met, total) => ({ reason: "scored", requirements_checked: Array.from({ length: total }, (_, i) => ({ requirement: "r", met: i < met, evidence: "" })) });
+check("isBoundaryRisk 5/9 false", m.isBoundaryRisk(mk(5, 9)) === false);
+check("isBoundaryRisk 4/9 true", m.isBoundaryRisk(mk(4, 9)) === true);
+check("isBoundaryRisk empty list true", m.isBoundaryRisk({ reason: "scored", requirements_checked: [] }) === true);
+const it = (r, met) => ({ requirement: r, met });
+const A = [it("modal", true), it("title", true), it("focus", false), it("esc", true)];
+const B = [it("modal", true), it("title", false), it("focus", false), it("esc", true)];
+const C = [it("modal", true), it("title", true), it("focus", true), it("esc", true)];
+const st = m.summarizeStability([A, B, C]);
+check("stability: 3 passes, spread 2-4 of 4", st.passes === 3 && st.coverage_spread === "2-4 of 4" && st.met_per_pass.join() === "3,2,4");
+check("stability: split items carry the vote", st.split_items.map((x) => `${x.requirement}:${x.met_votes}`).join() === "title:2/3,focus:1/3" && st.unanimous_items === 2);
+check("stability: identical passes -> no split items", m.summarizeStability([A, A]).split_items.length === 0 && /in every pass/.test(m.summarizeStability([A, A]).coverage_spread));
+check("stability: matching ignores case/whitespace", m.summarizeStability([A, A.map((x) => ({ ...x, requirement: ` ${x.requirement.toUpperCase()} ` }))]).items_comparable === true);
+check("stability: different item lists -> not comparable, no fake votes", (() => { const r = m.summarizeStability([A, [it("other", true)]]); return r.items_comparable === false && r.split_items === undefined; })());
+const reworded = [it("Modal container", true), it("Title text", false), it("Focus", false), it("Esc cancels", true)];
+const prov = ["modal", "title", "focus", "esc"];
+const bp = m.summarizeStability([A, reworded], { providedChecklist: prov });
+check("stability: provided checklist matches by position even if the model rewords", bp.items_comparable === true && bp.split_items.map((x) => x.requirement).join() === "title");
+check("stability: provided checklist but a pass dropped an item -> not comparable", m.summarizeStability([A, reworded.slice(0, 3)], { providedChecklist: prov }).items_comparable === false);
+check("stability: extracted (no provided list) + reworded -> not comparable", m.summarizeStability([A, reworded]).items_comparable === false);
+check("stability: <2 lists (single pass / null) -> null", m.summarizeStability([A]) === null && m.summarizeStability([A, null]) === null && m.summarizeStability([]) === null);
+console.log(fail ? `${fail} failed` : "All checks passed.");
+process.exit(fail ? 1 : 0);

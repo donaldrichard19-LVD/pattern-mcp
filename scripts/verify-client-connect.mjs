@@ -52,6 +52,8 @@ function runInit(root, home, extraArgs = [], stdin = "") {
       PATTERN_PROJECT_ROOT: root,
       HOME: home,
       PATTERN_TELEMETRY: "0",
+      // Never reach the real Anthropic API from a test: a typed key comes back "unverified".
+      PATTERN_ANTHROPIC_URL: "http://127.0.0.1:9",
       PATH: ISOLATED_PATH,
       // Never a TTY under spawnSync's piped stdio anyway, but explicit
       // for anyone reading this later.
@@ -282,8 +284,9 @@ console.log("5. pattern-mcp init: writes Cursor config, preserves unrelated entr
     JSON.stringify({ mcpServers: { other: { command: "foo" } } }, null, 2),
     "utf8",
   );
-  // Two piped lines: blank (skip API key), "y" (confirm the write).
-  const result = runInit(root, home, [], "\ny\n");
+  // Piped lines: blank (skip key), blank (no Figma), "y" (confirm the write),
+  // blank (skip design system), blank (no enforcement).
+  const result = runInit(root, home, [], "\n\ny\n\n\n");
   check("exits 0", result.status === 0);
   check("detected Cursor", result.stdout.includes("Cursor"));
 
@@ -294,7 +297,7 @@ console.log("5. pattern-mcp init: writes Cursor config, preserves unrelated entr
   check("no env block when API key was skipped", written.mcpServers?.pattern?.env === undefined);
 
   console.log("   rerun: idempotent, doesn't duplicate");
-  const rerun = runInit(root, home, [], "\ny\n");
+  const rerun = runInit(root, home, [], "\n\ny\n\n\n");
   check("rerun exits 0", rerun.status === 0);
   check("rerun reports already configured", rerun.stdout.includes("already configured"));
   const stillOne = JSON.parse(readFileSync(join(root, ".cursor", "mcp.json"), "utf8"));
@@ -321,8 +324,9 @@ console.log("7. pattern-mcp init: with API key provided, writes it into the conf
 {
   const { root, home } = scratch();
   mkdirSync(join(root, ".cursor"), { recursive: true });
-  // Piped lines: the API key itself, then "y" to confirm the write.
-  const result = runInit(root, home, [], "sk-ant-test-key\ny\n");
+  // Piped lines: the key, blank (use it although unverified), blank (no Figma),
+  // "y" (confirm the write), blank (skip design system), blank (no enforcement).
+  const result = runInit(root, home, [], "sk-ant-test-key\n\n\ny\n\n\n");
   check("exits 0", result.status === 0);
   const written = JSON.parse(readFileSync(join(root, ".cursor", "mcp.json"), "utf8"));
   check("API key written into env block", written.mcpServers?.pattern?.env?.ANTHROPIC_API_KEY === "sk-ant-test-key");
@@ -346,7 +350,7 @@ console.log("9. pattern-mcp init: Codex + a provided key -> echoes a ready-to-ru
   mkdirSync(join(home, ".codex"), { recursive: true });
   // Piped: the API key itself. No client that writes a config file is
   // present, so there's no second "confirm write?" prompt to answer.
-  const result = runInit(root, home, [], "sk-ant-codex-test-key\n");
+  const result = runInit(root, home, [], "sk-ant-codex-test-key\n\n\n\n\n");
   check("exits 0", result.status === 0);
   check("acknowledges a key was entered", result.stdout.includes("You entered an API key above"));
   check("echoes the real key in a copy-pasteable export line", result.stdout.includes('export ANTHROPIC_API_KEY="sk-ant-codex-test-key"'));

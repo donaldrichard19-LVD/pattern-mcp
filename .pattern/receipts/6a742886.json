@@ -1,0 +1,151 @@
+{
+  "schema_version": 2,
+  "feature_id": "6a742886",
+  "file_path": "website/components/OneAuthority.tsx",
+  "ledger_entry_id": "58a59782-5572-425b-931d-8be1cfcf8cc1",
+  "verdict": "custom_build",
+  "chosen_candidate": null,
+  "snapshot_ref": "f9b8ec820ebb7c2837c12ac52e93b8d6aef58e6e",
+  "checked_at": "2026-10-03T02:15:08.002Z",
+  "manual_override": false,
+  "override_reason": null,
+  "verification": {
+    "verified_at": "2026-10-03T02:16:46.418Z",
+    "file_sha256": "e5cbea4be54558ee891e6768c131a6ae4c184fdf2225d9bd0467a7221f67a654",
+    "summary": {
+      "pass": 6,
+      "fail": 1,
+      "unverified": 1,
+      "total": 8
+    },
+    "items": [
+      {
+        "item": "Two-column layout container with heading and two paragraphs on left, source panel on right",
+        "status": "pass",
+        "evidence": "gridTemplateColumns: \"1fr 1fr\"",
+        "clauses": [
+          {
+            "clause": "Two-column layout container with heading, two paragraphs left, panel right",
+            "status": "pass",
+            "evidence": "gridTemplateColumns: \"1fr 1fr\""
+          }
+        ]
+      },
+      {
+        "item": "Right-side panel renders exactly three list entries (Figma file, components folder, manifest)",
+        "status": "pass",
+        "evidence": "{ icon: Palette, h: \"A Figma file\"",
+        "clauses": [
+          {
+            "clause": "Right panel renders exactly three list entries (Figma, components folder, manifest)",
+            "status": "pass",
+            "evidence": "{ icon: Palette, h: \"A Figma file\""
+          }
+        ]
+      },
+      {
+        "item": "Each entry includes icon, title, one-line description, visually distinct",
+        "status": "pass",
+        "evidence": "<s.icon size={18} aria-hidden=\"true\"",
+        "clauses": [
+          {
+            "clause": "Each entry includes icon",
+            "status": "pass",
+            "evidence": "<s.icon size={18} aria-hidden=\"true\""
+          },
+          {
+            "clause": "Each entry includes title",
+            "status": "pass",
+            "evidence": "{s.h}</span>"
+          },
+          {
+            "clause": "Each entry includes one-line description",
+            "status": "pass",
+            "evidence": "{s.p}</span>"
+          },
+          {
+            "clause": "Entries are visually distinct",
+            "status": "pass",
+            "evidence": "borderTop: i === 0 ? \"none\" : \"1px solid var(--border-subtle)\""
+          }
+        ]
+      },
+      {
+        "item": "Panel includes a header element above the list",
+        "status": "pass",
+        "evidence": "register once per project",
+        "clauses": [
+          {
+            "clause": "Panel includes header element above the list",
+            "status": "pass",
+            "evidence": "register once per project"
+          }
+        ]
+      },
+      {
+        "item": "Panel includes a footer caption below the list, styled as smaller/secondary text",
+        "status": "pass",
+        "evidence": "every request is judged against this, and nothing else",
+        "clauses": [
+          {
+            "clause": "Panel includes footer caption below the list, styled smaller/secondary",
+            "status": "pass",
+            "evidence": "every request is judged against this, and nothing else"
+          }
+        ]
+      },
+      {
+        "item": "All styling via inline style objects referencing CSS custom properties, no Tailwind",
+        "status": "fail",
+        "evidence": "className=\"pt-cols-2\"",
+        "clauses": [
+          {
+            "clause": "All styling via inline style objects referencing CSS custom properties",
+            "status": "fail",
+            "evidence": "className=\"pt-cols-2\""
+          },
+          {
+            "clause": "No Tailwind classes",
+            "status": "pass",
+            "evidence": "absent: \"tw-\", \"className=\"flex\", \"className=\"grid-cols\", \"tailwind\""
+          }
+        ]
+      },
+      {
+        "item": "Responsive: two-column collapses to single column on smaller viewports",
+        "status": "unverified",
+        "evidence": "",
+        "clauses": [
+          {
+            "clause": "Responsive: two-column collapses to single column on smaller viewports",
+            "status": "unverified",
+            "evidence": ""
+          }
+        ]
+      },
+      {
+        "item": "Semantic/accessible markup: h2 heading, ul/li list structure, aria-hidden icons",
+        "status": "pass",
+        "evidence": "<h2 style={{ ...H2",
+        "clauses": [
+          {
+            "clause": "h2 heading used",
+            "status": "pass",
+            "evidence": "<h2 style={{ ...H2"
+          },
+          {
+            "clause": "ul/li list structure used",
+            "status": "pass",
+            "evidence": "<ul style={{ display: \"grid\", listStyle: \"none\""
+          },
+          {
+            "clause": "icons marked aria-hidden",
+            "status": "pass",
+            "evidence": "aria-hidden=\"true\""
+          }
+        ]
+      }
+    ],
+    "divergences": []
+  }
+}

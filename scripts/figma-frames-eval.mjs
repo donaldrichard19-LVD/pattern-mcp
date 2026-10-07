@@ -122,7 +122,7 @@ async function runVariant(name) {
     PATTERN_MEMORY_PATH: join(tmpdir(), "figma-eval-mem.json"), PATTERN_TOOLS: "full", ...v.env } });
   const c = new Client({ name: "figma-eval", version: "1" }, { capabilities: {} });
   await c.connect(t);
-  const reg = await c.callTool({ name: "register_design_system", arguments: { project_id: "figma-eval", figma_json_path: rel, ...v.args } });
+  const reg = await c.callTool({ name: "register_design_system", arguments: { project_id: "figma-eval", figma_json_path: rel, include_candidates: true, ...v.args } });
   if (reg.isError) throw new Error(reg.content[0].text);
   const registration = JSON.parse(reg.content[0].text).registration;
   if (v.vision) {

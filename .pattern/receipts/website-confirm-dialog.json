@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "feature_id": "website-confirm-dialog",
+  "file_path": "website/components/ConfirmDialog.tsx",
+  "ledger_entry_id": "8bbfcc8d-74cb-41e8-acfc-65dbf4a34fa3",
+  "verdict": "custom_build",
+  "chosen_candidate": null,
+  "snapshot_ref": "3efe25ef890e365d5f8b582f9e0fbdb3ffdf53d7",
+  "checked_at": "2026-09-30T02:07:25.410Z",
+  "manual_override": false,
+  "override_reason": null
+}

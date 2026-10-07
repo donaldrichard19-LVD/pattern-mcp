@@ -1,9 +1,19 @@
 ---
 name: pattern
-description: Judge whether a UI component need should use a component from the project's own registered design system, or requires a custom build.
+description: Use when building, prototyping or scaffolding UI (a component, page or screen), especially from a Figma link, mockup or screenshot. Checks the project's own design system first to decide reuse versus build, returns the exact unmet requirements to build, then verifies the built file. Skip trivial primitives (button, input, icon) and small edits to existing components.
 ---
 
 # Pattern
+
+## When to use it (without being asked)
+
+Use Pattern yourself, before writing code, whenever you are about to build,
+prototype or scaffold a new, non-trivial UI component, page or screen, and
+especially when the user gives you a Figma link, mockup or screenshot. The user
+should not have to say "use Pattern". Skip it for trivial primitives (button,
+input, label, icon), copy or style tweaks, and edits to existing components.
+If no design system is registered yet, register one first (a Figma file key, a
+components folder, or a manifest) -- see the workflow below.
 
 Pattern is an MCP server (`pattern-mcp`) that judges UI component
 decisions: given a component need, it returns a structured verdict
@@ -15,15 +25,32 @@ Full behavior, output schemas, and cost details are in
 [README.md](./README.md). This file is a quick tool-list orientation.
 
 Only `register_design_system`, `recommend_component`,
-`extract_requirements`, and `record_component_decision` are advertised in `tools/list` by default.
-`read_ledger`, `report_build_cost`, and `report_outcome_proxy` below are
+`extract_requirements`, `verify_component`, and `record_component_decision` are advertised in `tools/list` by default.
+`read_ledger`, `report_build_cost`, `report_outcome_proxy`, and `get_figma_evidence` below are
 real and callable by name at any time, but stay out of the default list
 until the server is started with `PATTERN_TOOLS=full` -- see the
 README's [Tool tiers](./README.md#tool-tiers).
 
+## Workflow (follow this order)
+
+1. `extract_requirements({component_need, domain, project_id})` -- its
+   `design_system.registered` field says whether the project has a design
+   system. Review or edit the checklist.
+2. Only if it is not registered: `register_design_system` (a Figma file key, the
+   components folder the user names, or a manifest), then extract again so the
+   checklist uses the design's real values. Never register on your own when one
+   exists: a different source replaces the user's design system (the call now
+   refuses unless `replace: true`).
+3. `recommend_component({..., project_id, checklist, file_path})` -- pass
+   `file_path` NOW, before writing the file.
+4. Build.
+5. `verify_component({project_id, file_path})` -- fix `fail` items, look at
+   `unverified` ones.
+6. `record_component_decision` when you acted on the verdict.
+
 ## Tools
 
-### `register_design_system` (call once per project, first)
+### `register_design_system` (once per project, only when none is registered)
 
 Registers the project's own design system -- a Figma file
 (`figma_file_key` with `FIGMA_ACCESS_TOKEN`, or `figma_json_path`), a
@@ -33,11 +60,17 @@ returns an error until one is registered for the `project_id`.
 
 ### `recommend_component` (primary tool -- start here)
 
-The single-call default. Extracts requirements, scores coverage against
-the registered design system's candidates, and returns a verdict. Requires
+The single-call default. Scores the registered design system's candidates
+(with Jev when `TYPESAFE_API_KEY` is set -- sub-second, returns
+`design_system_match`; otherwise, or when Jev finds nothing, with an
+Anthropic checklist + coverage pass) and returns a verdict. Requires
 `project_id` with a registered design system.
 This is the recommended path for most callers -- call it directly with
 `component_need`, `domain`, and `framework`.
+
+For a Figma registration, scoring also sees the exact sizes, spacing and
+nested components of the best-matching candidates, so requirements about size
+or composition can be judged instead of marked unknown.
 
 Optional inputs: `existing_stack` (tiebreaker), `project_id` (surfaces
 past decisions from `record_component_decision` as a consistency signal),
@@ -76,13 +109,36 @@ checklist *before* `recommend_component` scores,
 e.g. to catch a misread requirement early. This is an opt-in two-call
 pattern, not a replacement for the single-call default above.
 
-Flow: call `extract_requirements({component_need, domain})` → review (or
+Pass `project_id` (the one you registered under) to ground the checklist in the
+project's Figma values; the response then also has `checklist_items`, each tagged
+`figma-evidenced` / `inferred` / `general-practice`, and `grounded_in`.
+`general-practice` items (accessibility, keyboard, focus) are things a design
+file can't prove -- expect them unmet against a Figma-only registration; that
+is a gap to build, not a bad match.
+
+Flow: call `extract_requirements({component_need, domain, project_id})` → review (or
 edit) the returned `checklist` → pass it back into
 `recommend_component({..., checklist})`, which then scores against
 exactly those items instead of re-extracting its own.
 
 `extraction_confidence` in the response is a placeholder heuristic (see
 README) -- treat `"low"` as a hint to reread the input, not a hard error.
+
+### `verify_component`
+
+Call after building. Checks the built file (`file_path`, the same one passed to
+`recommend_component`) against its recorded checklist, item by item:
+`pass` / `fail` / `unverified`. Each clause of an item needs a verbatim quote
+the server confirms is in the file; must-be-absent clauses are searched by the
+server. It judges code, not rendered output. Writes the result into the
+committed receipt (schema v2) when one exists. Costs a few cents; surface
+`_meta.estimated_cost_usd`. Treat `unverified` as "needs a human look".
+
+### `get_figma_evidence` (advanced)
+
+`get_figma_evidence({project_id, node_id | name})` returns the raw Figma facts
+stored at registration (size, auto-layout, padding, gap, radius, nested
+components, text). Local read, no API call.
 
 ### `record_component_decision`
 
@@ -143,7 +199,7 @@ response. It's the one exception to "every call scores fresh"; see
 the exact match rules. Set `PATTERN_NO_LEDGER_CACHE_HIT` to turn this
 exception off and force every call to score fresh again.
 
-Every `recommend_component` and `extract_requirements` response carries an
+Every `recommend_component`, `extract_requirements` and `verify_component` response carries an
 `_meta` block (`total_ms`, `breakdown_ms`, `tokens_used`,
 `estimated_cost_usd`) so you can see what a call actually spent. **Surface
 `_meta.estimated_cost_usd` to the user after the call** -- it's real spend

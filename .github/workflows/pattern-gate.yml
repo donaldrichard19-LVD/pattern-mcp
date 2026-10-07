@@ -52,4 +52,4 @@ jobs:
         # Interpolating the list straight into `run:` would execute every file
         # name after the first as a command, and let a hostile name inject shell.
         run: |
-          printf '%s\n' "$ADDED_FILES" | sed '/^$/d' | xargs -d '\n' -r npx --yes -p pattern-mcp pattern-check-gate verify --project-root "$PWD" --files
+          printf '%s\n' "$ADDED_FILES" | sed '/^$/d' | xargs -d '\n' -r npx --yes -p pattern-mcp@latest pattern-check-gate verify --project-root "$PWD" --files

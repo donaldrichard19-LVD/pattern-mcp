@@ -36,7 +36,9 @@ import {
 import { instrument } from "@posthog/mcp";
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { SERVER_INSTRUCTIONS } from "./agent-guidance.js";
+import { attachVerificationToReceipt, type ReceiptVerification, type VerificationClause, type VerificationItem } from "./gate-receipt.js";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -53,8 +55,10 @@ import {
 } from "./telemetry.js";
 import { offerEnforcementSetupOnce } from "./init-enforcement.js";
 import { connectInstructionsText, offerClientConnectSetupOnce, runConnect } from "./client-connect.js";
+import { deriveProjectId } from "./project-id.js";
+import type { RegisterRequest as WizardRegisterRequest, RegisterResult as WizardRegisterResult } from "./setup-wizard.js";
 import { collapseForJev, rankWithJev } from "./design-system-jev.js";
-import { describeFigma, fetchFigmaFile, parseFigmaFile, type FigmaCandidateInfo } from "./design-system-figma.js";
+import { describeFigma, fetchFigmaFile, formatFigmaEvidence, parseFigmaFile, rankFigmaCandidates, type FigmaCandidateInfo, type FigmaEvidence } from "./design-system-figma.js";
 import { captionFigmaDesigns, carryOverCaptions } from "./design-system-figma-captions.js";
 import {
   SUMMARY_MODEL,
@@ -131,7 +135,9 @@ export const ANTHROPIC_WORKSPACE_ID = process.env.ANTHROPIC_WORKSPACE_ID;
 function warnIfAnthropicKeyLooksWrong(): void {
   if (!ANTHROPIC_API_KEY) {
     console.error(
-      "Pattern: ANTHROPIC_API_KEY is not set. recommend_component and extract_requirements will fail until it is."
+      DESIGN_SYSTEM_JEV_ENABLED
+        ? "Pattern: ANTHROPIC_API_KEY is not set. recommend_component will score with Jev only (no custom-build gap list); extract_requirements will fail until it is set."
+        : "Pattern: ANTHROPIC_API_KEY is not set. recommend_component and extract_requirements will fail until it is."
     );
     return;
   }
@@ -167,13 +173,20 @@ const MISSING_API_KEY_MESSAGE =
 // messaging) and diff verdicts before trusting it in production.
 export const MODEL = process.env.PATTERN_MODEL ?? "claude-sonnet-5";
 
-// Design-system mode only: PATTERN_SCORER=jev scores a project's registered
-// design system with Jev (TypeSafe AI) instead of Anthropic -- no web search,
-// no Anthropic call, and a plain "nothing fits" result when nothing does.
-// Off by default; see src/design-system-jev.ts for what the eval showed.
-// Candidate names, file names, doc comments and summaries (never prop lists)
-// plus the component_need are sent to api.typesafe.ai when it is on.
-const DESIGN_SYSTEM_JEV_ENABLED = process.env.PATTERN_SCORER === "jev";
+// Scorer selection. A registered design system is scored by Jev (TypeSafe AI)
+// whenever TYPESAFE_API_KEY is set -- sub-second, no Anthropic call. Unset
+// PATTERN_SCORER is "hybrid": Jev picks a match, and only when Jev finds
+// nothing that fits does Anthropic run (if ANTHROPIC_API_KEY is set) to
+// produce the requirement-by-requirement gap list a custom build needs.
+//   PATTERN_SCORER=jev        Jev only, no Anthropic call ever (no gap list)
+//   PATTERN_SCORER=anthropic  Anthropic only, ignores TYPESAFE_API_KEY
+// See src/design-system-jev.ts for what the eval showed. Candidate names,
+// file names, doc comments and summaries (never prop lists) plus the
+// component_need are sent to api.typesafe.ai when Jev is used.
+const SCORER_MODE = process.env.PATTERN_SCORER;
+const DESIGN_SYSTEM_JEV_ENABLED =
+  SCORER_MODE === "jev" || (SCORER_MODE !== "anthropic" && !!process.env.TYPESAFE_API_KEY);
+const JEV_GAP_PASS_ENABLED = SCORER_MODE !== "jev";
 // First guess from the eval: lowest correct top pick was 0.44 without
 // summaries (0.55 with) and highest "nothing fits" score was 0.27, so 0.4
 // separates them on that data. Jev's scores are not calibrated -- tune this
@@ -393,7 +406,7 @@ const LEDGER_CACHE_HIT_ENABLED = !process.env.PATTERN_NO_LEDGER_CACHE_HIT;
 // Everything else (design-system registration, ledger provenance/liveness,
 // cost/outcome tracking) is real but stays out of the default tool list so
 // it can reveal itself once a caller actually needs it, rather than
-// front-loading all eleven -- er, twelve -- tools on day one. Set
+// front-loading all fourteen tools on day one. Set
 // PATTERN_TOOLS=full to advertise every tool immediately.
 const TOOL_TIER = process.env.PATTERN_TOOLS === "full" ? "full" : "core";
 
@@ -709,6 +722,21 @@ async function streamAnthropicMessage(body: Record<string, unknown>): Promise<St
   };
 }
 
+// Phase 3b: effort for the design-system scoring pass defaults to "medium"
+// (A/B on the confirm-dialog need: ~35% cheaper and ~2x faster than the API
+// default "high" with the same verdict; see project notes). Overrides:
+// PATTERN_SCORE_EFFORT=low|medium|high|xhigh|max sets output_config.effort
+// ("high" restores the API default behavior); PATTERN_SCORE_THINKING=disabled
+// turns thinking off (accepted on claude-sonnet-5 only; 400s on 5.5/Opus 5.5).
+function scoringThinkingParams(): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  const requested = process.env.PATTERN_SCORE_EFFORT;
+  const effort = requested && ["low", "medium", "high", "xhigh", "max"].includes(requested) ? requested : "medium";
+  out.output_config = { effort };
+  if (process.env.PATTERN_SCORE_THINKING === "disabled") out.thinking = { type: "disabled" };
+  return out;
+}
+
 const TOOL_NAME = "recommend_component";
 const RECORD_DECISION_TOOL_NAME = "record_component_decision";
 const EXTRACT_REQUIREMENTS_TOOL_NAME = "extract_requirements";
@@ -721,6 +749,31 @@ const POST_LEDGER_PROVENANCE_TOOL_NAME = "post_ledger_provenance_to_github";
 const SWEEP_LEDGER_LIVENESS_TOOL_NAME = "sweep_ledger_liveness";
 const BACKFILL_LEDGER_SNAPSHOT_REF_TOOL_NAME = "backfill_ledger_snapshot_ref";
 const REGISTER_DESIGN_SYSTEM_TOOL_NAME = "register_design_system";
+const GET_FIGMA_EVIDENCE_TOOL_NAME = "get_figma_evidence";
+const VERIFY_COMPONENT_TOOL_NAME = "verify_component";
+
+const VERIFY_COMPONENT_INPUT_SCHEMA = {
+  type: "object",
+  properties: {
+    project_id: { type: "string", description: "The project_id used in recommend_component for this component." },
+    file_path: {
+      type: "string",
+      description:
+        "Path of the BUILT component file, relative to the project root. Must be the same file_path passed to recommend_component (that is how the ledger entry and its checklist are found).",
+    },
+  },
+  required: ["project_id", "file_path"],
+} as const;
+
+const GET_FIGMA_EVIDENCE_INPUT_SCHEMA = {
+  type: "object",
+  properties: {
+    project_id: { type: "string", description: "The project_id the Figma design system was registered under." },
+    node_id: { type: "string", description: "Exact Figma node id of a registered candidate (from a recommendation's chosen candidate or register_design_system)." },
+    name: { type: "string", description: "Candidate name, matched case-insensitively (exact match first, then substring). Up to 5 results. Use instead of node_id." },
+  },
+  required: ["project_id"],
+};
 
 // See TOOL_TIER above. These four cover the install -> register a design
 // system -> recommend -> enforce -> build happy path (recommend_component
@@ -731,6 +784,7 @@ const CORE_TOOL_NAMES = new Set([
   TOOL_NAME,
   EXTRACT_REQUIREMENTS_TOOL_NAME,
   RECORD_DECISION_TOOL_NAME,
+  VERIFY_COMPONENT_TOOL_NAME,
 ]);
 
 const INPUT_SCHEMA = {
@@ -807,7 +861,8 @@ const INPUT_SCHEMA = {
         "the file existing. When provided, it's stored on the resulting " +
         "ledger entry and check_ledger_liveness can later confirm the file " +
         "still exists and still references chosen_candidate. Omit if unknown; " +
-        "it cannot currently be attached to an entry after the fact.",
+        "it can still be attached later, without re-scoring, by passing " +
+        "file_path to record_component_decision.",
     },
   },
   required: ["component_need", "domain", "framework"],
@@ -823,6 +878,11 @@ const EXTRACT_REQUIREMENTS_INPUT_SCHEMA = {
     domain: {
       type: "string",
       description: "Same field as recommend_component's input -- the product type/domain. Extraction is grounded in this, not the component name alone.",
+    },
+    project_id: {
+      type: "string",
+      description:
+        "Optional. The project_id a Figma design system was registered under. When it has stored Figma evidence, the most relevant components' exact sizes, spacing and structure are shown to the extractor so the checklist uses real values, and each item is tagged figma-evidenced / inferred / general-practice. Same project_id you pass to recommend_component.",
     },
   },
   required: ["component_need", "domain"],
@@ -867,6 +927,22 @@ const RECORD_DECISION_INPUT_SCHEMA = {
         "This is self-reported by the calling agent -- Pattern has no way to measure a counterfactual, " +
         "so it never computes this itself (unlike _meta, which is Pattern's own real cost/latency). " +
         "Omit if you don't have a meaningful estimate; never guess a number just to fill the field.",
+    },
+    file_path: {
+      type: "string",
+      description:
+        "Optional. Path (relative to the project root, staying inside it) of the file you " +
+        "implemented this decision in. When given, it is attached to the most recent " +
+        "recommend_component ledger entry for this project_id and component_need (or the " +
+        "entry with the given feature_id) WITHOUT re-scoring, so the enforcement gate " +
+        "(pattern-check-gate) can match it. The gate reads the ledger, not this decision " +
+        "log: if no ledger entry exists yet, the response says so and nothing is attached.",
+    },
+    feature_id: {
+      type: "string",
+      description:
+        "Optional, only used with file_path. The feature_id of the recommend_component call " +
+        "to attach file_path to, when several ledger entries share the same component_need.",
     },
   },
   required: ["project_id", "component_need", "action", "source"],
@@ -1057,6 +1133,10 @@ const BACKFILL_LEDGER_SNAPSHOT_REF_INPUT_SCHEMA = {
   required: ["project_id"],
 } as const;
 
+// Registrations up to this many candidates are echoed in full by default;
+// larger ones get registrationResponseView's compact summary.
+export const REGISTER_FULL_LIST_MAX = 25;
+
 const REGISTER_DESIGN_SYSTEM_INPUT_SCHEMA = {
   type: "object",
   properties: {
@@ -1107,6 +1187,20 @@ const REGISTER_DESIGN_SYSTEM_INPUT_SCHEMA = {
       type: "boolean",
       description:
         "Two different things. (1) directory_path: ON BY DEFAULT when ANTHROPIC_API_KEY is set: writes a short (2-3 sentence) capability summary for each scanned file with Claude Haiku and stores it on the registration -- a big accuracy/confidence gain for the Jev design-system scorer (PATTERN_SCORER=jev) and harmless for the default one. This SENDS up to 8000 characters of each source file that needs a summary to api.anthropic.com; pass false (or set PATTERN_NO_SUMMARIES=1) to keep registration fully local. true refuses (leaving the previous registration untouched) when there is no key or no directory_path; unset never refuses, it just skips. Costs about 0.2 cents per file (capped at PATTERN_SUMMARY_MAX_FILES, default 200 files). Summaries are cached by file content: re-registering only pays for files that changed, and unchanged files keep their summary even with summarize: false. (2) figma_file_key: OPT-IN ONLY (summarize: true; never default) -- renders each registered design with Figma's images API and has Claude Haiku write a 2-sentence VISION caption of it (chart type, what is drawn, tooltips/legends/toggles), stored as the candidate's summary. Text and layer names can't say what is drawn, and on a real file this raised needs matched from ~17/27 to 23/27 with a clean score gap. It SENDS IMAGES OF YOUR DESIGNS to api.anthropic.com and asks Figma to render them with your token; needs ANTHROPIC_API_KEY and FIGMA_ACCESS_TOKEN; costs under a tenth of a cent per design; refused with figma_json_path (fully local).",
+    },
+    replace: {
+      type: "boolean",
+      description:
+        "Optional, default false. A project that already has a design system registered will NOT have it swapped for a DIFFERENT source (another file, folder, manifest or Figma file) unless this is true -- the call returns an error describing the existing registration instead. Re-registering the SAME source (a refresh) never needs it. Only pass true when the user has asked to switch design systems.",
+    },
+    include_candidates: {
+      type: "boolean",
+      description:
+        "Optional. Whether the response carries the full registration.candidates list. Unset: the full list " +
+        "for small registrations (up to " + REGISTER_FULL_LIST_MAX + " candidates), and a compact summary for larger ones " +
+        "(candidate_count, a short name preview, per-page counts for Figma, plus warnings) -- a large Figma file " +
+        "otherwise puts ~10k tokens of candidates into the caller's context. true always returns the full list; " +
+        "false always returns the summary. The registration itself is stored in full either way.",
     },
   },
   required: ["project_id"],
@@ -1226,10 +1320,16 @@ function buildExtractionSystemPrompt(): string {
 
 ${EXTRACTION_INSTRUCTIONS}
 
+If the user message includes a "Detailed Figma evidence" section, those are exact values read from this project's own design file for the most relevant components. Use them: when a requirement rests on a stated fact (a size, spacing, a nested component, literal text), write it with that exact value. Tag every item with its basis:
+- "figma-evidenced": the item rests on a fact stated in that evidence section. Put the fact in "evidence" (quote it).
+- "inferred": derived from the component need and domain, not stated in any evidence.
+- "general-practice": expected behavior a design file cannot show (accessibility roles, keyboard handling, focus management, error states).
+Never mark an item "figma-evidenced" without a quoted fact, and never invent values the evidence does not give. When there is no evidence section, use only "inferred" or "general-practice".
+
 Respond with ONLY a single JSON object, no prose before or after, no markdown code fences, matching this exact shape:
 
 {
-  "checklist": ["string", "string", "..."]
+  "checklist_items": [ { "item": "string", "basis": "figma-evidenced" | "inferred" | "general-practice", "evidence": "string, figma-evidenced only" } ]
 }`;
 }
 
@@ -1384,19 +1484,35 @@ async function runSinglePass(input: {
   // Jev design-system path: needs no Anthropic key. A caller-supplied
   // checklist opts out (Jev scores whole files, not per-requirement items),
   // falling through to the normal Anthropic path below.
+  let jevScreen: JudgmentResult["design_system_match"] | null = null;
   if (DESIGN_SYSTEM_JEV_ENABLED && input.project_id && !(input.checklist && input.checklist.length > 0)) {
     const jevDesignSystem = getRegisteredDesignSystem(input.project_id);
-    if (jevDesignSystem) return runDesignSystemJevPass(input, jevDesignSystem, passStartMs);
+    if (jevDesignSystem) {
+      const jevPass = await runDesignSystemJevPass(input, jevDesignSystem, passStartMs);
+      // Hybrid: a Jev "nothing fits" gets an Anthropic pass so the caller
+      // still receives the unmet-requirements gap list. Everything else
+      // (a match, or no Anthropic key, or PATTERN_SCORER=jev) returns as is.
+      const needsGapPass =
+        JEV_GAP_PASS_ENABLED && ANTHROPIC_API_KEY && jevPass.ok && jevPass.result.verdict === "custom_build";
+      if (!needsGapPass) return jevPass;
+      jevScreen = jevPass.ok ? (jevPass.result.design_system_match ?? null) : null;
+    }
   }
 
   // Pattern judges against a project's own registered design system only.
   // No registration -> nothing to score against; say so instead of falling
   // back to searching external libraries.
+  const noDesignSystem = !input.project_id || !getRegisteredDesignSystem(input.project_id);
+  // A Jev-only setup has no Anthropic key by design, so report the missing
+  // design system first there; otherwise the key check leads (see
+  // verify-client-connect.mjs).
+  if (noDesignSystem && DESIGN_SYSTEM_JEV_ENABLED) throw new Error(NO_DESIGN_SYSTEM_MESSAGE);
+
   if (!ANTHROPIC_API_KEY) {
     throw new Error(MISSING_API_KEY_MESSAGE);
   }
 
-  if (!input.project_id || !getRegisteredDesignSystem(input.project_id)) {
+  if (noDesignSystem) {
     throw new Error(NO_DESIGN_SYSTEM_MESSAGE);
   }
 
@@ -1442,10 +1558,17 @@ async function runSinglePass(input: {
         })
         .join("\n")}`;
 
+  // Phase 4b: for the few candidates that look most relevant, append the raw
+  // Figma facts captured at registration (size, padding, gap, nested
+  // components...). Every candidate is still listed above; this only adds
+  // detail for the top-k. Default 3; PATTERN_FIGMA_EVIDENCE_TOPK=0 turns it off.
+  const evidence = buildFigmaEvidenceBlock(designSystem, input.component_need, input.checklist);
+  const evidenceBlock = evidence.block;
+
   const userMessage = `component_need: ${input.component_need}
 domain: ${input.domain}
 framework: ${input.framework}
-existing_stack: ${input.existing_stack ?? "(not specified)"}${checklistBlock}${pastDecisionsBlock}${designSystemBlock}`;
+existing_stack: ${input.existing_stack ?? "(not specified)"}${checklistBlock}${pastDecisionsBlock}${designSystemBlock}${evidenceBlock}`;
 
   // Diagnostic only, same pattern as the other stderr diagnostics in this
   // file -- proves the memory lookup actually reached the prompt sent to
@@ -1463,7 +1586,13 @@ existing_stack: ${input.existing_stack ?? "(not specified)"}${checklistBlock}${p
 
   const data = await streamAnthropicMessage({
     model: MODEL,
-    max_tokens: 8192,
+    // Ceiling only, not a target: adaptive thinking counts against it and
+    // varies per pass (measured ~2-3k of ~3-4k output tokens per pass), so
+    // 8192 could truncate a pass whose visible JSON was tiny. Streaming is
+    // on, so a higher ceiling adds no timeout risk and costs nothing unless
+    // the model actually uses it.
+    max_tokens: 16384,
+    ...scoringThinkingParams(),
     // System prompt is identical on every call, so mark it cacheable --
     // cache reads cost roughly a tenth of fresh input tokens.
     system: [
@@ -1479,11 +1608,29 @@ existing_stack: ${input.existing_stack ?? "(not specified)"}${checklistBlock}${p
     tools: [],
   });
 
+  // Diagnostic only: where do output tokens go on this path? Logged before
+  // the truncation check so a truncated pass is still visible.
+  {
+    const rawText = data.content.filter((b) => b.type === "text").map((b) => b.text ?? "").join("");
+    console.error(
+      JSON.stringify({
+        diagnostic: "design_system_pass_size",
+        stop_reason: data.stop_reason ?? null,
+        input_tokens: data.usage?.input_tokens ?? null,
+        output_tokens: data.usage?.output_tokens ?? null,
+        output_chars: rawText.length,
+        block_types: data.content.map((b) => b.type),
+        candidates_in_prompt: designSystem.candidates.length,
+        prompt_chars: userMessage.length,
+      })
+    );
+  }
+
   // If the model hits max_tokens, the response is cut
   // mid-JSON and must not be silently returned as if it were valid.
   if (data.stop_reason === "max_tokens") {
     throw new Error(
-      "Anthropic response was truncated (stop_reason: max_tokens) before finishing its JSON output. Raise max_tokens or register a smaller design system."
+      "Anthropic response was truncated (stop_reason: max_tokens) before finishing its JSON output. The pass spent its whole output budget (including thinking) before finishing; retry, or register a smaller design system."
     );
   }
 
@@ -1513,6 +1660,12 @@ existing_stack: ${input.existing_stack ?? "(not specified)"}${checklistBlock}${p
   enforceCoverageRecount(parsed);
   enforceVerdictThreshold(parsed);
   enforceRecommendationConsistency(parsed);
+
+  // The model has no clock: JUDGMENT_RESPONSE_SHAPE asks it for "today's
+  // date" and it fills in a guess from its training data (observed live as
+  // 2025 dates). The Jev and skip-list paths already stamp the server
+  // clock, so do the same here instead of trusting the model's value.
+  parsed.computed_at = new Date().toISOString().slice(0, 10);
 
   // Set server-side, never trusted from the model's own "source" text --
   // same "server derives what it already knows deterministically" policy
@@ -1556,6 +1709,8 @@ existing_stack: ${input.existing_stack ?? "(not specified)"}${checklistBlock}${p
   // other enforce* functions above.
   parsed.checklist_source = checklistSource;
   parsed._meta = buildMeta(data.timings, data.usage);
+  // Hybrid mode: record that Jev screened this need first and found nothing.
+  if (jevScreen) parsed.jev_screen = { verdict: "custom_build", closest: jevScreen };
 
   // Same "server-side, not just prompt instruction" policy as the rest of
   // this file: a past_decision_signal is only trusted when this call
@@ -1577,8 +1732,329 @@ existing_stack: ${input.existing_stack ?? "(not specified)"}${checklistBlock}${p
   return { ok: true, result: parsed };
 }
 
+// Shared by the scoring pass and extract_requirements (Phase 4b/4c): the
+// stored Figma facts for the top-k lexically best-matching candidates of a
+// Figma-sourced registration, as a prompt section. Empty block when the
+// registration isn't Figma, has no stored evidence, or top-k is 0.
+function figmaEvidenceTopK(): number {
+  const raw = Number.parseInt(process.env.PATTERN_FIGMA_EVIDENCE_TOPK ?? "3", 10);
+  return Number.isFinite(raw) && raw >= 0 ? raw : 3;
+}
+
+function buildFigmaEvidenceBlock(
+  designSystem: DesignSystemRegistration,
+  need: string,
+  checklist: string[] | undefined
+): { block: string; names: string[] } {
+  const k = figmaEvidenceTopK();
+  const names: string[] = [];
+  if (k <= 0 || designSystem.source_kind !== "figma") return { block: "", names };
+  const stored = readFigmaEvidence(designSystem.project_id);
+  const lines: string[] = [];
+  if (stored) {
+    for (const i of rankFigmaCandidates(designSystem.candidates, need, checklist, k)) {
+      const c = designSystem.candidates[i];
+      const ev = c.figma ? stored.evidence[c.figma.node_id] : undefined;
+      if (ev) {
+        lines.push(`- ${c.name}: ${formatFigmaEvidence(ev)}`);
+        names.push(c.name);
+      }
+    }
+  }
+  console.error(JSON.stringify({ diagnostic: "figma_evidence_topk", k, stored: !!stored, candidates: names }));
+  const block =
+    lines.length > 0
+      ? `\n\nDetailed Figma evidence for the ${lines.length} most relevant candidates (exact values read from the design file; use them to judge size, spacing and composition requirements instead of assuming they are unknown):\n${lines.join("\n")}`
+      : "";
+  return { block, names };
+}
+
+// ---------------------------------------------------------------------
+// verify_component (Phase 5): per-item check of a BUILT file against the
+// checklist recorded for it, with server-verified quotes.
+// ---------------------------------------------------------------------
+const VERIFY_MAX_FILE_CHARS = 80_000;
+const VERIFICATIONS_PATH = process.env.PATTERN_LEDGER_VERIFICATIONS_PATH ?? join(homedir(), ".pattern", "ledger_verifications.jsonl");
+/**
+ * A forbidden-thing search term as a regex that does not match inside a
+ * longer identifier: "dir" must not hit "flexDirection" or "direction",
+ * while "dir=" (ends in punctuation) still anchors only on the left.
+ */
+export function absentTermRegex(term: string): RegExp {
+  const esc = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const word = /\w/;
+  return new RegExp(`${word.test(term[0]) ? "(?<![A-Za-z0-9_])" : ""}${esc}${word.test(term[term.length - 1]) ? "(?![A-Za-z0-9_])" : ""}`, "i");
+}
+export function stripCodeComments(text: string): string {
+  return text.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|\s)\/\/[^\n]*/g, "$1");
+}
+const squash = (t: string) => t.replace(/\s+/g, " ").trim();
+
+function buildVerifySystemPrompt(withEvidence: boolean): string {
+  return `You are the post-build verification step of a UI component judgment tool. You are given a requirement checklist and the source of a component that was built to satisfy it. Decide, for EACH checklist item, whether the source satisfies it.
+
+Rules:
+- Judge only what the source code says. You cannot run it or see it render, so anything that depends on rendered appearance or runtime behavior you cannot see in the code is "unverified", not "pass".
+- "pass": the code clearly does it. "fail": the code clearly does not, or contradicts it. "unverified": cannot be decided from the source.
+- Many checklist items are COMPOUND ("Escape cancels, focus returns to the trigger, visible focus ring"). Split every item into its atomic clauses (1 to 6, each a short phrase naming one thing the code must do) and judge EACH clause separately. An item is only as good as its weakest clause: do not let one satisfied clause stand in for the others. A single-requirement item has exactly one clause.
+- For each clause, "pass" and a "fail" that rests on code that is present need "evidence": ONE contiguous snippet copied verbatim from the source (<= 200 characters, exact characters, no paraphrase, no ellipsis) that shows that clause specifically. For a "fail" because something is simply absent, use "" as evidence.
+- A clause that says something must be ABSENT ("no Tailwind classes", "LTR only, no RTL handling") cannot be quoted. Instead of "evidence", give "absent": 1 to 5 literal strings that would appear in the source if the forbidden thing were present (e.g. ["className=", "tw-", "rtl", "dir="]). The server searches the file for them: the clause passes only if none occur, and fails if any does. Choose strings specific enough not to appear innocently (comments are ignored by the search, but strings, identifiers and prop names are not).
+- Be strict about numbers: if a clause states a size, spacing, radius or count and the code uses a different value, that clause fails, quoting the differing code.
+Do not give credit for intent or comments. A TODO or a comment claiming it works is not a pass.
+
+${withEvidence ? `Also list "divergences": measurable places where the source departs from the Figma evidence section. Be conservative; an empty list is a good answer. Each is an object:
+{ "kind": "size" | "spacing" | "radius" | "layout" | "composition", "figma_component": "exact component name as it appears in the evidence section", "figma_value": "the value copied verbatim from that component's evidence line (e.g. gap 16)", "code_snippet": "verbatim snippet from the source showing the differing value", "code_value": "the value the code uses", "same_element": true }
+Rules: "same_element" is true ONLY if the code element you point at is that very Figma component or a named part of it (the dialog itself, its header, its footer buttons). A different thing that merely resembles it (a 40px icon tile versus the 24px Icon Button component) is NOT a divergence; set same_element false or leave it out. Never report text content, labels, placeholder or sample copy, or colors as divergences. Never report something the evidence does not state. At most 5.` : `Set "divergences" to an empty list (no design evidence is available for this component).`}
+
+Respond with ONLY a single JSON object, no prose, no markdown fences:
+{
+  "items": [ { "index": 1, "clauses": [ { "clause": "short phrase", "status": "pass" | "fail" | "unverified", "evidence": "verbatim snippet or empty", "absent": ["only for must-be-absent clauses"] } ] } ],
+  "divergences": [ ]
+}
+Return one entry per checklist item, using the item's number as "index".`;
+}
+
+export interface VerifyComponentResult {
+  ledger_entry_id: string;
+  file_path: string;
+  file_sha256: string;
+  summary: ReceiptVerification["summary"];
+  items: VerificationItem[];
+  divergences: string[];
+  /** Model-proposed divergences the server could not back up (reason + raw), for transparency; not stored in the receipt. */
+  divergences_dropped: DivergenceCheck["dropped"];
+  receipt: { updated: boolean; feature_id?: string };
+  _meta: NonNullable<JudgmentResult["_meta"]>;
+}
+
+/**
+ * Turns the model's raw per-item answers into verified items. Pure and
+ * exported for offline testing: a "pass" is only kept when its quote is
+ * actually in the file; any other unsupported claim becomes "unverified".
+ */
+export function reconcileVerification(
+  checklist: string[],
+  raw: unknown,
+  fileText: string
+): VerificationItem[] {
+  const haystack = squash(fileText);
+  type RawItem = { index?: unknown; clauses?: unknown; status?: unknown; evidence?: unknown; clause?: unknown };
+  const byIndex = new Map<number, RawItem>();
+  if (Array.isArray(raw)) {
+    for (const r of raw as RawItem[]) {
+      const idx = typeof r?.index === "number" ? r.index : Number.NaN;
+      if (Number.isInteger(idx) && idx >= 1 && idx <= checklist.length && !byIndex.has(idx)) byIndex.set(idx, r);
+    }
+  }
+  // A claim is only as good as its quote: a pass needs a quote that is
+  // really in the file; a fail that cites code needs that code to be there.
+  const judge = (label: string, r: { status?: unknown; evidence?: unknown; absent?: unknown } | undefined): VerificationClause => {
+    // A must-be-absent clause is decided by the server, not the model: search
+    // the file for the strings the model says would betray the forbidden thing.
+    if (Array.isArray(r?.absent)) {
+      const terms = (r!.absent as unknown[]).filter((t): t is string => typeof t === "string" && t.trim().length >= 2).map((t) => t.trim()).slice(0, 5);
+      if (terms.length > 0) {
+        // Comments don't count as the forbidden thing being present (a note
+        // saying "no RTL" or "Dir=None" is not RTL handling). Line comments
+        // only strip when preceded by start/whitespace, so "http://" in a
+        // string can't swallow the rest of its line.
+        const code = stripCodeComments(fileText);
+        const matcher = (t: string) => absentTermRegex(t);
+        const hit = terms.find((t) => matcher(t).test(code));
+        const line = hit ? code.split("\n").find((l) => matcher(hit).test(l)) : undefined;
+        return hit
+          ? { clause: label, status: "fail", evidence: `found "${hit}" in: ${squash(line ?? "").slice(0, 120)}` }
+          : { clause: label, status: "pass", evidence: `absent: ${terms.map((t) => `"${t}"`).join(", ")}` };
+      }
+    }
+    const evidence = typeof r?.evidence === "string" ? squash(r.evidence).slice(0, 240) : "";
+    const quoted = evidence !== "" && haystack.includes(evidence);
+    let status: VerificationClause["status"] =
+      r?.status === "pass" || r?.status === "fail" || r?.status === "unverified" ? r.status : "unverified";
+    if (status === "pass" && !quoted) status = "unverified";
+    if (status === "fail" && evidence !== "" && !quoted) status = "unverified";
+    return { clause: label, status, evidence: status === "unverified" ? "" : evidence };
+  };
+  return checklist.map((item, i) => {
+    const r = byIndex.get(i + 1);
+    // Accept the older flat shape (one status/evidence per item) as a single clause.
+    const rawClauses: Array<{ clause?: unknown; status?: unknown; evidence?: unknown; absent?: unknown }> =
+      Array.isArray(r?.clauses) && (r!.clauses as unknown[]).length > 0
+        ? (r!.clauses as Array<{ clause?: unknown; status?: unknown; evidence?: unknown; absent?: unknown }>).slice(0, 6)
+        : r
+          ? [{ clause: item, status: r.status, evidence: r.evidence }]
+          : [];
+    const clauses = rawClauses.map((c, k) => judge(typeof c?.clause === "string" && c.clause.trim() ? squash(c.clause).slice(0, 160) : `clause ${k + 1}`, c));
+    if (clauses.length === 0) return { item, status: "unverified" as const, evidence: "" };
+    const status: VerificationItem["status"] = clauses.some((c) => c.status === "fail")
+      ? "fail"
+      : clauses.every((c) => c.status === "pass")
+        ? "pass"
+        : "unverified";
+    const decisive = clauses.find((c) => c.status === status && c.evidence) ?? clauses.find((c) => c.evidence);
+    return { item, status, evidence: decisive?.evidence ?? "", clauses };
+  });
+}
+
+export interface DivergenceCheck {
+  kept: string[];
+  dropped: Array<{ reason: string; raw: unknown }>;
+}
+
+/**
+ * Keeps only divergences the server can back up: a known kind, a component
+ * that was actually in the evidence shown, a figma_value that really appears
+ * in that evidence, a code snippet that really is in the file, the same
+ * element on both sides, and values that genuinely differ. Everything else is
+ * dropped (and reported), so the list is short and every entry is checkable.
+ */
+export function reconcileDivergences(
+  raw: unknown,
+  evidenceBlock: string,
+  evidenceNames: string[],
+  fileText: string
+): DivergenceCheck {
+  const KINDS = new Set(["size", "spacing", "radius", "layout", "composition"]);
+  const kept: string[] = [];
+  const dropped: DivergenceCheck["dropped"] = [];
+  const hay = squash(fileText);
+  const block = squash(evidenceBlock).toLowerCase();
+  const names = new Set(evidenceNames.map((n) => n.toLowerCase()));
+  const nums = (t: string) => (t.match(/-?\d+(?:\.\d+)?/g) ?? []).sort().join(",");
+  if (!Array.isArray(raw)) return { kept, dropped };
+  for (const d of raw as Array<Record<string, unknown>>) {
+    if (kept.length >= 5) break;
+    const str = (k: string) => (typeof d?.[k] === "string" ? squash(d[k] as string) : "");
+    const kind = str("kind"), comp = str("figma_component"), fv = str("figma_value"), snip = str("code_snippet"), cv = str("code_value");
+    const drop = (reason: string) => dropped.push({ reason, raw: d });
+    if (!KINDS.has(kind)) drop("kind not allowed (text, labels and colors are never divergences)");
+    else if (d.same_element !== true) drop("not the same element on both sides");
+    else if (!comp || !names.has(comp.toLowerCase())) drop("figma_component was not in the evidence shown");
+    else if (!fv || !block.includes(fv.toLowerCase())) drop("figma_value is not in the evidence");
+    else if (!snip || !hay.includes(snip)) drop("code_snippet is not in the file");
+    else if (!cv) drop("no code_value");
+    else if (nums(fv) !== "" && nums(fv) === nums(cv)) drop("values do not differ");
+    else kept.push(`${comp} ${kind}: Figma ${fv} vs code ${cv} (\`${snip.slice(0, 100)}\`)`);
+  }
+  return { kept, dropped };
+}
+
+async function runVerifyComponent(input: { project_id: string; file_path: string }): Promise<VerifyComponentResult> {
+  const rel = normalizeRelPath(input.file_path);
+  const abs = resolveWithinRoot(PROJECT_ROOT, rel);
+  if (!abs) throw new Error(`file_path "${input.file_path}" must be a relative path within the project root (${PROJECT_ROOT}).`);
+  if (!existsSync(abs) || !statSync(abs).isFile()) throw new Error(`No file found at "${rel}" (resolved to ${abs}). Build the component first.`);
+  const fileText = readFileSync(abs, "utf8");
+  if (fileText.length > VERIFY_MAX_FILE_CHARS) {
+    throw new Error(`"${rel}" is ${fileText.length} characters, over the ${VERIFY_MAX_FILE_CHARS} verify limit. Split the component, or verify its main file.`);
+  }
+
+  const entry = readLedgerEntries(input.project_id)
+    .filter((e) => e.file_path && normalizeRelPath(e.file_path) === rel)
+    .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
+    .pop();
+  if (!entry) {
+    throw new Error(
+      `No ledger entry for project "${input.project_id}" is attached to "${rel}". Pass this file_path to recommend_component (or record_component_decision) first so there is a checklist to verify against.`
+    );
+  }
+  if (!entry.checklist || entry.checklist.length === 0) {
+    throw new Error(`The ledger entry for "${rel}" has no checklist (verdict ${entry.verdict}, reason ${entry.reason}); nothing to verify against.`);
+  }
+  if (!ANTHROPIC_API_KEY) throw new Error(MISSING_API_KEY_MESSAGE);
+
+  // Design facts to detect divergence against, when the project's design
+  // system is a Figma registration with stored evidence.
+  const registration = getRegisteredDesignSystem(input.project_id);
+  const evidence = registration ? buildFigmaEvidenceBlock(registration, entry.component_need, entry.checklist) : { block: "", names: [] as string[] };
+  const designBlock =
+    `\n\nChosen design: ${entry.chosen_candidate ?? "(none -- custom build)"}; verdict recorded: ${entry.verdict} (${entry.coverage ?? "no coverage"}).` + evidence.block;
+
+  const userMessage = `component_need: ${entry.component_need}\ndomain: ${entry.domain}\n\nChecklist:\n${entry.checklist
+    .map((c, i) => `${i + 1}. ${c}`)
+    .join("\n")}${designBlock}\n\nSource of ${rel}:\n<<<FILE\n${fileText}\nFILE>>>`;
+
+  const data = await streamAnthropicMessage({
+    model: MODEL,
+    max_tokens: 16384,
+    ...scoringThinkingParams(),
+    system: [{ type: "text", text: buildVerifySystemPrompt(evidence.names.length > 0), cache_control: { type: "ephemeral" } }],
+    messages: [{ role: "user", content: userMessage }],
+  });
+  if (data.stop_reason === "max_tokens") throw new Error("Verification response was truncated (stop_reason: max_tokens); retry.");
+  const text = data.content.filter((b) => b.type === "text").map((b) => b.text ?? "").join("\n").trim();
+  if (!text) throw new Error(`Verification response had no text (stop_reason: ${data.stop_reason ?? "unknown"}).`);
+  let parsed: { items?: unknown; divergences?: unknown };
+  try {
+    parsed = JSON.parse(extractJson(text));
+  } catch {
+    throw new Error("Verification response did not parse as JSON; retry.");
+  }
+
+  const items = reconcileVerification(entry.checklist, parsed.items, fileText);
+  const divCheck = reconcileDivergences(parsed.divergences, evidence.block, evidence.names, fileText);
+  const divergences = divCheck.kept;
+  const summary = {
+    pass: items.filter((i) => i.status === "pass").length,
+    fail: items.filter((i) => i.status === "fail").length,
+    unverified: items.filter((i) => i.status === "unverified").length,
+    total: items.length,
+  };
+  const fileSha = createHash("sha256").update(fileText).digest("hex");
+  const verification: ReceiptVerification = { verified_at: new Date().toISOString(), file_sha256: fileSha, summary, items, divergences };
+
+  // Overlay line (append-only, like the other ledger overlays) + the
+  // committed receipt, when the gate already minted one for this file.
+  try {
+    mkdirSync(dirname(VERIFICATIONS_PATH), { recursive: true });
+    appendFileSync(VERIFICATIONS_PATH, JSON.stringify({ ledger_entry_id: entry.id, project_id: input.project_id, file_path: rel, ...verification }) + "\n", "utf8");
+  } catch (err) {
+    console.error(JSON.stringify({ diagnostic: "verification_log_write_failed", message: String((err as Error)?.message ?? err) }));
+  }
+  let receipt: { updated: boolean; feature_id?: string } = { updated: false };
+  try {
+    receipt = attachVerificationToReceipt(PROJECT_ROOT, rel, verification);
+  } catch (err) {
+    console.error(JSON.stringify({ diagnostic: "receipt_verification_write_failed", message: String((err as Error)?.message ?? err) }));
+  }
+
+  return {
+    ledger_entry_id: entry.id,
+    file_path: rel,
+    file_sha256: fileSha,
+    summary,
+    items,
+    divergences,
+    divergences_dropped: divCheck.dropped,
+    receipt,
+    _meta: buildMeta(data.timings, data.usage),
+  };
+}
+
+/** Lets a caller tell "registered" from "not registered" without trying to register (which could replace). */
+function designSystemStatus(projectId: string | undefined): { design_system?: { registered: boolean; source_kind?: string; candidate_count?: number } } {
+  if (!projectId) return {};
+  const reg = getRegisteredDesignSystem(projectId);
+  return { design_system: reg ? { registered: true, source_kind: reg.source_kind, candidate_count: reg.candidate_count } : { registered: false } };
+}
+
+export type ChecklistBasis = "figma-evidenced" | "inferred" | "general-practice";
+
+export interface ChecklistItem {
+  item: string;
+  basis: ChecklistBasis;
+  /** figma-evidenced only: the stated fact from the design file the item rests on. */
+  evidence?: string;
+}
+
 export interface ExtractionResult {
   checklist: string[];
+  /** Same items as `checklist`, each tagged with what it rests on. */
+  checklist_items: ChecklistItem[];
+  /** Set when stored Figma evidence for this project was shown to the extractor. */
+  grounded_in: { project_id: string; candidates: string[] } | null;
+  /** Only when project_id was passed: whether a design system is registered for it, so the caller knows whether registering is needed. */
+  design_system?: { registered: boolean; source_kind?: string; candidate_count?: number };
   extraction_confidence: "high" | "medium" | "low";
   _meta: NonNullable<JudgmentResult["_meta"]>;
 }
@@ -1592,7 +2068,7 @@ type ExtractionOutcome = { ok: true; result: ExtractionResult } | { ok: false; r
 // applies the same local skip-list short-circuit as recommend_component,
 // for the same reason (trivial primitives shouldn't cost an API call here
 // either).
-async function runExtraction(input: { component_need: string; domain: string }): Promise<ExtractionOutcome> {
+async function runExtraction(input: { component_need: string; domain: string; project_id?: string }): Promise<ExtractionOutcome> {
   const startMs = Date.now();
 
   if (isSkipListMatch(input.component_need)) {
@@ -1601,6 +2077,9 @@ async function runExtraction(input: { component_need: string; domain: string }):
       ok: true,
       result: {
         checklist: [],
+        checklist_items: [],
+        grounded_in: null,
+        ...designSystemStatus(input.project_id),
         extraction_confidence: "high",
         _meta: {
           total_ms: elapsedMs,
@@ -1616,11 +2095,16 @@ async function runExtraction(input: { component_need: string; domain: string }):
     throw new Error(MISSING_API_KEY_MESSAGE);
   }
 
-  const userMessage = `component_need: ${input.component_need}\ndomain: ${input.domain}`;
+  // 4c: ground the checklist in what the project's Figma file actually says.
+  const registration = input.project_id ? getRegisteredDesignSystem(input.project_id) : null;
+  const evidence = registration ? buildFigmaEvidenceBlock(registration, input.component_need, undefined) : { block: "", names: [] as string[] };
+  const grounded = evidence.names.length > 0;
+  const userMessage = `component_need: ${input.component_need}\ndomain: ${input.domain}${evidence.block}`;
 
   const data = await streamAnthropicMessage({
     model: MODEL,
-    max_tokens: 1024,
+    // Ceiling only; thinking counts against it (see the scoring pass).
+    max_tokens: 4096,
     system: [
       {
         type: "text",
@@ -1650,7 +2134,7 @@ async function runExtraction(input: { component_need: string; domain: string }):
   }
 
   const extracted = extractJson(finalText);
-  let parsed: { checklist?: unknown };
+  let parsed: { checklist?: unknown; checklist_items?: unknown };
   try {
     parsed = JSON.parse(extracted);
   } catch {
@@ -1658,12 +2142,31 @@ async function runExtraction(input: { component_need: string; domain: string }):
     return { ok: false, raw: extracted };
   }
 
-  const checklist = Array.isArray(parsed.checklist) ? parsed.checklist.filter((item): item is string => typeof item === "string") : [];
+  // Accept the tagged shape, or a plain string list (older prompt/model drift).
+  const BASES = new Set<ChecklistBasis>(["figma-evidenced", "inferred", "general-practice"]);
+  const items: ChecklistItem[] = [];
+  if (Array.isArray(parsed.checklist_items)) {
+    for (const raw of parsed.checklist_items as Array<Record<string, unknown>>) {
+      if (!raw || typeof raw.item !== "string" || !raw.item.trim()) continue;
+      let basis = BASES.has(raw.basis as ChecklistBasis) ? (raw.basis as ChecklistBasis) : "inferred";
+      const evidenceText = typeof raw.evidence === "string" ? raw.evidence.trim() : "";
+      // Server-side, not trusted from the model: "figma-evidenced" is only
+      // credible when Figma evidence was actually in the prompt and the item
+      // cites the fact it rests on.
+      if (basis === "figma-evidenced" && (!grounded || !evidenceText)) basis = "inferred";
+      items.push({ item: raw.item.trim(), basis, ...(basis === "figma-evidenced" ? { evidence: evidenceText } : {}) });
+    }
+  } else if (Array.isArray(parsed.checklist)) {
+    for (const t of parsed.checklist) if (typeof t === "string" && t.trim()) items.push({ item: t.trim(), basis: "inferred" });
+  }
 
   return {
     ok: true,
     result: {
-      checklist,
+      checklist: items.map((i) => i.item),
+      checklist_items: items,
+      grounded_in: grounded && input.project_id ? { project_id: input.project_id, candidates: evidence.names } : null,
+      ...designSystemStatus(input.project_id),
       extraction_confidence: estimateExtractionConfidence(input.component_need),
       _meta: buildMeta(data.timings, data.usage),
     },
@@ -1700,10 +2203,79 @@ export function isBoundaryRisk(result: JudgmentResult): boolean {
   if (!Array.isArray(items) || items.length === 0) return true; // malformed -- be conservative
 
   const total = items.length;
-  if (total !== 8) return true; // extraction didn't follow the fixed-8 instruction -- the precomputed boundary table doesn't apply, so don't trust a single run
-
   const met = items.filter((item) => item.met === true).length;
-  return BOUNDARY_RISK_MET_COUNTS_FOR_8_ITEMS.has(met);
+  return isNearVerdictBoundary(met, total);
+}
+
+export interface StabilityReport {
+  passes: number;
+  /** Per-pass count of met items, e.g. [5, 7, 6] (same-length checklists only). */
+  met_per_pass?: number[];
+  /** "5-7 of 9" -- the spread of coverage across passes. */
+  coverage_spread?: string;
+  /** False when the passes scored different item lists (each pass re-extracted its own), so item-level agreement is not meaningful. */
+  items_comparable: boolean;
+  /** Items the passes did not agree on, with the vote. Empty when every item was unanimous. */
+  split_items?: Array<{ requirement: string; met_votes: string }>;
+  unanimous_items?: number;
+}
+
+const normReq = (t: string) => t.replace(/\s+/g, " ").trim().toLowerCase();
+
+/**
+ * Item-level variance across the scoring passes the ensemble already paid
+ * for -- free to compute. Reporting only: it never changes the verdict,
+ * coverage or confidence. Null when fewer than two passes have a checklist.
+ */
+export function summarizeStability(
+  perPass: Array<Array<{ requirement?: string; met?: boolean }> | null | undefined>,
+  opts: { providedChecklist?: string[] } = {}
+): StabilityReport | null {
+  type Item = { requirement?: string; met?: boolean };
+  const lists = perPass.filter((l): l is Item[] => Array.isArray(l) && l.length > 0);
+  if (lists.length < 2) return null;
+  // A caller-provided checklist is fixed input and the passes return its items
+  // in order (the model sometimes shortens the wording), so match by position
+  // when every pass has exactly that many items. An extracted checklist is
+  // different per pass, so there the wording must match.
+  const provided = opts.providedChecklist;
+  const byPosition = !!provided && provided.length > 0 && lists.every((l) => l.length === provided.length);
+  const sameItems =
+    byPosition ||
+    lists.every((l) => l.length === lists[0].length && l.every((it, i) => normReq(it.requirement ?? "") === normReq(lists[0][i].requirement ?? "")));
+  if (!sameItems) return { passes: lists.length, items_comparable: false };
+  const label = (i: number) => (byPosition ? provided![i] : lists[0][i].requirement ?? "");
+  const total = lists[0].length;
+  const metCounts = lists.map((l) => l.filter((it) => it.met === true).length);
+  const lo = Math.min(...metCounts), hi = Math.max(...metCounts);
+  const split: NonNullable<StabilityReport["split_items"]> = [];
+  lists[0].forEach((it, i) => {
+    const votes = lists.filter((l) => l[i].met === true).length;
+    if (votes !== 0 && votes !== lists.length) split.push({ requirement: label(i).slice(0, 160), met_votes: `${votes}/${lists.length}` });
+  });
+  return {
+    passes: lists.length,
+    met_per_pass: metCounts,
+    coverage_spread: lo === hi ? `${lo} of ${total} in every pass` : `${lo}-${hi} of ${total}`,
+    items_comparable: true,
+    split_items: split,
+    unanimous_items: total - split.length,
+  };
+}
+
+// Generalizes BOUNDARY_RISK_MET_COUNTS_FOR_8_ITEMS to any checklist size: a
+// single run is risky when one item's judgment flipping (met +/- 1) would
+// move coverage into a different band (<40% custom_build, 40-79% low-
+// confidence use_existing, >=80% high-confidence use_existing). For 8 items
+// this yields exactly {3, 4, 6, 7}. Before, any total other than 8 -- e.g. a
+// caller-provided 9-item checklist -- always paid for a 2nd pass.
+export function isNearVerdictBoundary(met: number, total: number): boolean {
+  const band = (m: number) => {
+    const c = m / total;
+    return c < 0.4 ? 0 : c < 0.8 ? 1 : 2;
+  };
+  const here = band(met);
+  return (met > 0 && band(met - 1) !== here) || (met < total && band(met + 1) !== here);
 }
 
 // One JSON line per call that reached the API. Never throws -- a logging
@@ -1868,6 +2440,42 @@ export interface DesignSystemCandidate {
   figma?: FigmaCandidateInfo;
 }
 
+// What register_design_system returns for `registration`: the full object, or
+// (for a large one) everything except the candidates list plus an overview. The
+// stored registration is untouched; this is only the response view.
+export function registrationResponseView(
+  registration: DesignSystemRegistration,
+  includeCandidates: boolean | undefined
+): Record<string, unknown> {
+  const full = includeCandidates ?? registration.candidates.length <= REGISTER_FULL_LIST_MAX;
+  const warnings: string[] = [];
+  if (registration.candidate_count === 0) {
+    warnings.push("0 candidates registered: recommend_component has nothing to score against.");
+  } else if (registration.source_kind !== "manifest" && registration.candidate_count < 5) {
+    warnings.push(
+      `Only ${registration.candidate_count} candidate(s) registered. If that is fewer than expected, check figma_pages / figma_exclude_pages or the directory_path.`
+    );
+  }
+  if (full) return warnings.length ? { ...registration, warnings } : { ...registration };
+  const { candidates, ...rest } = registration;
+  const pages: Record<string, number> = {};
+  for (const c of candidates) {
+    const page = c.figma?.page?.trim();
+    if (page) pages[page] = (pages[page] ?? 0) + 1;
+  }
+  return {
+    ...rest,
+    candidates_omitted: candidates.length,
+    candidates_preview: candidates.slice(0, 10).map((c) => (c.figma?.page ? `${c.name} (${c.figma.page.trim()})` : c.name)),
+    ...(Object.keys(pages).length ? { candidates_by_page: pages } : {}),
+    ...(warnings.length ? { warnings } : {}),
+    ...(registration.source_kind === "figma" && Object.keys(pages).length > 1
+      ? { figma_pages_hint: "Large Figma files are mostly sub-parts. Re-register with figma_pages: [<page names from candidates_by_page>] (or figma_exclude_pages) to score only the pages that hold real components." }
+      : {}),
+    hint: "Full candidate list omitted to save context; pass include_candidates: true to get it. The registration is stored in full.",
+  };
+}
+
 export interface DesignSystemRegistration {
   project_id: string;
   source_kind: "manifest" | "directory_scan" | "figma";
@@ -1902,6 +2510,37 @@ function readDesignSystems(): DesignSystemsFile {
 function writeDesignSystems(file: DesignSystemsFile): void {
   mkdirSync(dirname(DESIGN_SYSTEMS_PATH), { recursive: true });
   writeFileSync(DESIGN_SYSTEMS_PATH, JSON.stringify(file, null, 2), "utf8");
+}
+
+// Raw Figma facts (size, auto-layout, padding, gap, radius, nested instances,
+// text) captured at registration, one file per project, kept OUT of
+// design_systems.json so the scored candidate list stays small. Read back by
+// get_figma_evidence.
+const FIGMA_EVIDENCE_DIR = process.env.PATTERN_FIGMA_EVIDENCE_DIR ?? join(dirname(DESIGN_SYSTEMS_PATH), "figma_evidence");
+const figmaEvidencePath = (projectId: string) => join(FIGMA_EVIDENCE_DIR, `${projectId.replace(/[^A-Za-z0-9._-]/g, "_")}.json`);
+
+function writeFigmaEvidence(projectId: string, evidence: Record<string, FigmaEvidence> | null): void {
+  const path = figmaEvidencePath(projectId);
+  try {
+    if (!evidence || Object.keys(evidence).length === 0) {
+      // A re-registration replaces the old one entirely: never leave stale facts behind.
+      rmSync(path, { force: true });
+      return;
+    }
+    mkdirSync(FIGMA_EVIDENCE_DIR, { recursive: true });
+    writeFileSync(path, JSON.stringify({ project_id: projectId, captured_at: new Date().toISOString(), evidence }), "utf8");
+  } catch (err) {
+    console.error(JSON.stringify({ diagnostic: "figma_evidence_write_failed", message: String((err as Error)?.message ?? err) }));
+  }
+}
+
+function readFigmaEvidence(projectId: string): { captured_at: string; evidence: Record<string, FigmaEvidence> } | null {
+  try {
+    const parsed = JSON.parse(readFileSync(figmaEvidencePath(projectId), "utf8"));
+    return parsed && typeof parsed.evidence === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 // Read-only lookup used by runSinglePass. No project_id -> no lookup,
@@ -2232,7 +2871,10 @@ function readCandidateSource(scanRoot: string, rel: string): string | null {
 // summary for every scanned file still missing a valid one, then persist.
 // Sends up to 8000 chars of each such source file to Anthropic.
 async function summarizeRegistration(
-  registration: DesignSystemRegistration
+  registration: DesignSystemRegistration,
+  // The init wizard collects the key after this module loaded, so it passes it in.
+  apiKey: string | undefined = ANTHROPIC_API_KEY,
+  workspaceId: string | undefined = ANTHROPIC_WORKSPACE_ID
 ): Promise<SummarizeStats & { estimated_cost_usd: number; model: string }> {
   const scanRoot = resolveWithinRoot(PROJECT_ROOT, registration.source_path);
   if (!scanRoot) throw new Error(`source_path "${registration.source_path}" is outside the project root.`);
@@ -2240,7 +2882,7 @@ async function summarizeRegistration(
   const stats = await summarizeCandidates(
     registration.candidates,
     (rel) => readCandidateSource(scanRoot, rel),
-    makeAnthropicSummaryCall(ANTHROPIC_API_KEY!, ANTHROPIC_WORKSPACE_ID || undefined),
+    makeAnthropicSummaryCall(apiKey!, workspaceId || undefined),
     reused
   );
   const file = readDesignSystems();
@@ -2268,6 +2910,8 @@ export function registerDesignSystem(input: {
   figma_mode?: "components" | "frames";
   figma_pages?: string[];
   figma_exclude_pages?: string[];
+  /** Allow replacing an existing registration with a different source. */
+  replace?: boolean;
   // Internal: an already-fetched Figma file (the handler's figma_file_key
   // path), with the label to store as source_path.
   figma_file?: unknown;
@@ -2285,6 +2929,7 @@ export function registerDesignSystem(input: {
   let sourceKind: "manifest" | "directory_scan" | "figma";
   let sourcePath: string;
   let candidates: DesignSystemCandidate[];
+  let figmaEvidence: Record<string, FigmaEvidence> | null = null;
 
   if (input.figma_json_path || input.figma_file !== undefined) {
     sourceKind = "figma";
@@ -2310,6 +2955,7 @@ export function registerDesignSystem(input: {
     }
     const parsed = parseFigmaFile(raw, sourcePath, { mode: input.figma_mode, pages: input.figma_pages, excludePages: input.figma_exclude_pages });
     candidates = parsed.candidates;
+    figmaEvidence = parsed.evidence;
     // A real design system can define tens of thousands of components (one
     // 135 MB file had 14,135 standalone ones -- icons -- against 95 real UI
     // components). Scoring that many is slow, costly and noisy, so refuse and
@@ -2387,8 +3033,21 @@ export function registerDesignSystem(input: {
   };
 
   const file = readDesignSystems();
+  // An agent that cannot tell whether a design system is registered may try to
+  // register one "to be safe"; with a different source that would silently
+  // destroy the real one (and its stored Figma evidence). Refuse unless asked.
+  const existing = file[input.project_id];
+  if (existing && !input.replace && (existing.source_kind !== sourceKind || existing.source_path !== sourcePath)) {
+    throw new Error(
+      `Project "${input.project_id}" already has a design system registered (${existing.source_kind}: ${existing.source_path}, ${existing.candidate_count} components). ` +
+        `Registering ${sourceKind}: ${sourcePath} would REPLACE it. Do not do that on your own: use the existing registration as is. ` +
+        `If the user has asked to switch design systems, call register_design_system again with replace: true. ` +
+        `(Re-registering the same source to refresh it needs no flag.)`
+    );
+  }
   file[input.project_id] = registration;
   writeDesignSystems(file);
+  writeFigmaEvidence(input.project_id, figmaEvidence);
   return registration;
 }
 
@@ -2610,6 +3269,90 @@ function withLatestLiveness(entry: LedgerEntry): LedgerEntry {
   return { ...entry, live_status: latest.live_status, last_verified_live: latest.timestamp };
 }
 
+// Overlay store for file_path attached to an existing ledger entry after
+// the fact (record_component_decision's file_path). Same append-only,
+// latest-wins-at-read-time convention as the liveness overlay above: the
+// ledger line itself ("file_path ... set once at write time") is never
+// mutated, a later attach is a new observation merged in by
+// readLedgerEntries, which is also the only thing the enforcement gate reads.
+const LEDGER_FILE_PATHS_PATH =
+  process.env.PATTERN_LEDGER_FILE_PATHS_PATH ?? join(homedir(), ".pattern", "ledger_file_paths.jsonl");
+
+export interface LedgerFilePathRecord {
+  id: string;
+  timestamp: string;
+  ledger_entry_id: string;
+  project_id: string;
+  file_path: string;
+}
+
+function appendLedgerFilePathRecord(record: LedgerFilePathRecord): void {
+  mkdirSync(dirname(LEDGER_FILE_PATHS_PATH), { recursive: true });
+  appendFileSync(LEDGER_FILE_PATHS_PATH, JSON.stringify(record) + "\n", "utf8");
+}
+
+// Read once per readLedgerEntries call (not per entry). Later lines win.
+function readLedgerFilePathOverlay(): Map<string, string> {
+  const overlay = new Map<string, string>();
+  let raw: string;
+  try {
+    raw = readFileSync(LEDGER_FILE_PATHS_PATH, "utf8");
+  } catch {
+    return overlay;
+  }
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const parsed = JSON.parse(line);
+      if (parsed && typeof parsed.ledger_entry_id === "string" && typeof parsed.file_path === "string") {
+        overlay.set(parsed.ledger_entry_id, parsed.file_path);
+      }
+    } catch {
+      // skip malformed line
+    }
+  }
+  return overlay;
+}
+
+export function normalizeRelPath(p: string): string {
+  return p.trim().replace(/\\/g, "/").replace(/^\.\//, "");
+}
+
+// Attaches file_path to the latest matching ledger entry without re-scoring.
+// Never throws on "no match": the caller reports it, because the decision
+// itself was still recorded and a missing ledger entry is guidance, not failure.
+export function attachFilePathToLedger(input: {
+  project_id: string;
+  component_need: string;
+  file_path: string;
+  feature_id?: string;
+}): { attached: true; ledger_entry_id: string; feature_id: string; file_path: string } | { attached: false; warning: string } {
+  const needLower = input.component_need.trim().toLowerCase();
+  const candidates = readLedgerEntries(input.project_id).filter((e) =>
+    input.feature_id ? e.feature_id === input.feature_id : e.component_need.trim().toLowerCase() === needLower
+  );
+  if (candidates.length === 0) {
+    return {
+      attached: false,
+      warning:
+        `No recommend_component ledger entry found for project_id="${input.project_id}" ` +
+        (input.feature_id ? `feature_id="${input.feature_id}"` : `component_need="${input.component_need}"`) +
+        `, so file_path was not attached and the enforcement gate will not match it. ` +
+        `The decision itself was recorded. Call recommend_component for this need (with file_path set) first.`,
+    };
+  }
+  const latest = candidates.reduce((a, b) => (new Date(b.timestamp).getTime() >= new Date(a.timestamp).getTime() ? b : a));
+  const relPath = normalizeRelPath(input.file_path);
+  appendLedgerFilePathRecord({
+    id: randomUUID(),
+    timestamp: new Date().toISOString(),
+    ledger_entry_id: latest.id,
+    project_id: input.project_id,
+    file_path: relPath,
+  });
+  return { attached: true, ledger_entry_id: latest.id, feature_id: latest.feature_id, file_path: relPath };
+}
+
 // Feature 2 P3's overlay -- same append-only/latest-wins convention as
 // ledger_liveness.jsonl above, kept as a fully separate file/function pair
 // rather than folded into the liveness overlay: these two overlays answer
@@ -2813,6 +3556,7 @@ export function readLedgerEntries(projectId: string): LedgerEntry[] {
     return [];
   }
   const entries: LedgerEntry[] = [];
+  const filePathOverlay = readLedgerFilePathOverlay();
   for (const line of raw.split("\n")) {
     if (!line.trim()) continue;
     try {
@@ -2825,7 +3569,7 @@ export function readLedgerEntries(projectId: string): LedgerEntry[] {
         const rawEntry = parsed as Partial<LedgerEntry>;
         const normalized: LedgerEntry = {
           ...(rawEntry as LedgerEntry),
-          file_path: rawEntry.file_path ?? null,
+          file_path: (rawEntry.id && filePathOverlay.get(rawEntry.id)) || (rawEntry.file_path ?? null),
           snapshot_ref: rawEntry.snapshot_ref ?? null,
           last_verified_live: rawEntry.last_verified_live ?? null,
           live_status: rawEntry.live_status ?? "unknown",
@@ -3691,6 +4435,8 @@ async function judgeComponent(input: {
   // the tool should surface, not paper over with a confident-sounding verdict.
   if (majorityCount < passes.length) base.confidence = "low";
   base.ensemble = { triggered: true, runs: verdicts, agreement };
+  const stability = summarizeStability(passes.map((p) => p.result.requirements_checked), { providedChecklist: input.checklist });
+  if (stability) base.stability = stability;
   // Captured before aggregateMeta overwrites base._meta (same object as
   // winningPass.result._meta) with a fresh summed-across-passes object --
   // scoring_fetch isn't summed like cost/tokens, it describes whichever
@@ -3805,6 +4551,8 @@ export interface JudgmentResult {
     reference?: ReferenceEntry | ReferenceEntry[] | null;
   } | null;
   ensemble?: { triggered: boolean; runs?: string[]; agreement?: string };
+  /** Only when 2+ scoring passes ran: how much the passes agreed item by item. Absent on a single pass (no variance information). */
+  stability?: StabilityReport;
   past_decision_signal?: { considered: boolean; note: string } | null;
   checklist_source?: "extracted" | "provided";
   // Present and true only when this response was served from the ledger
@@ -4241,7 +4989,13 @@ export function extractJson(text: string): string {
 // as possible, before the crash handlers -- see the comment there).
 const server = new Server(
   { name: "pattern-mcp", version: PACKAGE_VERSION },
-  { capabilities: { tools: {} } }
+  {
+    capabilities: { tools: {} },
+    // Tells the agent when and how to use Pattern without the user asking
+    // (see agent-guidance.ts). PATTERN_NO_INSTRUCTIONS=1 omits it, for A/B
+    // measurement or if a client's system prompt is too crowded.
+    ...(process.env.PATTERN_NO_INSTRUCTIONS ? {} : { instructions: SERVER_INSTRUCTIONS }),
+  }
 );
 
 // Standard MCP tool-call analytics (tool name, duration, success/failure,
@@ -4319,7 +5073,10 @@ const ALL_TOOLS = [
         "same way install_command is shown before running -- it's real " +
         "spend against the user's own API key, not internal bookkeeping " +
         "to keep from them. This call scores ONLY against the project's " +
-        "own registered candidates. A custom_build verdict " +
+        "own registered candidates, using Jev when TYPESAFE_API_KEY is set " +
+        "(fast; a match carries design_system_match instead of a checklist) " +
+        "and Anthropic otherwise or to write the gap list when Jev finds " +
+        "nothing (see jev_screen). A custom_build verdict " +
         "with reason no_candidates_found may also carry a top-level " +
         "design_system_recall_check field -- a deterministic, zero-cost " +
         "keyword-overlap check flagging registered candidates that share " +
@@ -4362,7 +5119,10 @@ const ALL_TOOLS = [
         "grouped correctly and never mixed with another project's. Pass " +
         "time_saved_minutes (optional) if you have a genuine estimate of how " +
         "much time this decision saved you -- this is your own self-reported " +
-        "number, never computed or verified by Pattern.",
+        "number, never computed or verified by Pattern. Pass file_path (and, if " +
+        "needed, feature_id) to also attach the implementing file to the matching " +
+        "recommend_component ledger entry without re-scoring -- that is what the " +
+        "enforcement gate (pattern-check-gate) reads; the decision log itself is not.",
       inputSchema: RECORD_DECISION_INPUT_SCHEMA,
     },
     {
@@ -4499,6 +5259,32 @@ const ALL_TOOLS = [
       inputSchema: BACKFILL_LEDGER_SNAPSHOT_REF_INPUT_SCHEMA,
     },
     {
+      name: VERIFY_COMPONENT_TOOL_NAME,
+      description:
+        "Run AFTER building the component. Checks the built file against the " +
+        "requirement checklist recorded by recommend_component for that file_path, " +
+        "item by item: pass / fail / unverified, each backed by a verbatim quote " +
+        "from the file that the server confirms is really in it (an unquotable " +
+        "pass is downgraded to unverified). Also lists divergences from the " +
+        "chosen design (e.g. a size or spacing that differs from the Figma values). " +
+        "Writes the outcome into the committed receipt (schema v2) when one exists. " +
+        "Judges what the code says, not how it renders; it does not run the component. " +
+        "Costs one model call (typically a few cents).",
+      inputSchema: VERIFY_COMPONENT_INPUT_SCHEMA,
+    },
+    {
+      name: GET_FIGMA_EVIDENCE_TOOL_NAME,
+      description:
+        "Returns the raw Figma facts captured when a Figma design system was " +
+        "registered: size, auto-layout direction/gap/padding/radius, the " +
+        "nested component instances (dependencies), literal text, and a " +
+        "trimmed layer tree, read from the component's first variant. Local " +
+        "read only, no API call. Use it to ground a requirement in what the " +
+        "design actually says (e.g. exact dimensions) instead of a summary. " +
+        "Only available for components-mode registrations.",
+      inputSchema: GET_FIGMA_EVIDENCE_INPUT_SCHEMA,
+    },
+    {
       name: REGISTER_DESIGN_SYSTEM_TOOL_NAME,
       description:
         "Registers THIS project's own design system as the candidate pool " +
@@ -4564,7 +5350,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   }
 
   if (request.params.name === EXTRACT_REQUIREMENTS_TOOL_NAME) {
-    const args = request.params.arguments as { component_need: string; domain: string };
+    const args = request.params.arguments as { component_need: string; domain: string; project_id?: string };
 
     // Same session-cap protection as recommend_component, extended to
     // this tool since it's a real API call too (skip-list hits excluded,
@@ -4609,15 +5395,33 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       source: string;
       timestamp?: string;
       time_saved_minutes?: number;
+      file_path?: string;
+      feature_id?: string;
     };
 
     try {
+      // Validate before writing anything, so a bad path never leaves a
+      // half-applied record behind.
+      if (args.file_path !== undefined && (!args.file_path.trim() || resolveWithinRoot(PROJECT_ROOT, normalizeRelPath(args.file_path)) === null)) {
+        throw new Error(
+          `file_path "${args.file_path}" must be a non-empty path relative to the project root (${PROJECT_ROOT}) that stays inside it. Nothing was recorded.`
+        );
+      }
       const entry = recordDecision(args);
+      const ledger =
+        args.file_path !== undefined
+          ? attachFilePathToLedger({
+              project_id: args.project_id,
+              component_need: args.component_need,
+              file_path: args.file_path,
+              feature_id: args.feature_id,
+            })
+          : undefined;
       return {
         content: [
           {
             type: "text",
-            text: JSON.stringify({ status: "recorded", project_id: args.project_id, entry }),
+            text: JSON.stringify({ status: "recorded", project_id: args.project_id, entry, ...(ledger ? { ledger } : {}) }),
           },
         ],
       };
@@ -4802,6 +5606,48 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
   }
 
+  if (request.params.name === VERIFY_COMPONENT_TOOL_NAME) {
+    const args = (request.params.arguments ?? {}) as { project_id?: string; file_path?: string };
+    try {
+      if (!args.project_id || !args.file_path) throw new Error("project_id and file_path are required.");
+      if (sessionCallCount >= SESSION_CALL_CAP) {
+        throw new Error(
+          `Session call cap (${SESSION_CALL_CAP}) reached. This protects against runaway costs on your API key. Restart the MCP server to reset the counter, or set PATTERN_SESSION_CAP to raise the limit.`
+        );
+      }
+      sessionCallCount++;
+      const result = await runVerifyComponent({ project_id: args.project_id, file_path: args.file_path });
+      return { content: [{ type: "text", text: JSON.stringify(result) }] };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (/Anthropic API error \d+/.test(message)) captureApiError({ tool: VERIFY_COMPONENT_TOOL_NAME, message });
+      return { content: [{ type: "text", text: `Error: ${message}` }], isError: true };
+    }
+  }
+
+  if (request.params.name === GET_FIGMA_EVIDENCE_TOOL_NAME) {
+    const args = (request.params.arguments ?? {}) as { project_id?: string; node_id?: string; name?: string };
+    const fail = (message: string) => ({ content: [{ type: "text", text: message }], isError: true });
+    if (!args.project_id) return fail("project_id is required.");
+    if (!args.node_id && !args.name) return fail("Pass node_id or name.");
+    const stored = readFigmaEvidence(args.project_id);
+    if (!stored) {
+      return fail(
+        `No Figma evidence stored for project_id "${args.project_id}". It is captured when a Figma file is registered in components mode (frames mode and non-Figma sources have none); re-run register_design_system.`
+      );
+    }
+    const all = Object.values(stored.evidence);
+    let matches: FigmaEvidence[];
+    if (args.node_id) matches = all.filter((e) => e.node_id === args.node_id);
+    else {
+      const q = args.name!.trim().toLowerCase();
+      const exact = all.filter((e) => e.name.toLowerCase() === q);
+      matches = (exact.length > 0 ? exact : all.filter((e) => e.name.toLowerCase().includes(q))).slice(0, 5);
+    }
+    if (matches.length === 0) return fail(`No stored evidence matches ${args.node_id ? `node_id "${args.node_id}"` : `name "${args.name}"`} in project "${args.project_id}" (${all.length} components stored).`);
+    return { content: [{ type: "text", text: JSON.stringify({ captured_at: stored.captured_at, matches }, null, 2) }] };
+  }
+
   if (request.params.name === REGISTER_DESIGN_SYSTEM_TOOL_NAME) {
     const args = request.params.arguments as {
       project_id: string;
@@ -4813,6 +5659,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       figma_pages?: string[];
       figma_exclude_pages?: string[];
       summarize?: boolean;
+      include_candidates?: boolean;
+      replace?: boolean;
     };
 
     try {
@@ -4843,7 +5691,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
         const token = process.env.FIGMA_ACCESS_TOKEN;
         if (!token) {
-          throw new Error("figma_file_key needs FIGMA_ACCESS_TOKEN set in the environment (a Figma personal access token that can read the file). Alternatively save the file's JSON and pass figma_json_path, which needs no token and makes no network call.");
+          throw new Error(
+            "figma_file_key needs FIGMA_ACCESS_TOKEN (a Figma personal access token that can read the file) in THIS server's own environment: " +
+              "the `env` block of its entry in your MCP client config (e.g. ~/.claude.json), then restart the client. " +
+              "A variable exported in your shell, or a project .env file, does not reach a server the client launched. " +
+              "Set it yourself; never paste the token into a chat. " +
+              "Alternatively save the file's JSON (GET https://api.figma.com/v1/files/<file_key>) and pass figma_json_path, which needs no token and makes no network call."
+          );
         }
         registerInput = {
           project_id: args.project_id,
@@ -4852,6 +5706,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           figma_mode: args.figma_mode,
           figma_pages: args.figma_pages,
           figma_exclude_pages: args.figma_exclude_pages,
+          replace: args.replace,
         };
       }
       const registration = registerDesignSystem(registerInput);
@@ -4892,7 +5747,19 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
       }
       return {
-        content: [{ type: "text", text: JSON.stringify({ status: "registered", registration, ...(summaries ? { summaries } : {}) }) }],
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              status: "registered",
+              registration: registrationResponseView(registration, args.include_candidates),
+              // Where relative paths resolved from and where this registration lives:
+              // the server's root is often not the repo you are in.
+              resolved: { project_root: PROJECT_ROOT, design_systems_path: DESIGN_SYSTEMS_PATH },
+              ...(summaries ? { summaries } : {}),
+            }),
+          },
+        ],
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -4919,6 +5786,42 @@ const IDLE_CONNECT_NUDGE_MS = 20_000;
 // are registered near the top of this file now, before PACKAGE_VERSION's
 // definition -- see the comment there for why.
 
+// Registration for the init wizard: the same registerDesignSystem core the
+// tool uses, called in-process. For a folder, the wizard may also ask for
+// Haiku capability summaries (req.summarizeWith is the key it just
+// collected, which this process's ANTHROPIC_API_KEY constant cannot know).
+async function registerForWizard(req: WizardRegisterRequest): Promise<WizardRegisterResult> {
+  const projectId = deriveProjectId(PROJECT_ROOT);
+  const registration =
+    req.kind === "figma"
+      ? registerDesignSystem({
+          project_id: projectId,
+          figma_file: await fetchFigmaFile(req.fileKey, req.token),
+          figma_source_label: `figma:${req.fileKey}`,
+          figma_exclude_pages: req.excludePages,
+          replace: req.replace,
+        })
+      : registerDesignSystem({
+          project_id: projectId,
+          ...(req.kind === "directory" ? { directory_path: req.path } : { manifest_path: req.path }),
+          replace: req.replace,
+        });
+  const result: WizardRegisterResult = {
+    candidateCount: registration.candidates.length,
+    source: req.kind === "figma" ? `Figma file ${req.fileKey}` : req.path,
+  };
+  if (req.kind === "directory" && req.summarizeWith) {
+    try {
+      const stats = await summarizeRegistration(registration, req.summarizeWith.apiKey, req.summarizeWith.workspaceId);
+      result.summaries = { generated: stats.generated, costUsd: stats.estimated_cost_usd };
+    } catch (err) {
+      // The registration is already saved; a summary failure only costs match quality.
+      result.summaryError = err instanceof Error ? err.message : String(err);
+    }
+  }
+  return result;
+}
+
 async function main() {
   // `npx pattern-mcp init` -- the connect wizard -- exits without ever
   // starting the server. Checked before anything else so it can't be
@@ -4926,7 +5829,11 @@ async function main() {
   const argv = process.argv.slice(2);
   if (argv[0] === "init") {
     captureCliStarted("init", PACKAGE_VERSION);
-    await runConnect(PROJECT_ROOT, { yes: argv.includes("--yes") });
+    await runConnect(
+      PROJECT_ROOT,
+      { yes: argv.includes("--yes") },
+      { wizard: { projectId: deriveProjectId(PROJECT_ROOT), register: registerForWizard } },
+    );
     await shutdownTelemetry();
     // Explicit exit, not a bare return -- shutdownTelemetry races a
     // bounded timeout (see telemetry.ts) so this always reaches here

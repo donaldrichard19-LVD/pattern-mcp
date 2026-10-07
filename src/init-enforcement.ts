@@ -18,6 +18,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deriveProjectId } from "./project-id.js";
 import { closeRl, confirm, promptText, shellQuote, type PromptOptions } from "./prompt.js";
+import { GATE_INIT_COMMAND, HOOK_COMMAND, isLegacyGateInvocation } from "./gate-commands.js";
 
 const HOOK_MARKER = "pattern-check-gate-hook";
 
@@ -40,7 +41,8 @@ interface ClaudeSettings {
   [key: string]: unknown;
 }
 
-async function setupClaudeSettings(root: string, projectIdOverride: string | null, options: InitOptions): Promise<void> {
+// "written" is the only outcome after which a Claude Code session needs a restart.
+async function setupClaudeSettings(root: string, projectIdOverride: string | null, options: InitOptions): Promise<"written" | "already" | "skipped"> {
   const settingsPath = join(root, ".claude", "settings.json");
   let settings: ClaudeSettings = {};
   let existed = false;
@@ -50,22 +52,45 @@ async function setupClaudeSettings(root: string, projectIdOverride: string | nul
       settings = JSON.parse(readFileSync(settingsPath, "utf8")) as ClaudeSettings;
     } catch {
       console.log("  .claude/settings.json exists but isn't valid JSON -- skipping, fix it manually first.");
-      return;
+      return "skipped";
     }
   }
 
   const preToolUse: PreToolUseEntry[] = settings.hooks?.PreToolUse ?? [];
-  const alreadyInstalled = preToolUse.some((entry) =>
-    (entry.hooks ?? []).some((h) => typeof h.command === "string" && h.command.includes(HOOK_MARKER)),
-  );
+  const ours = (h: { command?: unknown }) => typeof h.command === "string" && h.command.includes(HOOK_MARKER);
+  const alreadyInstalled = preToolUse.some((entry) => (entry.hooks ?? []).some(ours));
   if (alreadyInstalled) {
-    console.log("  .claude/settings.json: hook already configured, skipping.");
-    return;
+    // Hooks written before 0.19.1 ran the hook bin through a bare npx (no
+    // `-p pattern-mcp`), which asks npm for a package that does not exist: the hook errors on every tool
+    // call and, since a hook error is non-blocking, the gate silently never runs.
+    // Repair those in place (keeping any env prefix), never touching other hooks.
+    let repaired = 0;
+    for (const entry of preToolUse) {
+      for (const h of entry.hooks ?? []) {
+        if (ours(h) && isLegacyGateInvocation(h.command as string)) {
+          h.command = (h.command as string).replace(/\bnpx\s+(?:(?:--yes|-y)\s+)?pattern-check-gate-hook\b/, HOOK_COMMAND);
+          repaired++;
+        }
+      }
+    }
+    if (repaired === 0) {
+      console.log("  .claude/settings.json: hook already configured, skipping.");
+      return "already";
+    }
+    console.log(`  .claude/settings.json: this hook uses the pre-0.19.1 command, which cannot run (it names an npm package that does not exist).`);
+    console.log(`  Updating it to: ${HOOK_COMMAND}`);
+    if (!(await confirm("  Write this?", options, true))) {
+      console.log("  Skipped.");
+      return "skipped";
+    }
+    writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n", "utf8");
+    console.log("  Written. Restart the Claude Code session so it picks up the change.");
+    return "written";
   }
 
   const command = projectIdOverride
-    ? `env PATTERN_PROJECT_ID=${shellQuote(projectIdOverride)} npx --yes pattern-check-gate-hook`
-    : "npx --yes pattern-check-gate-hook";
+    ? `env PATTERN_PROJECT_ID=${shellQuote(projectIdOverride)} ${HOOK_COMMAND}`
+    : HOOK_COMMAND;
 
   const newEntry: PreToolUseEntry = {
     matcher: "Edit|Write",
@@ -82,7 +107,7 @@ async function setupClaudeSettings(root: string, projectIdOverride: string | nul
   const proceed = await confirm("  Write this?", options, true);
   if (!proceed) {
     console.log("  Skipped.");
-    return;
+    return "skipped";
   }
 
   const merged: ClaudeSettings = {
@@ -95,6 +120,7 @@ async function setupClaudeSettings(root: string, projectIdOverride: string | nul
   mkdirSync(dirname(settingsPath), { recursive: true });
   writeFileSync(settingsPath, JSON.stringify(merged, null, 2) + "\n", "utf8");
   console.log("  Written.");
+  return "written";
 }
 
 function isGitHubRepo(root: string): { owner: string; repo: string } | null {
@@ -289,8 +315,9 @@ export async function runInit(root: string, options: InitOptions): Promise<void>
   const projectId = await promptText("Project id", derivedId, options);
   const projectIdOverride = projectId !== derivedId ? projectId : null;
 
+  let hook: "written" | "already" | "skipped" = "skipped";
   try {
-    await setupClaudeSettings(root, projectIdOverride, options);
+    hook = await setupClaudeSettings(root, projectIdOverride, options);
     await setupWorkflowFile(root, options);
     await maybeSetupBranchProtection(root, options);
   } finally {
@@ -300,6 +327,27 @@ export async function runInit(root: string, options: InitOptions): Promise<void>
   }
 
   console.log("\nDone. Review the changes with `git status` / `git diff`, then commit when ready.");
+  for (const line of initFollowUpNotes(projectId, hook)) console.log(line);
+}
+
+// What init cannot make true by itself, said explicitly: the hook is only read
+// when a Claude Code session starts, and the gate matches ledger entries by
+// project_id, so callers must use the same one.
+export function initFollowUpNotes(projectId: string, hook: "written" | "already" | "skipped"): string[] {
+  const notes: string[] = [""];
+  if (hook === "written") {
+    notes.push("Restart Claude Code: hooks are read when a session starts, so this hook will NOT fire in the session you ran init from.");
+  } else if (hook === "already") {
+    notes.push("The hook was already configured; if you changed it, restart Claude Code so the change is picked up.");
+  }
+  notes.push(
+    `The gate matches ledger entries by project_id. Pass project_id "${projectId}" to recommend_component and record_component_decision,`,
+    `and set file_path on recommend_component (or on record_component_decision afterwards) so the gate can find the entry.`,
+  );
+  if (hook === "already") {
+    notes.push("(An existing hook keeps whatever PATTERN_PROJECT_ID, if any, is in its command; check it matches.)");
+  }
+  return notes;
 }
 
 // Option B from BACKLOG.md's "Enforcement boundary setup" entry: piggyback
@@ -344,7 +392,7 @@ export async function offerEnforcementSetupOnce(root: string): Promise<void> {
       "",
       "Pattern -- enforcement boundary available (this will not print again)",
       "By default, Pattern is something the calling agent chooses to use.",
-      "An opt-in hook + CI check can require it instead: run `npx pattern-check-gate init`",
+      "An opt-in hook + CI check can require it instead: run `${GATE_INIT_COMMAND}`",
       "in your repo to set it up.",
       "Full details: https://github.com/donaldrichard19-LVD/pattern-mcp#enforcement-boundary-hook--ci-gate",
       "",

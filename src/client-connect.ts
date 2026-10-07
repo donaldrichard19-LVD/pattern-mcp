@@ -17,7 +17,23 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { SKILL_NAME } from "./agent-guidance.js";
+import { deriveProjectId } from "./project-id.js";
+import { findPatternEntry, patternServersInClaudeList, type ClaudeListServer } from "./server-entry.js";
 import { askLine, closeRl, confirm, type PromptOptions } from "./prompt.js";
+import { runInit } from "./init-enforcement.js";
+import {
+  newWizardState,
+  runDesignSystemStep,
+  runKeysSteps,
+  WIZARD_STEPS,
+  wizardIntro,
+  wizardSummary,
+  type WizardDeps,
+  type WizardEnv,
+  type WizardState,
+} from "./setup-wizard.js";
 
 export type ConnectOptions = PromptOptions;
 
@@ -47,25 +63,40 @@ function hasCommand(cmd: string, versionFlag = "--version"): boolean {
   }
 }
 
-function claudeCodeAlreadyConnected(): boolean {
+// Pattern servers Claude Code already has, under ANY name (a hand-made entry
+// for a dev checkout is "connected" too), with whether each one is healthy.
+function claudeCodePatternServers(): ClaudeListServer[] {
   try {
     const out = execFileSync("claude", ["mcp", "list"], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
       timeout: 10000,
     });
-    return /^pattern\b/m.test(out);
+    return patternServersInClaudeList(out);
   } catch {
-    return false;
+    return [];
   }
 }
 
-async function setupClaudeCode(apiKey: string | null, options: ConnectOptions): Promise<void> {
+async function setupClaudeCode(env: WizardEnv, options: ConnectOptions, state: WizardState): Promise<void> {
   if (!hasCommand("claude")) return;
   console.log("\nClaude Code detected (`claude` on PATH).");
 
-  if (claudeCodeAlreadyConnected()) {
-    console.log("  Already connected (`claude mcp list` shows pattern) -- skipping.");
+  const existing = claudeCodePatternServers();
+  if (existing.length > 0) {
+    const names = existing.map((s) => `"${s.name}"`).join(", ");
+    if (existing.some((s) => s.ok)) {
+      console.log(`  Already connected (\`claude mcp list\` shows Pattern as ${names}) -- skipping.`);
+      state.clientConnected = true;
+    } else {
+      console.log(
+        `  Pattern is already registered as ${names}, but Claude Code reports it failed to connect.\n` +
+          "  Not adding a second server. Run `npx -p pattern-mcp pattern doctor` to see why; the usual cause is a\n" +
+          "  local checkout without node_modules. To use the published package instead, re-add it under the same name:\n" +
+          `    claude mcp remove ${existing[0].name} -s user && claude mcp add -s user ${existing[0].name} -- npx --yes pattern-mcp@latest\n` +
+          "  (add -e ANTHROPIC_API_KEY=... and any other keys it had).",
+      );
+    }
     return;
   }
 
@@ -76,7 +107,7 @@ async function setupClaudeCode(apiKey: string | null, options: ConnectOptions): 
   );
 
   const args = ["mcp", "add", "pattern"];
-  if (apiKey) args.push("-e", `ANTHROPIC_API_KEY=${apiKey}`);
+  for (const [k, v] of Object.entries(env)) args.push("-e", `${k}=${v}`);
   if (everywhere) args.push("--scope", "user");
   args.push("--", SERVER_COMMAND, ...SERVER_ARGS);
 
@@ -90,9 +121,68 @@ async function setupClaudeCode(apiKey: string | null, options: ConnectOptions): 
   try {
     execFileSync("claude", args, { stdio: "inherit", timeout: 15000 });
     console.log("  Connected. Verify with `claude mcp list`.");
+    state.clientConnected = true;
   } catch {
     console.log("  `claude mcp add` failed -- see output above, or add it manually (README's Claude Code section).");
   }
+}
+
+// The Claude Code skill that makes the agent reach for Pattern on its own when
+// it is about to build UI (see agent-guidance.ts). Installed per user so it
+// applies in every project; SKILL.md ships in the package root and is the
+// single source (it is also the repo's tool-orientation doc).
+export function packagedSkillPath(): string {
+  return join(dirname(fileURLToPath(import.meta.url)), "..", "SKILL.md");
+}
+
+/**
+ * Copies SKILL.md to <home>/.claude/skills/pattern/SKILL.md after confirming.
+ * Never overwrites a file that is not a Pattern skill; replaces an older
+ * Pattern one only when the content differs. Returns what happened.
+ */
+export async function installPatternSkill(
+  options: ConnectOptions,
+  home: string = homedir(),
+): Promise<"installed" | "updated" | "current" | "skipped" | "foreign" | "missing"> {
+  const source = packagedSkillPath();
+  if (!existsSync(source)) return "missing";
+  const body = readFileSync(source, "utf8");
+  const target = join(home, ".claude", "skills", SKILL_NAME, "SKILL.md");
+
+  let existing: string | null = null;
+  try {
+    existing = readFileSync(target, "utf8");
+  } catch {
+    // not installed yet
+  }
+  if (existing !== null) {
+    if (!new RegExp(`^---[\\s\\S]*?\\nname:\\s*${SKILL_NAME}\\s*\\n`).test(existing)) {
+      console.log(`  ${target} exists and is not a Pattern skill -- leaving it alone.`);
+      return "foreign";
+    }
+    if (existing === body) {
+      console.log("  Pattern skill already installed and current.");
+      return "current";
+    }
+  }
+
+  console.log(
+    "\nPattern skill: lets Claude Code use Pattern on its own when it is about to build UI,\n" +
+      "so you never have to say \"use Pattern\".",
+  );
+  const ok = await confirm(
+    `  ${existing === null ? "Install" : "Update"} it at ${target}?`,
+    options,
+    true,
+  );
+  if (!ok) {
+    console.log("  Skipped.");
+    return "skipped";
+  }
+  mkdirSync(dirname(target), { recursive: true });
+  writeFileSync(target, body, "utf8");
+  console.log("  Written. Restart Claude Code so it picks up the skill.");
+  return existing === null ? "installed" : "updated";
 }
 
 interface McpServersConfig {
@@ -117,8 +207,9 @@ function readJsonConfig(path: string): { config: McpServersConfig; existed: bool
 async function mergeServerConfig(
   label: string,
   path: string,
-  apiKey: string | null,
+  env: WizardEnv,
   options: ConnectOptions,
+  state: WizardState,
 ): Promise<void> {
   const { config, existed, valid } = readJsonConfig(path);
   if (existed && !valid) {
@@ -127,13 +218,15 @@ async function mergeServerConfig(
   }
 
   const servers = { ...(config.mcpServers ?? {}) } as Record<string, unknown>;
-  if (servers.pattern) {
-    console.log(`\n${label}: pattern already configured in ${path} -- skipping.`);
+  const already = findPatternEntry(servers);
+  if (already) {
+    console.log(`\n${label}: Pattern already configured in ${path} (as "${already.name}") -- skipping.`);
+    state.clientConnected = true;
     return;
   }
 
   const entry: Record<string, unknown> = { command: SERVER_COMMAND, args: [...SERVER_ARGS] };
-  if (apiKey) entry.env = { ANTHROPIC_API_KEY: apiKey };
+  if (Object.keys(env).length > 0) entry.env = { ...env };
 
   console.log(`\n${existed ? "Merging into" : "Creating"} ${label} config at ${path}:`);
   console.log(
@@ -152,12 +245,13 @@ async function mergeServerConfig(
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, JSON.stringify(merged, null, 2) + "\n", "utf8");
   console.log(`Written. Restart ${label} to pick it up.`);
+  state.clientConnected = true;
 }
 
 function clientConfigHasPattern(path: string | null): boolean {
   if (!path) return false;
   const { config } = readJsonConfig(path);
-  return Boolean((config.mcpServers as Record<string, unknown> | undefined)?.pattern);
+  return findPatternEntry(config.mcpServers) !== null;
 }
 
 // Best-effort, read-only check across every client Pattern knows how to
@@ -173,7 +267,7 @@ function clientConfigHasPattern(path: string | null): boolean {
 // when it isn't).
 export function isAnyClientConnected(root: string): boolean {
   return (
-    claudeCodeAlreadyConnected() ||
+    claudeCodePatternServers().length > 0 ||
     clientConfigHasPattern(claudeDesktopConfigPath()) ||
     clientConfigHasPattern(join(root, ".cursor", "mcp.json"))
   );
@@ -194,7 +288,7 @@ function claudeDesktopConfigPath(): string | null {
   }
 }
 
-async function setupClaudeDesktop(apiKey: string | null, options: ConnectOptions): Promise<void> {
+async function setupClaudeDesktop(env: WizardEnv, options: ConnectOptions, state: WizardState): Promise<void> {
   const path = claudeDesktopConfigPath();
   if (!path) return;
   // Only offer this if Claude Desktop's own config directory already
@@ -202,7 +296,7 @@ async function setupClaudeDesktop(apiKey: string | null, options: ConnectOptions
   // without a CLI to query directly (unlike Claude Code's `claude
   // --version`).
   if (!existsSync(dirname(path))) return;
-  await mergeServerConfig("Claude Desktop", path, apiKey, options);
+  await mergeServerConfig("Claude Desktop", path, env, options, state);
 }
 
 // Cursor has no CLI to query and no reliable global config location
@@ -211,9 +305,9 @@ async function setupClaudeDesktop(apiKey: string | null, options: ConnectOptions
 // directory already present is real evidence Cursor has opened this
 // project, without guessing at a global install marker that doesn't
 // exist. Project-scoped `.cursor/mcp.json`, matching the README.
-async function setupCursor(root: string, apiKey: string | null, options: ConnectOptions): Promise<void> {
+async function setupCursor(root: string, env: WizardEnv, options: ConnectOptions, state: WizardState): Promise<void> {
   if (!existsSync(join(root, ".cursor"))) return;
-  await mergeServerConfig("Cursor", join(root, ".cursor", "mcp.json"), apiKey, options);
+  await mergeServerConfig("Cursor", join(root, ".cursor", "mcp.json"), env, options, state);
 }
 
 // Codex CLI's global config is TOML (~/.codex/config.toml), which this
@@ -233,7 +327,8 @@ async function setupCursor(root: string, apiKey: string | null, options: Connect
 // export is the one method that works the same way across every Codex
 // version and every other client here, since it never depends on a
 // client-specific config format at all.
-function offerCodexInstructions(apiKey: string | null): void {
+function offerCodexInstructions(env: WizardEnv): void {
+  const apiKey = env.ANTHROPIC_API_KEY ?? null;
   if (!existsSync(join(homedir(), ".codex"))) return;
   const lines = [
     "\nCodex CLI detected (~/.codex exists). Pattern doesn't auto-write Codex's",
@@ -264,39 +359,38 @@ function offerCodexInstructions(apiKey: string | null): void {
   console.log(lines.join("\n"));
 }
 
-async function promptApiKey(options: ConnectOptions): Promise<string | null> {
-  if (options.yes) return null;
-  console.log(
-    "\nYour ANTHROPIC_API_KEY can be written into whichever client configs you set up\n" +
-      "below (visible in plain text there and as you type it now), or you can skip\n" +
-      "and add it yourself later -- see README's \"Add your Anthropic API key\".",
-  );
-  const answer = (await askLine("Paste your ANTHROPIC_API_KEY now, or press Enter to skip: ")).trim();
-  return answer || null;
+export interface RunConnectExtras {
+  /** Design-system registration + project id for the guided steps; without it those steps are skipped. */
+  wizard?: WizardDeps;
+  fetchImpl?: typeof fetch;
 }
 
-export async function runConnect(root: string, options: ConnectOptions): Promise<void> {
-  console.log("Connecting Pattern to your MCP client(s)...");
+export async function runConnect(root: string, options: ConnectOptions, extras: RunConnectExtras = {}): Promise<void> {
+  const state = newWizardState();
+  const wizard = extras.wizard;
+  console.log(options.yes ? "Connecting Pattern to your MCP client(s)..." : wizardIntro());
 
   try {
-    const apiKey = await promptApiKey(options);
+    const env = await runKeysSteps(options, state, extras.fetchImpl);
 
+    if (!options.yes) console.log(`\n[3/${WIZARD_STEPS}] Connect your client`);
     let anyDetected = false;
     if (hasCommand("claude")) {
       anyDetected = true;
-      await setupClaudeCode(apiKey, options);
+      await setupClaudeCode(env, options, state);
+      state.skill = await installPatternSkill(options);
     }
     if (claudeDesktopConfigPath() && existsSync(dirname(claudeDesktopConfigPath()!))) {
       anyDetected = true;
-      await setupClaudeDesktop(apiKey, options);
+      await setupClaudeDesktop(env, options, state);
     }
     if (existsSync(join(root, ".cursor"))) {
       anyDetected = true;
-      await setupCursor(root, apiKey, options);
+      await setupCursor(root, env, options, state);
     }
     if (existsSync(join(homedir(), ".codex"))) {
       anyDetected = true;
-      offerCodexInstructions(apiKey);
+      offerCodexInstructions(env);
     }
 
     if (!anyDetected) {
@@ -304,19 +398,26 @@ export async function runConnect(root: string, options: ConnectOptions): Promise
         "\nNo supported MCP client was detected on this machine automatically.\n" + connectInstructionsText(),
       );
     }
+
+    if (wizard) {
+      await runDesignSystemStep(root, wizard, env, state, options);
+      if (!options.yes) {
+        console.log(`\n[5/${WIZARD_STEPS}] Enforcement (optional)`);
+        console.log("  A project hook plus a CI check that stops a new component shipping without a recorded Pattern decision.");
+        if (await confirm("  Set that up now?", options, false)) {
+          await runInit(root, options);
+          state.gate = "set up";
+        } else {
+          state.gate = "skipped";
+          console.log("  Skipped. Turn it on any time with: npx -p pattern-mcp pattern-check-gate init");
+        }
+      }
+    }
   } finally {
     closeRl();
   }
 
-  console.log(
-    "\nDone. Ask your agent to list its MCP tools and look for recommend_component.\n" +
-      "\nNext: Pattern judges components against YOUR design system, so register one first.\n" +
-      "Ask your agent to call register_design_system with one of:\n" +
-      "  figma_file_key      a Figma file (needs FIGMA_ACCESS_TOKEN)\n" +
-      "  directory_path      your components folder\n" +
-      "  manifest_path       a JSON manifest or Storybook index\n" +
-      "Until one is registered for your project_id, recommend_component returns an error saying so.",
-  );
+  console.log(wizardSummary(state, wizard?.projectId ?? deriveProjectId(root)));
 }
 
 // Option 1/#1 from the activation-funnel discussion: piggybacks on the

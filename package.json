@@ -1,11 +1,12 @@
 {
   "name": "pattern-mcp",
-  "version": "0.18.0",
+  "version": "0.21.0",
   "description": "Pattern checks a coding agent's UI decisions against real evidence before it builds, whether that means your own design system in code or Figma, or components from popular libraries. It helps the agent choose what the product actually needs without overbuilding. An opt-in enforcement boundary can make that check required, and every decision is recorded in an auditable ledger you can verify later.",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
     "pattern-mcp": "dist/index.js",
+    "pattern": "dist/cli.js",
     "pattern-check-gate": "dist/check-gate.js",
     "pattern-check-gate-hook": "dist/check-gate-hook.js"
   },
@@ -31,6 +32,7 @@
   "files": [
     "dist",
     "README.md",
+    "SKILL.md",
     "templates"
   ],
   "scripts": {
