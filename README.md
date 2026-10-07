@@ -662,6 +662,30 @@ receipt for the file to `schema_version: 2` by adding a `verification` block;
 the CI check matches on `file_path` alone, so v1 and v2 receipts are both
 accepted.
 
+**Components added inside existing files.** The check above looks at new
+files, so a component declared inside a file that already existed used to
+slip through. The CI check now also diffs each *modified* `.tsx`/`.jsx` file
+against the base branch and treats every PascalCase component name that
+did not exist before (a function, a `const X = () =>` / `memo` / `forwardRef`,
+or a class that extends something) as needing a decision. It is name-based,
+not size-based, so it has no threshold to tune. A new name is covered by
+either:
+
+- a receipt for that file whose `components` list names it. Mint one with
+  `pattern-check-gate write --file <path> --components Pill,Tag` after
+  `recommend_component` was called with that `file_path`; or
+- an explicit skip, a comment on the line above the declaration:
+  `// pattern-mcp:skip reason="CSS-only variant of Hero"`. The reason is
+  required, and every skip is shown in the PR as a workflow annotation and a
+  job-summary table, so an exemption is visible to a reviewer. A file-level
+  `// pattern-mcp:override reason="..."` skips every new component in that file.
+
+Limits: a component rewritten under the *same* name is not detected (the name
+is not new), and detection is line-start pattern matching, not a parser.
+Workflows installed before this change keep working: without `--base` the
+modified files are simply not inspected. Copy the new
+`templates/github-workflows/pattern-gate.yml` over your workflow to turn it on.
+
 The join between the two depends on `file_path` being passed to
 `recommend_component`/`record_component_decision` -- if it's omitted, the
 gate has nothing to match against and fails closed (blocks) rather than

@@ -38,18 +38,29 @@ jobs:
           BASE_REF: ${{ github.base_ref }}
         run: |
           ADDED=$(git diff --name-only --diff-filter=A "origin/${BASE_REF}...HEAD")
+          MODIFIED=$(git diff --name-only --diff-filter=M "origin/${BASE_REF}...HEAD")
           DELIM="PATTERN_FILES_$(date +%s%N)"
           {
             echo "files<<${DELIM}"
             echo "${ADDED}"
             echo "${DELIM}"
+            echo "modified<<${DELIM}"
+            echo "${MODIFIED}"
+            echo "${DELIM}"
           } >> "$GITHUB_OUTPUT"
       - name: Run pattern-check-gate verify
-        if: steps.diff.outputs.files != ''
+        if: steps.diff.outputs.files != '' || steps.diff.outputs.modified != ''
         env:
           ADDED_FILES: ${{ steps.diff.outputs.files }}
-        # One file name per line -> one argument each (--files must come last).
+          MODIFIED_FILES: ${{ steps.diff.outputs.modified }}
+          BASE_REF: ${{ github.base_ref }}
+        # One file name per line -> one array element each. The lists are passed as
+        # quoted array expansions, never interpolated into the script. Modified files
+        # are checked for components added inside them, compared against the base ref.
         # Interpolating the list straight into `run:` would execute every file
         # name after the first as a command, and let a hostile name inject shell.
         run: |
-          printf '%s\n' "$ADDED_FILES" | sed '/^$/d' | xargs -d '\n' -r npx --yes -p pattern-mcp@latest pattern-check-gate verify --project-root "$PWD" --files
+          mapfile -t ADDED < <(printf '%s\n' "$ADDED_FILES" | sed '/^$/d')
+          mapfile -t MODIFIED < <(printf '%s\n' "$MODIFIED_FILES" | sed '/^$/d')
+          if [ "${#ADDED[@]}" -eq 0 ] && [ "${#MODIFIED[@]}" -eq 0 ]; then exit 0; fi
+          npx --yes -p pattern-mcp@latest pattern-check-gate verify --project-root "$PWD" --base "origin/${BASE_REF}" --modified-files "${MODIFIED[@]}" --files "${ADDED[@]}"
