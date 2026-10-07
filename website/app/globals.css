@@ -148,6 +148,53 @@ button {
   }
 }
 
+@keyframes pt-hero {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes pt-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+@keyframes pt-grow {
+  0%,
+  100% {
+    transform: scaleX(1);
+  }
+  45% {
+    transform: scaleX(1.22);
+  }
+}
+.pt-grow {
+  transform-box: fill-box;
+  transform-origin: left center;
+  animation: pt-grow 2.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+.pt-hero {
+  animation: pt-hero 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.pt-bob {
+  animation: pt-bob 2.6s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .pt-hero,
+  .pt-bob,
+  .pt-grow {
+    animation: none;
+  }
+}
+
 @keyframes pt-breathe {
   0%,
   100% {

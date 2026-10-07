@@ -27,7 +27,7 @@ const INPUT_ROWS: Row[] = [
   ["project_id", "string, optional", "Enables per-project decision memory and the ledger. Omit to skip both entirely"],
   ["checklist", "string[], optional", "Skip internal extraction and score against this instead. Pairs with extract_requirements"],
   ["feature_id", "string, optional", "Joins this call's cost with a later report_build_cost/report_outcome_proxy call for the same feature"],
-  ["file_path", "string, optional", "The file you are about to write, passed BEFORE writing. The enforcement hook, the receipt, verify_component and check_ledger_liveness all match on it"],
+  ["file_path", "string, optional", "Where this decision is expected to be implemented, if known. Enables a later check_ledger_liveness check"],
 ];
 
 const OUTPUT_ROWS: Row[] = [
@@ -41,10 +41,6 @@ const OUTPUT_ROWS: Row[] = [
   ["ensemble", "{ triggered, runs, agreement }", "Present on every response; runs and agreement only when it fired"],
   ["past_decision_signal", "{ considered, note }", "Only when project_id was passed and a real past decision applied"],
   ["checklist_source", "extracted | provided", "Which path actually produced the checklist that got scored"],
-  ["scorer", '"jev" | absent', 'Present when Jev scored the call. A Jev match carries design_system_match instead of a checklist, and its confidence is never "high"'],
-  ["design_system_match", "{ components, score, alternatives[] }", "Jev result: the best-matching registered component(s) with an uncalibrated 0-1 score"],
-  ["jev_screen", "{ verdict, closest }", "Set when Jev found nothing and Claude then wrote the requirement-by-requirement gap list. Closest is Jev's nearest candidate"],
-  ["stability", "{ met_per_pass, coverage_spread, split_items[] }", "Only when the ensemble ran 2+ passes: the checklist items the passes disagreed on. Reporting only; never changes the verdict"],
   ["served_from_ledger", "boolean", "True when this verdict was replayed from a recent, high-confidence ledger entry at $0 instead of freshly scored"],
   ["design_system_recall_check", "{ possible_missed_candidates, note } | absent", "Design-system mode only: present when a custom_build/no_candidates_found verdict shares real keywords with a registered candidate it didn't select. A hint to double-check, never an override of the verdict"],
   ["_meta", "{ total_ms, breakdown_ms, tokens_used, estimated_cost_usd }", "Real timing, tokens, and cost for this call. Summed across all 3 runs when the ensemble fires"],
@@ -135,69 +131,29 @@ const BACKFILL_OUTPUT_ROWS: Row[] = [
 const EXTRACT_INPUT_ROWS: Row[] = [
   ["component_need", "string, required", "Same field as recommend_component's input"],
   ["domain", "string, required", "Extraction is grounded in this, not the component name alone"],
-  ["project_id", "string, optional", "The project's registered Figma design system. When it has stored evidence, the checklist uses its real sizes and spacing and each item is tagged by what it rests on"],
 ];
 
 const EXTRACT_OUTPUT_ROWS: Row[] = [
   ["checklist", "string[]", "Exactly 8 items, ranked most-important first, unless the need hit the skip-list"],
-  ["checklist_items", "{ item, basis, evidence? }[]", "Same items tagged figma-evidenced (quotes a fact from the design file), inferred, or general-practice (accessibility, keyboard, focus: things a design file can't show)"],
   ["extraction_confidence", "high | medium | low", "A word-count heuristic today, not a calibrated signal. Treat low as a prompt to reread the input"],
   ["_meta", "{ total_ms, tokens_used, estimated_cost_usd }", "No search happens here, so this is typically a few seconds and a fraction of a cent"],
 ];
 
-const VERIFY_INPUT_ROWS: Row[] = [
-  ["project_id", "string, required", "The project_id used in recommend_component for this component"],
-  ["file_path", "string, required", "The built file, relative to the project root. Must be the same file_path passed to recommend_component"],
-];
-
-const VERIFY_OUTPUT_ROWS: Row[] = [
-  ["summary", "{ pass, fail, unverified, total }", "Per checklist item. An item passes only if every clause of it has its own verbatim quote that the server confirms is in the file"],
-  ["items", "{ item, status, evidence, clauses[] }[]", "Must-be-absent clauses (no Tailwind, LTR only) are searched for by the server, not decided by the model"],
-  ["divergences", "string[]", "Up to 5 measurable departures from the Figma values (size, spacing, radius, layout), each backed by a snippet the server confirmed is in the file. Often empty by design"],
-  ["receipt", "{ updated, feature_id? }", "Written into the committed receipt (schema v2) when the gate already created one for this file"],
-];
-
-const FIGMA_EVIDENCE_INPUT_ROWS: Row[] = [
-  ["project_id", "string, required", "The project_id a Figma design system was registered under"],
-  ["node_id", "string, optional", "Exact Figma node id of a registered component"],
-  ["name", "string, optional", "Component name, case-insensitive: exact match first, then substring, up to 5 results. Pass node_id or name"],
-];
-
-const FIGMA_EVIDENCE_OUTPUT_ROWS: Row[] = [
-  ["matches[].size", "{ w, h }", "Read from the component's first variant"],
-  ["matches[].layout", "{ direction, gap, padding, radius }", "Auto-layout facts exactly as the design file states them"],
-  ["matches[].instances", "string[]", "Components it uses, named by their component set (Button, not Variant=Outline)"],
-  ["matches[].texts / tree", "string[] / object", "Literal text and a trimmed layer tree"],
-];
-
 const REGISTER_DESIGN_SYSTEM_INPUT_ROWS: Row[] = [
   ["project_id", "string, required", "Must match the project_id used in later recommend_component calls"],
-  ["figma_file_key", "string, optional", "A Figma file, fetched with FIGMA_ACCESS_TOKEN from your environment (never a tool argument). Components mode also stores raw sizes, spacing and nested components"],
-  ["figma_json_path", "string, optional", "A saved Figma file response, relative to the project root. Fully local, no token. npx -p pattern-mcp pattern fetch-figma <key> downloads one safely"],
-  ["figma_mode", "components | frames, optional", "components (default): defined components and variants. frames: named designs on pages, for template files"],
-  ["figma_pages", "string[], optional", "Only these pages (substring match). figma_exclude_pages skips pages, e.g. [\"Icons\"]"],
   ["manifest_path", "string, optional", "A hand-authored JSON manifest or a Storybook-exported stories/index file, relative to the project root"],
-  ["directory_path", "string, optional", "A real components folder, scanned for exported components and their props. Exactly one of manifest_path, directory_path, figma_json_path or figma_file_key is required. directory_path is required"],
+  ["directory_path", "string, optional", "A real components folder, scanned for exported components and their props. Exactly one of manifest_path or directory_path is required"],
 ];
 
 const REGISTER_DESIGN_SYSTEM_OUTPUT_ROWS: Row[] = [
   ["status", '"registered"', "Confirms the registration was saved"],
-  ["registration.source_kind", "manifest | directory_scan | figma", "Which input mode produced this registration"],
+  ["registration.source_kind", "manifest | directory_scan", "Which input mode produced this registration"],
   ["registration.candidate_count", "number", "How many components were found"],
   ["registration.candidates[]", "name, props, description, usage_example, file_path", "The full list, so you can sanity-check what got captured before it's scored against"],
 ];
 
 const CONFIG_ROWS: Row[] = [
-  ["ANTHROPIC_API_KEY", "required unless PATTERN_SCORER=jev", "Your own Console key. Every Claude-scored call bills your account. Put it in the MCP server's own env block, not just your shell"],
-  ["TYPESAFE_API_KEY", "unset", "Turns on the hybrid scorer: Jev picks the match in about a second, and Claude only writes the custom-build gap list"],
-  ["PATTERN_SCORER", "unset (hybrid when TYPESAFE_API_KEY is set)", "jev: Jev only, no Claude call ever. anthropic: ignore TYPESAFE_API_KEY"],
-  ["PATTERN_SCORE_EFFORT", "medium", "low | medium | high | xhigh | max. Reasoning effort of the scoring pass; medium was about 25-35% cheaper and faster than high on two measured needs"],
-  ["FIGMA_ACCESS_TOKEN", "unset", "Only for figma_file_key registration and pattern fetch-figma. Read from the environment, never a tool argument"],
-  ["PATTERN_FIGMA_EVIDENCE_TOPK", "3", "How many best-matching candidates get their stored Figma facts shown to scoring and extraction. 0 turns it off"],
-  ["PATTERN_FIGMA_EVIDENCE_DIR", "~/.pattern/figma_evidence", "Where per-project Figma facts are stored, local only"],
-  ["PATTERN_LEDGER_VERIFICATIONS_PATH", "~/.pattern/ledger_verifications.jsonl", "Every verify_component result, appended"],
-  ["PATTERN_NO_INSTRUCTIONS", "unset", "Set to 1 to stop the server sending its usage instructions (the note that tells the agent to use Pattern on its own when it is about to build UI)."],
-  ["PATTERN_TOOLS", "core", "Set to full to advertise all fourteen tools. Every tool is callable by name either way"],
+  ["ANTHROPIC_API_KEY", "required", "Your own Console key. Every call bills your account"],
   ["PATTERN_MODEL", "claude-sonnet-5", "Swap models without a code change. Re-run the five test cases first"],
   ["PATTERN_SESSION_CAP", "40", "Per-process call cap, a runaway-agent guard, not a usage budget"],
   ["PATTERN_MEMORY_PATH", "~/.pattern/memory.json", "Where confirmed decisions are stored, local only"],
@@ -215,9 +171,6 @@ const CONFIG_ROWS: Row[] = [
 ];
 
 const ENFORCEMENT_CLI_ROWS: [string, string][] = [
-  ["npx pattern-mcp init", "Connects Claude Code, Cursor, Codex or Claude Desktop, stores your key, and offers to install the enforcement hook."],
-  ["npx -p pattern-mcp pattern doctor", "Checks what usually goes wrong before the first run: which config holds the server, which keys are in its env block, the Figma token shape, the project root and id. Never prints a secret."],
-  ["npx -p pattern-mcp pattern fetch-figma <key>", "Downloads a Figma file with your token and saves it locally only if it is a real file, never an error body."],
   ["pattern-check-gate write", "Run by the local hook. Blocks a new component from being written until a matching Pattern decision exists."],
   ["pattern-check-gate verify", "Run in CI. Fails the check if a committed receipt is missing for a new component."],
   ["pattern-check-gate init", "Sets up the enforcement boundary by configuring the local hook and CI workflow. It can also configure GitHub branch protection."],
@@ -251,22 +204,6 @@ const TOOLS: Tool[] = [
     description: "Optional standalone step: runs the requirement-extraction that recommend_component does internally, without scoring any candidates.",
     inputRows: EXTRACT_INPUT_ROWS,
     outputRows: EXTRACT_OUTPUT_ROWS,
-  },
-  {
-    name: "verify_component",
-    group: "Make the judgment call",
-    cost: "API call",
-    description: "Run after you build. Checks the built file against the recorded checklist, item by item, with quotes the server confirms are in the file. Judges what the code says, not how it renders. Typically a few cents.",
-    inputRows: VERIFY_INPUT_ROWS,
-    outputRows: VERIFY_OUTPUT_ROWS,
-  },
-  {
-    name: "get_figma_evidence",
-    group: "Make the judgment call",
-    cost: "free",
-    description: "Returns the raw Figma facts stored when a Figma file was registered in components mode: size, auto-layout, padding, gap, radius, nested components and text. A local read; no API call. Advanced tier (PATTERN_TOOLS=full).",
-    inputRows: FIGMA_EVIDENCE_INPUT_ROWS,
-    outputRows: FIGMA_EVIDENCE_OUTPUT_ROWS,
   },
   {
     name: "register_design_system",
@@ -588,10 +525,9 @@ export function Reference() {
             <h2 style={{ ...H2, margin: 0 }}>Reference</h2>
           </div>
           <p style={{ margin: "0 0 24px", fontSize: "var(--text-body-md)", lineHeight: "var(--leading-body)", color: "var(--text-secondary)", maxWidth: "70ch" }}>
-            Fourteen MCP tools in three groups: making the judgment call, tracking what it cost and what happened, and
-            verifying or exporting past decisions. Five are on by default: register_design_system,
-            extract_requirements, recommend_component, verify_component and record_component_decision. A separate
-            CLI, pattern-check-gate, turns the judgment call into an enforcement boundary.
+            Twelve MCP tools in three groups: making the judgment call, tracking what it cost and what happened, and
+            verifying or exporting past decisions. A separate CLI, pattern-check-gate, turns the judgment call into
+            an enforcement boundary.
           </p>
         </Reveal>
 
@@ -692,7 +628,7 @@ export function Reference() {
 
         <Reveal delay={120}>
           <div style={{ display: "grid", gap: 12, marginTop: 40 }}>
-            <div style={LABEL}>Command line</div>
+            <div style={LABEL}>Enforcement CLI</div>
             <EnforcementCliTable />
           </div>
         </Reveal>

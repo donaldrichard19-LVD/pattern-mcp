@@ -1,12 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Check, Minus } from "lucide-react";
-import { BODY, H2, LABEL, MONO, PANEL, SECTION } from "./tokens";
+import { BODY, H2, MONO, SECTION } from "./tokens";
 import { Chip, Reveal } from "./ui";
 
 const CHECKLIST: { item: string; met: boolean }[] = [
-  { item: "Itemized line rows (rate, fees, taxes)", met: true },
+  { item: "Itemized line rows for rate, fees, and taxes", met: true },
   { item: "Nightly rate × nights subtotal", met: true },
   { item: "Collapsible fee explanation", met: false },
   { item: "Currency + locale formatting", met: false },
@@ -15,74 +14,120 @@ const CHECKLIST: { item: string; met: boolean }[] = [
   { item: "Tooltip on service fee", met: false },
   { item: "Mobile bottom-sheet layout", met: false },
 ];
-const MET_COUNT = CHECKLIST.filter((c) => c.met).length;
+const TOTAL = CHECKLIST.length;
+// Steps 0..TOTAL score one row at a time, then hold on the finished state
+// for a few ticks before looping.
+const LOOP_AT = TOTAL + 5;
+
+function ScoringMark({ spinning }: { spinning: boolean }) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 64 64" aria-hidden="true" style={{ display: "block", overflow: "visible" }}>
+      {[
+        [6, 10, 26, "var(--blue-500)", 1],
+        [36, 10, 22, "var(--green-500)", 0.85],
+        [6, 26, 22, "var(--amber-500)", 1],
+        [32, 26, 26, "var(--blue-500)", 0.55],
+        [6, 42, 30, "var(--green-500)", 1],
+        [40, 42, 18, "var(--amber-500)", 0.7],
+      ].map(([x, y, w, fill, o], i) => (
+        <rect
+          key={i}
+          x={x as number}
+          y={y as number}
+          width={w as number}
+          height={12}
+          rx={6}
+          fill={fill as string}
+          opacity={o as number}
+          className={spinning ? "pt-grow" : undefined}
+          style={spinning ? { animationDelay: i * 0.14 + "s" } : undefined}
+        />
+      ))}
+    </svg>
+  );
+}
 
 function ChecklistPanel() {
-  const [done, setDone] = useState(false);
+  const [step, setStep] = useState(0);
   useEffect(() => {
-    // Flips the status chip once the last item's stagger + reveal transition
-    // has had time to finish -- see Reveal's own delay/transition timing.
-    const t = setTimeout(() => setDone(true), CHECKLIST.length * 90 + 700);
-    return () => clearTimeout(t);
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setStep(TOTAL);
+      return;
+    }
+    const t = setInterval(() => setStep((s) => (s >= LOOP_AT ? 0 : s + 1)), 700);
+    return () => clearInterval(t);
   }, []);
+
+  const finished = step >= TOTAL;
+  const scored = Math.min(step, TOTAL);
+  const met = CHECKLIST.slice(0, scored).filter((c) => c.met).length;
+
   return (
-    <div style={{ ...PANEL, background: "#fff", overflow: "hidden" }}>
+    <div style={{ border: "1px solid var(--border-subtle)", borderRadius: 8, overflow: "hidden", background: "#fff" }}>
       <div
         style={{
           display: "flex",
-          alignItems: "center",
           justifyContent: "space-between",
-          gap: 10,
-          padding: "10px 14px",
+          alignItems: "center",
+          gap: 12,
+          padding: "10px 16px",
+          background: "var(--surface-sunken)",
           borderBottom: "1px solid var(--border-subtle)",
         }}
       >
-        <span style={{ ...MONO, fontSize: 11, color: "var(--text-tertiary)" }}>checking against requirements</span>
-        <Chip tone={done ? "warning" : "accent"}>{done ? "build new · high" : "scoring"}</Chip>
-      </div>
-      <div style={{ padding: 14, display: "grid", gap: 10 }}>
-        <p style={{ ...BODY, fontSize: "var(--text-body-sm)", margin: 0 }}>
-          Build the price breakdown for the booking checkout: nightly rate, cleaning fee, service fee, taxes.
-        </p>
-        <div style={{ display: "grid", gap: 7 }}>
-          {CHECKLIST.map((c, i) => (
-            <Reveal key={c.item} delay={i * 90}>
-              <div style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: "var(--text-body-sm)" }}>
-                {c.met ? (
-                  <Check size={15} style={{ flexShrink: 0, marginTop: 2, color: "var(--text-success)" }} />
-                ) : (
-                  <Minus size={15} style={{ flexShrink: 0, marginTop: 2, color: "var(--text-tertiary)" }} />
-                )}
-                <span style={{ color: c.met ? "var(--text-primary)" : "var(--text-tertiary)" }}>{c.item}</span>
-              </div>
-            </Reveal>
-          ))}
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <ScoringMark spinning={!finished} />
+          <span style={{ ...MONO, fontSize: 11, color: "var(--text-tertiary)" }}>coverage scoring</span>
         </div>
+        <Chip tone={finished ? "warning" : "accent"}>{finished ? "custom_build · high" : "scoring"}</Chip>
       </div>
-      <div
-        style={{
-          padding: "10px 14px",
-          borderTop: "1px solid var(--border-subtle)",
-          display: "grid",
-          gap: 6,
-        }}
-      >
-        <div style={{ display: "flex", gap: 3 }} aria-hidden="true">
-          {CHECKLIST.map((c, i) => (
+      <div style={{ padding: "14px 16px", borderBottom: "1px solid var(--border-subtle)", fontSize: 13, lineHeight: 1.5, color: "var(--text-secondary)" }}>
+        <span style={{ color: "var(--text-tertiary)" }}>Task · </span>
+        Build the price breakdown for the booking checkout: nightly rate, cleaning fee, service fee, taxes.
+      </div>
+      <div style={{ padding: "6px 16px 10px", display: "flex", flexDirection: "column" }}>
+        {CHECKLIST.map((c, i) => {
+          const done = i < step;
+          const active = i === step && step < TOTAL;
+          return (
+            <div key={c.item} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: "1px solid #f0f2f5" }}>
+              <span
+                aria-hidden="true"
+                style={{
+                  width: 18,
+                  flex: "none",
+                  textAlign: "center",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: done && c.met ? "var(--text-success)" : "var(--text-tertiary)",
+                }}
+              >
+                {done ? (c.met ? "✓" : "–") : active ? "·" : ""}
+              </span>
+              <span style={{ fontSize: 13, color: done ? (c.met ? "var(--text-primary)" : "var(--text-tertiary)") : active ? "var(--text-primary)" : "#a9b0bb" }}>
+                {c.item}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ padding: "12px 16px", borderTop: "1px solid var(--border-subtle)", display: "flex", flexDirection: "column", gap: 10 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, fontSize: 13 }}>
+          <span style={{ color: "var(--text-tertiary)" }}>
+            {met} of {scored} met
+          </span>
+          <span style={{ fontWeight: 500, color: finished ? "var(--text-primary)" : "var(--text-tertiary)" }}>
+            {finished ? "Build custom" : "Scoring…"}
+          </span>
+        </div>
+        <div aria-hidden="true" style={{ display: "grid", gridTemplateColumns: `repeat(${TOTAL}, 1fr)`, gap: 5 }}>
+          {CHECKLIST.map((_, i) => (
             <span
               key={i}
-              style={{
-                flex: 1,
-                height: 4,
-                borderRadius: 2,
-                background: c.met ? "var(--blue-500)" : "var(--border-subtle)",
-              }}
+              style={{ height: 3, borderRadius: 2, background: i < scored ? "var(--blue-500)" : "var(--border-subtle)", transition: "background .4s ease" }}
             />
           ))}
         </div>
-        <span style={{ ...MONO, fontSize: 11, color: "var(--text-tertiary)" }}>
-          {MET_COUNT} of {CHECKLIST.length} met &middot; build new recommended
-        </span>
       </div>
     </div>
   );
@@ -90,41 +135,34 @@ function ChecklistPanel() {
 
 export function AskBeforeBuilding() {
   return (
-    <section id="step-01" style={{ padding: "80px 0", borderTop: "1px solid var(--border-subtle)", background: "#fff" }}>
-      <div
-        className="pt-cols-2"
-        style={{ ...SECTION, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 48, alignItems: "start" }}
-      >
-        <Reveal>
-          <div style={{ display: "grid", gap: 14 }}>
-            <span style={LABEL}>02</span>
-            <h2 style={{ ...H2, fontSize: "clamp(24px, 3.6vw, 30px)" }}>
-              Just ask for the screen.{" "}
-              <span style={{ color: "var(--text-accent)" }}>Pattern is already in the loop.</span>
-            </h2>
-            <p style={{ ...BODY, fontSize: "var(--text-body-md)" }}>
-              When your agent connects, Pattern tells it to check before it builds UI, especially when you hand
-              it a Figma link, a mockup or a screenshot. Buttons and small edits are left alone. Then it
-              compares a checklist of what the component must do with what your design system has.
-            </p>
-            <p style={{ ...BODY, fontSize: "var(--text-body-md)" }}>
-              In a small Claude Code test, agents ran the check on their own in 6 of 6 UI builds, and skipped
-              it on a typo fix 8 of 8 times.
-            </p>
-            <p style={{ ...BODY, fontSize: "var(--text-caption)", color: "var(--text-tertiary)" }}>
-              A model can still ignore instructions. The rule in step 04 makes the check mandatory. Common
-              basics like buttons and inputs are answered on your machine at no cost.
-            </p>
-          </div>
-        </Reveal>
-        <Reveal delay={80}>
-          <ChecklistPanel />
-          <p style={{ ...BODY, fontSize: "var(--text-caption)", color: "var(--text-tertiary)", marginTop: 10 }}>
-            The agent asked for a price breakdown. Your design system covered 2 of the 8 things it needs, so
-            Pattern recommended building a new one and listed what was missing.
+    <section
+      id="how"
+      className="pt-sec"
+      style={{
+        ...SECTION,
+        padding: "80px 32px 40px",
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 400px), 1fr))",
+        gap: 56,
+        alignItems: "center",
+      }}
+    >
+      <Reveal>
+        <div style={{ display: "flex", flexDirection: "column", gap: 18, maxWidth: "30em" }}>
+          <h2 style={{ ...H2, lineHeight: 1.04 }}>Ask for the screen.</h2>
+          <p style={{ ...BODY, fontSize: "var(--text-body-lg)" }}>
+            Pattern tells your agent to check before it builds UI, especially from a Figma link, mockup, or screenshot. Buttons and small edits are left
+            alone. Then it compares what the component must do with what your design system has.
           </p>
-        </Reveal>
-      </div>
+          <p style={{ ...BODY, fontSize: "var(--text-body-lg)" }}>
+            In a small Claude Code test, agents ran the check on their own in 6 of 6 UI builds and skipped it on a typo fix 8 of 8 times. A model can
+            still ignore instructions, which is why the check can be required.
+          </p>
+        </div>
+      </Reveal>
+      <Reveal delay={80}>
+        <ChecklistPanel />
+      </Reveal>
     </section>
   );
 }
