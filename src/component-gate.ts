@@ -43,6 +43,70 @@ export function isGatedComponentFile(filePath: string, fileContent: string, isNe
   return nonBlankLines >= MIN_NON_BLANK_LINES;
 }
 
+// --- Components added inside files that already existed -----------------
+//
+// isGatedComponentFile above only looks at brand-new files, so a component
+// declared inside an existing file (a sub-component, or a rewrite under a new
+// name) never reached the gate. CI verify mode diffs each modified file's
+// component declarations against the base branch and treats the names that
+// are new as gated. Deliberately NOT size-based, for the reason documented at
+// MIN_NON_BLANK_LINES: any threshold has a real component just under it. A
+// name that did not exist before is a deterministic signal.
+//
+// Heuristic, line-start only: PascalCase functions, classes that extend
+// something, and PascalCase consts assigned an arrow function, memo() or
+// forwardRef(). A name must contain a lowercase letter so SHOUTY_CONSTANTS
+// are never mistaken for components.
+const DECLARATION_PATTERNS: RegExp[] = [
+  /^(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s+([A-Z][A-Za-z0-9]*)\s*[(<]/,
+  /^(?:export\s+)?(?:default\s+)?class\s+([A-Z][A-Za-z0-9]*)\s+extends\b/,
+  /^(?:export\s+)?const\s+([A-Z][A-Za-z0-9]*)\s*(?::[^=]+)?=\s*(?:(?:async\s+)?\(|(?:async\s+)?[a-z_]\w*\s*=>|(?:React\.)?(?:memo|forwardRef)\s*[(<]|function\b)/,
+];
+
+export interface ComponentDeclaration {
+  name: string;
+  /** 0-based index into the file's lines. */
+  line: number;
+}
+
+export function extractComponentDeclarations(content: string): ComponentDeclaration[] {
+  const found: ComponentDeclaration[] = [];
+  const lines = content.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    for (const re of DECLARATION_PATTERNS) {
+      const m = lines[i].match(re);
+      if (m && /[a-z]/.test(m[1])) {
+        found.push({ name: m[1], line: i });
+        break;
+      }
+    }
+  }
+  return found;
+}
+
+// Names declared in `head` that `base` did not declare. A null base (the file
+// has no previous version) counts every declaration as new.
+export function newComponentDeclarations(base: string | null, head: string): ComponentDeclaration[] {
+  const before = new Set(base === null ? [] : extractComponentDeclarations(base).map((d) => d.name));
+  return extractComponentDeclarations(head).filter((d) => !before.has(d.name));
+}
+
+// Explicit, reasoned skip for one component: a comment on one of the two lines
+// directly above its declaration. A file-level override (parseManualOverride)
+// also skips every new component in the file. Either way the reason is
+// surfaced in the CI output, so a skip is visible in the PR, never silent.
+const SKIP_PATTERN = /\/\/\s*pattern-mcp:skip\s+reason="([^"]+)"/;
+
+export function skipReasonFor(content: string, decl: ComponentDeclaration): string | null {
+  const lines = content.split("\n");
+  for (let i = decl.line - 1; i >= Math.max(0, decl.line - 2); i--) {
+    const m = lines[i].match(SKIP_PATTERN);
+    if (m && m[1].trim()) return m[1].trim();
+  }
+  const fileLevel = parseManualOverride(content);
+  return fileLevel.overridden ? fileLevel.reason : null;
+}
+
 // Per-file escape hatch (Q3 from the enforcement-boundary design): a
 // magic comment with a required reason. The hook and CI both honor this
 // identically because both call this same function -- but it never

@@ -34,9 +34,10 @@
 // hook template or the workflow template never invokes this file, and
 // Pattern's core MCP tools are unaffected either way.
 
-import { existsSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { isAbsolute, relative, resolve as resolvePath } from "node:path";
-import { isGatedComponentFile, parseManualOverride } from "./component-gate.js";
+import { isGatedComponentFile, newComponentDeclarations, parseManualOverride, skipReasonFor } from "./component-gate.js";
 import { createHash } from "node:crypto";
 import { deriveOverrideFeatureId, GateReceipt, readAllGateReceipts, writeGateReceipt } from "./gate-receipt.js";
 import { deriveProjectId } from "./project-id.js";
@@ -55,17 +56,19 @@ function toRepoRelative(root: string, fileArg: string): string | null {
   return normalize(rel);
 }
 
-function parseArgs(argv: string[]): { mode: string; flags: Record<string, string | true>; files: string[] } {
+function parseArgs(argv: string[]): { mode: string; flags: Record<string, string | true>; files: string[]; modified: string[] } {
   const mode = argv[0];
   const flags: Record<string, string | true> = {};
   const files: string[] = [];
+  const modified: string[] = [];
   for (let i = 1; i < argv.length; i++) {
     const arg = argv[i];
-    if (arg === "--files") {
-      // --files (verify mode) consumes every following non-flag token
+    if (arg === "--files" || arg === "--modified-files") {
+      // Both (verify mode) consume every following non-flag token
+      const target = arg === "--files" ? files : modified;
       i++;
       while (i < argv.length && !argv[i].startsWith("--")) {
-        files.push(argv[i]);
+        target.push(argv[i]);
         i++;
       }
       i--;
@@ -80,7 +83,7 @@ function parseArgs(argv: string[]): { mode: string; flags: Record<string, string
       }
     }
   }
-  return { mode, flags, files };
+  return { mode, flags, files, modified };
 }
 
 function readStdin(): Promise<string> {
@@ -114,8 +117,14 @@ async function runWrite(root: string, flags: Record<string, string | true>): Pro
   }
   const content = await readStdin();
   const isNew = flags["is-new"] === true;
+  // --components A,B names components added inside a file that already existed. It is an
+  // explicit request for a receipt, so the new-file classifier is bypassed.
+  const components =
+    typeof flags.components === "string"
+      ? (flags.components as string).split(",").map((c) => c.trim()).filter((c) => c.length > 0)
+      : [];
 
-  if (!isGatedComponentFile(relPath as string, content, isNew)) {
+  if (components.length === 0 && !isGatedComponentFile(relPath as string, content, isNew)) {
     emit({ ok: true, gated: false }, true);
   }
 
@@ -142,6 +151,7 @@ async function runWrite(root: string, flags: Record<string, string | true>): Pro
       checked_at: checkedAt,
       manual_override: true,
       override_reason: override.reason,
+      ...(components.length > 0 ? { components } : {}),
     };
     writeGateReceipt(root, receipt);
     emit({ ok: true, gated: true, manual_override: true, feature_id: receipt.feature_id }, true);
@@ -176,12 +186,80 @@ async function runWrite(root: string, flags: Record<string, string | true>): Pro
     checked_at: checkedAt,
     manual_override: false,
     override_reason: null,
+    ...(components.length > 0 ? { components } : {}),
   };
   writeGateReceipt(root, receipt);
   emit({ ok: true, gated: true, feature_id: receipt.feature_id }, true);
 }
 
-async function runVerify(root: string, files: string[]): Promise<void> {
+const GATED_EXT = /\.(tsx|jsx)$/;
+
+// The file's content at `ref`, or null when it did not exist there. Fixed git
+// arguments only; the path and ref are passed as one argv entry, never a shell string.
+function readAtRef(root: string, ref: string, relPath: string): string | null {
+  const r = spawnSync("git", ["show", `${ref}:${relPath}`], { cwd: root, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
+  return r.status === 0 ? r.stdout : null;
+}
+
+interface SkippedComponent {
+  file: string;
+  component: string;
+  reason: string;
+}
+
+// Components declared in files that already existed, new relative to the base
+// ref. Each needs a receipt covering that name, or an explicit reasoned skip.
+function checkNewComponentsInModified(
+  root: string,
+  base: string,
+  modified: string[],
+  receipts: GateReceipt[],
+): { missing: { file: string; component: string }[]; skipped: SkippedComponent[]; checked: number } {
+  const missing: { file: string; component: string }[] = [];
+  const skipped: SkippedComponent[] = [];
+  let checked = 0;
+  for (const fileArg of modified) {
+    const relPath = toRepoRelative(root, fileArg);
+    if (relPath === null || !GATED_EXT.test(relPath)) continue;
+    const abs = resolvePath(root, relPath);
+    if (!existsSync(abs)) continue;
+    const head = readFileSync(abs, "utf8");
+    const before = readAtRef(root, base, relPath);
+    // No base version means the git lookup failed or the file is really new; new files go
+    // through the added-files path, so there is nothing to compare here.
+    if (before === null) continue;
+    for (const decl of newComponentDeclarations(before, head)) {
+      checked++;
+      const covered = receipts.some((r) => normalize(r.file_path) === relPath && (r.components ?? []).includes(decl.name));
+      if (covered) continue;
+      const reason = skipReasonFor(head, decl);
+      if (reason) skipped.push({ file: relPath, component: decl.name, reason });
+      else missing.push({ file: relPath, component: decl.name });
+    }
+  }
+  return { missing, skipped, checked };
+}
+
+// Skips are exempt from needing a receipt, so they are made visible instead: a
+// workflow annotation per skip plus a job summary table. No token needed.
+function reportSkips(skipped: SkippedComponent[]): void {
+  if (skipped.length === 0) return;
+  const clean = (s: string) => s.replace(/[\r\n%]/g, " ");
+  for (const s of skipped) {
+    process.stderr.write(`::notice file=${clean(s.file)}::Pattern check skipped for ${clean(s.component)}: ${clean(s.reason)}\n`);
+  }
+  const summary = process.env.GITHUB_STEP_SUMMARY;
+  if (summary) {
+    const rows = skipped.map((s) => `| \`${s.file}\` | \`${s.component}\` | ${s.reason.replace(/\|/g, "\\|")} |`);
+    appendFileSync(
+      summary,
+      ["### Pattern check skipped (explicit reasons)", "", "| File | Component | Reason |", "| --- | --- | --- |", ...rows, ""].join("\n"),
+      "utf8",
+    );
+  }
+}
+
+async function runVerify(root: string, files: string[], modified: string[], base: string | null): Promise<void> {
   const receipts = readAllGateReceipts(root);
   const ungated: string[] = [];
   let checked = 0;
@@ -211,32 +289,58 @@ async function runVerify(root: string, files: string[]): Promise<void> {
     }
   }
 
-  if (ungated.length > 0) {
+  const inModified =
+    base !== null && modified.length > 0
+      ? checkNewComponentsInModified(root, base, modified, receipts)
+      : { missing: [], skipped: [], checked: 0 };
+  reportSkips(inModified.skipped);
+
+  if (ungated.length > 0 || inModified.missing.length > 0) {
+    const reasons: string[] = [];
+    if (ungated.length > 0) reasons.push("One or more new UI components have no matching .pattern/receipts/*.json entry.");
+    if (inModified.missing.length > 0) {
+      reasons.push(
+        "New component(s) were added inside existing files with no receipt naming them. Record the decision " +
+          "(recommend_component with file_path, then `pattern-check-gate write --file <path> --components <Name>`), " +
+          'or add `// pattern-mcp:skip reason="..."` on the line above the declaration.',
+      );
+    }
     emit(
       {
         ok: false,
-        ungated_files: ungated,
-        reason: "One or more new UI components have no matching .pattern/receipts/*.json entry.",
+        ...(ungated.length > 0 ? { ungated_files: ungated } : {}),
+        ...(inModified.missing.length > 0 ? { ungated_components: inModified.missing } : {}),
+        ...(inModified.skipped.length > 0 ? { skipped_components: inModified.skipped } : {}),
+        reason: reasons.join(" "),
       },
       false,
     );
   }
-  emit({ ok: true, checked, verification }, true);
+  emit(
+    {
+      ok: true,
+      checked,
+      new_components_checked: inModified.checked,
+      ...(inModified.skipped.length > 0 ? { skipped_components: inModified.skipped } : {}),
+      verification,
+    },
+    true,
+  );
 }
 
 async function main(): Promise<void> {
-  const { mode, flags, files } = parseArgs(process.argv.slice(2));
+  const { mode, flags, files, modified } = parseArgs(process.argv.slice(2));
   const root = typeof flags["project-root"] === "string" ? (flags["project-root"] as string) : process.cwd();
 
   if (mode === "write") {
     await runWrite(root, flags);
   } else if (mode === "verify") {
-    await runVerify(root, files);
+    await runVerify(root, files, modified, typeof flags.base === "string" ? (flags.base as string) : null);
   } else if (mode === "init") {
     await runInit(root, { yes: flags.yes === true });
   } else {
-    process.stderr.write("Usage: pattern-check-gate write --file <path> [--is-new] [--project-id <id>] [--project-root <root>] (content on stdin)\n");
-    process.stderr.write("       pattern-check-gate verify --files <path...> [--project-root <root>]\n");
+    process.stderr.write("Usage: pattern-check-gate write --file <path> [--is-new | --components <A,B>] [--project-id <id>] [--project-root <root>] (content on stdin)\n");
+    process.stderr.write("       pattern-check-gate verify --files <path...> [--base <ref> --modified-files <path...>] [--project-root <root>]\n");
     process.stderr.write("       pattern-check-gate init [--project-root <root>] [--yes]\n");
     process.exit(2);
   }

@@ -650,6 +650,73 @@ console.log("13e. pattern doctor warns about the pre-0.19.1 hook command and wor
   rmSync(root, { recursive: true, force: true });
 }
 
+console.log("13g. verify: components added inside EXISTING files are gated; skips need a reason and are surfaced");
+{
+  const { extractComponentDeclarations, newComponentDeclarations } = await import("../dist/component-gate.js");
+  const names = (src) => extractComponentDeclarations(src).map((d) => d.name);
+  check("finds function, arrow-const, memo and class components", names(
+    "function Pill(){}\nexport const Card = () => <i/>;\nconst Row = memo(function Row(){});\nclass Box extends X {}\n",
+  ).join() === "Pill,Card,Row,Box");
+  check("ignores SHOUTY constants, lowercase helpers and PascalCase non-functions", names(
+    "const ROW = {};\nconst CHIP_TONES = {};\nfunction helper(){}\nconst Label = 'x';\nconst AGENTS = [];\n",
+  ).length === 0);
+  check("a name already in the base is not new", newComponentDeclarations("function Pill(){}", "function Pill(){ return 1 }\nfunction Tag(){}").map((d) => d.name).join() === "Tag");
+
+  const root = mkdtempSync(join(tmpdir(), "pattern-check-gate-test-"));
+  const git = (...a) => spawnSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", ...a], { cwd: root, encoding: "utf8" });
+  git("init", "-q", "-b", "main");
+  mkdirSync(join(root, "web"), { recursive: true });
+  const file = "web/Hero.tsx";
+  const base = "export function Hero() {\n  return <h1>hi</h1>;\n}\n";
+  writeFileSync(join(root, file), base, "utf8");
+  git("add", "-A");
+  git("commit", "-q", "-m", "base");
+  const verify = (extra = []) => runCheckGate(["verify", "--project-root", root, "--base", "HEAD", "--modified-files", file, ...extra], "");
+  const parse = (r) => JSON.parse(r.stdout.trim());
+
+  writeFileSync(join(root, file), base + "function Pill() {\n  return <i />;\n}\n", "utf8");
+  let r = verify();
+  check("a new sub-component with no receipt fails", r.status === 1 && parse(r).ungated_components?.[0]?.component === "Pill");
+  check("the failure says how to fix it", /pattern-mcp:skip/.test(parse(r).reason) && /--components/.test(parse(r).reason));
+
+  writeFileSync(join(root, file), base + "const ROW = { a: 1 };\nfunction helper() { return 1; }\n", "utf8");
+  check("constants and helpers added to an existing file pass", verify().status === 0);
+
+  writeFileSync(join(root, file), base + '// pattern-mcp:skip reason="CSS-only variant of Hero"\nfunction Pill() {\n  return <i />;\n}\n', "utf8");
+  r = verify();
+  check("a skip comment with a reason passes", r.status === 0);
+  check("the skip and its reason are reported in the result", parse(r).skipped_components?.[0]?.reason === "CSS-only variant of Hero");
+  check("the skip is surfaced as a workflow annotation", /::notice file=web\/Hero\.tsx::.*Pill.*CSS-only variant/.test(r.stderr));
+
+  writeFileSync(join(root, file), base + '// pattern-mcp:skip reason=""\nfunction Pill() {\n  return <i />;\n}\n', "utf8");
+  check("a skip comment with an empty reason does not count", verify().status === 1);
+
+  writeFileSync(join(root, file), base + "function Pill() {\n  return <i />;\n}\n", "utf8");
+  const receipt = (extra) => ({
+    schema_version: 1, feature_id: "abc12345", file_path: file, ledger_entry_id: null, verdict: "custom_build",
+    chosen_candidate: null, snapshot_ref: null, checked_at: "2026-10-07T00:00:00.000Z", manual_override: false, override_reason: null, ...extra,
+  });
+  mkdirSync(join(root, ".pattern", "receipts"), { recursive: true });
+  writeFileSync(join(root, ".pattern", "receipts", "abc12345.json"), JSON.stringify(receipt({})), "utf8");
+  check("an older receipt for the file without a components list does NOT cover a new component", verify().status === 1);
+  writeFileSync(join(root, ".pattern", "receipts", "abc12345.json"), JSON.stringify(receipt({ components: ["Pill"] })), "utf8");
+  check("a receipt naming the component covers it", verify().status === 0);
+  writeFileSync(join(root, ".pattern", "receipts", "abc12345.json"), JSON.stringify(receipt({ components: ["Other"] })), "utf8");
+  check("a receipt naming a different component does not", verify().status === 1);
+  rmSync(join(root, ".pattern"), { recursive: true, force: true });
+
+  writeFileSync(join(root, file), "export function Hero() {\n  return <h1>hi</h1>;\n}\n// pattern-mcp:override reason=\"vendored\"\nfunction Pill() {\n  return <i />;\n}\n", "utf8");
+  check("a file-level override skips every new component in the file", verify().status === 0);
+
+  const w = runCheckGate(["write", "--file", file, "--components", "Pill, Tag", "--project-id", "t", "--project-root", root], readFileSync(join(root, file), "utf8"));
+  const minted = readAllGateReceipts(root);
+  check("write --components mints a receipt for an existing file", w.status === 0 && minted.length === 1 && minted[0].components.join() === "Pill,Tag");
+  check("... that then covers the component in verify (override path)", minted[0].manual_override === true);
+
+  check("no --base means modified files are not inspected (back-compat with older workflows)", runCheckGate(["verify", "--project-root", root, "--modified-files", file, "--files"], "").status === 0);
+  rmSync(root, { recursive: true, force: true });
+}
+
 function runCheckGate(args, stdin, extraEnv = {}) {
   const cliPath = fileURLToPath(new URL("../dist/check-gate.js", import.meta.url));
   return spawnSync("node", [cliPath, ...args], {

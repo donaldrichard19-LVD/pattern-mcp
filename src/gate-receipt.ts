@@ -64,6 +64,12 @@ export interface GateReceipt {
   checked_at: string;
   manual_override: boolean;
   override_reason: string | null;
+  /**
+   * Components this receipt covers inside a file that already existed. CI matches a
+   * new declaration in a modified file on file_path plus this list, so an old receipt
+   * for the file never silently covers a component added later.
+   */
+  components?: string[];
   verification?: ReceiptVerification;
 }
 
@@ -78,6 +84,7 @@ const ALLOWED_GATE_RECEIPT_KEYS = new Set([
   "checked_at",
   "manual_override",
   "override_reason",
+  "components",
   "verification",
 ]);
 
@@ -96,6 +103,12 @@ export function assertGateReceiptShape(value: unknown): asserts value is GateRec
   }
   if (record.schema_version !== 1 && record.schema_version !== 2) {
     throw new Error("GateReceipt.schema_version must be 1 or 2");
+  }
+  if (record.components !== undefined) {
+    const c = record.components;
+    if (!Array.isArray(c) || !c.every((n) => typeof n === "string" && n.length > 0)) {
+      throw new Error("GateReceipt.components must be an array of non-empty strings");
+    }
   }
   if (record.verification !== undefined) {
     if (record.schema_version !== 2) throw new Error("GateReceipt.verification requires schema_version 2");
