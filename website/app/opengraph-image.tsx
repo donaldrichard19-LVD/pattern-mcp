@@ -74,7 +74,7 @@ export default async function OpengraphImage() {
             display: "flex",
           }}
         >
-          Catch the wrong UI decision before your agent builds it
+          Build exactly what you designed in Figma with your coding agent
         </div>
       </div>
     ),

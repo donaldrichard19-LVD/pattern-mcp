@@ -4,7 +4,7 @@ import { H2, MONO } from "./tokens";
 import { Reveal } from "./ui";
 
 const TILES: [string, string][] = [
-  ["$0", "A match, about a second"],
+  ["<1s", "A match with a TypeSafe key, no Anthropic call"],
   ["¢", "A full check with a build list"],
   ["$0", "Common basics, on your machine"],
 ];
@@ -17,8 +17,8 @@ export function Cost() {
           <h2 style={{ ...H2, lineHeight: 1.1 }}>Pay per check.</h2>
         </Reveal>
         <p style={{ margin: 0, fontSize: 17, lineHeight: 1.6, color: "var(--text-secondary)", maxWidth: "34em", textWrap: "pretty" }}>
-          Pattern is MIT licensed, and checks use your Anthropic key. A match takes about a second and costs nothing. A full check with a build list
-          usually runs a few cents. Common basics like buttons and inputs are answered on your machine for free.
+          Pattern is MIT licensed, and checks use your Anthropic key. A full check with a build list usually runs a few cents. With a TypeSafe key,
+          a match is scored in under a second with no Anthropic call. Common basics like buttons and inputs are answered on your machine for free.
         </p>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 1, background: "var(--border-subtle)", border: "1px solid var(--border-subtle)", borderRadius: 10, overflow: "hidden" }}>
           {TILES.map(([big, label], i) => (
