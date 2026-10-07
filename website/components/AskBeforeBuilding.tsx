@@ -154,10 +154,6 @@ export function AskBeforeBuilding() {
             Pattern tells your agent to check before it builds UI, especially from a Figma link, mockup, or screenshot. Buttons and small edits are left
             alone. Then it compares what the component must do with what your design system has.
           </p>
-          <p style={{ ...BODY, fontSize: "var(--text-body-lg)" }}>
-            In a small Claude Code test, agents ran the check on their own in 6 of 6 UI builds and skipped it on a typo fix 8 of 8 times. A model can
-            still ignore instructions, which is why the check can be required.
-          </p>
         </div>
       </Reveal>
       <Reveal delay={80}>

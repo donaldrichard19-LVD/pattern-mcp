@@ -206,7 +206,8 @@ export function Hero() {
       >
         <h1
           style={{
-            margin: 0,
+            margin: "0 auto",
+            textAlign: "center",
             fontSize: "clamp(30px, 5vw, 46px)",
             lineHeight: 1.5,
             letterSpacing: "-0.02em",
