@@ -211,7 +211,7 @@ export function Hero() {
             fontSize: "clamp(30px, 5vw, 46px)",
             lineHeight: 1.5,
             letterSpacing: "-0.02em",
-            fontWeight: 400,
+            fontWeight: 600,
             color: "var(--text-primary)",
             textWrap: "balance",
             maxWidth: "19em",
