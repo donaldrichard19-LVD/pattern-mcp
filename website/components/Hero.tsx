@@ -127,8 +127,8 @@ function VerdictCard() {
           value={tab}
           onChange={setTab}
           options={[
-            ["you", "For you"],
-            ["agent", "For your agent"],
+            ["you", "What you see"],
+            ["agent", "What your agent sees"],
           ]}
         />
       </div>
