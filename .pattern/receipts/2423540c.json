@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "feature_id": "2423540c",
+  "file_path": "website/components/Cost.tsx",
+  "ledger_entry_id": "c69582e4-709d-4766-abd1-363dc19d8057",
+  "verdict": "use_existing",
+  "chosen_candidate": "TrustGrid is a three-card grid section with glyph badges, headings, and descriptive text used to highlight key feature points, with staggered reveal animations and responsive column adaptation.",
+  "snapshot_ref": "2d2627760226ff50b2b063dd1dd70241f3fa6003",
+  "checked_at": "2026-10-07T00:07:30.386Z",
+  "manual_override": false,
+  "override_reason": null
+}
