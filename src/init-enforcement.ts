@@ -93,7 +93,7 @@ async function setupClaudeSettings(root: string, projectIdOverride: string | nul
     : HOOK_COMMAND;
 
   const newEntry: PreToolUseEntry = {
-    matcher: "Edit|Write",
+    matcher: "Edit|Write|Bash",
     hooks: [{ type: "command", command, timeout: 60 }],
   };
 

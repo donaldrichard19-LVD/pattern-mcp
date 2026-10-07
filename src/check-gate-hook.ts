@@ -27,10 +27,11 @@ import { existsSync, readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { newUiFilesWrittenByShell } from "./shell-ui-writes.js";
 
 interface PreToolUseInput {
   tool_name?: string;
-  tool_input?: { file_path?: string; content?: string };
+  tool_input?: { file_path?: string; content?: string; command?: string };
   cwd?: string;
 }
 
@@ -46,6 +47,26 @@ async function main(): Promise<void> {
 
   const input = JSON.parse(readFileSync(0, "utf8")) as PreToolUseInput;
   const toolName = input.tool_name;
+
+  if (toolName === "Bash") {
+    const created = newUiFilesWrittenByShell(input.tool_input?.command ?? "", input.cwd ?? process.cwd());
+    if (created.length > 0) {
+      process.stdout.write(
+        JSON.stringify({
+          hookSpecificOutput: {
+            hookEventName: "PreToolUse",
+            permissionDecision: "deny",
+            permissionDecisionReason:
+              `This command creates a new UI component file (${created.join(", ")}) from the shell, which skips Pattern's required check. ` +
+              "Create it with the Write tool instead so the check runs and a receipt is recorded. " +
+              "Run recommend_component with the file_path first.",
+          },
+        }),
+      );
+    }
+    process.exit(0);
+  }
+
   if (toolName !== "Write" && toolName !== "Edit") {
     process.exit(0);
   }

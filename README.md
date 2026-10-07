@@ -645,7 +645,14 @@ implementation.
   ledger entry (via `~/.pattern/ledger.jsonl`, same as everywhere else in
   Pattern) whose `file_path` matches the file being written. A match
   writes a receipt and allows the write; no match blocks it with a reason
-  fed back to the model as retryable guidance, not a hard failure.
+  fed back to the model as retryable guidance, not a hard failure. The hook
+  also matches `Bash` and denies a shell command that creates a new
+  `.tsx`/`.jsx` file (redirect, `tee`, `cp`/`mv`, or an inline script write),
+  because shell writes skip the Write/Edit check. The agent is told to use
+  the Write tool instead. This is pattern matching on the command text, not
+  a shell parser, so an unusual command can still slip through; the CI check
+  is the backstop. Hooks installed before this change keep matcher
+  `Edit|Write`; change it to `Edit|Write|Bash` in `.claude/settings.json`.
   **This is the one new exception where Pattern writes into your repo**
   (`.pattern/receipts/<feature_id>.json`) -- everything else described in
   this README is read-only. `project_id` no longer needs to be set by
