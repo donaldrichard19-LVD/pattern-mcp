@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "feature_id": "c8a5a0b8",
+  "file_path": "website/components/SeeTheProof.tsx",
+  "ledger_entry_id": "77f2cff5-c625-4a36-b3b2-c948fb3c1d7e",
+  "verdict": "use_existing",
+  "chosen_candidate": "ProofSection (ProofSection.tsx)",
+  "snapshot_ref": "2d2627760226ff50b2b063dd1dd70241f3fa6003",
+  "checked_at": "2026-10-07T00:07:29.767Z",
+  "manual_override": false,
+  "override_reason": null
+}

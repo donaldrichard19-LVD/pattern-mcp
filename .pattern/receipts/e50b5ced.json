@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "feature_id": "e50b5ced",
+  "file_path": "website/components/Grid.tsx",
+  "ledger_entry_id": "767b5b5b-e95d-41d8-ac8e-9b619bf4427f",
+  "verdict": "use_existing",
+  "chosen_candidate": "SavesTime renders a marketing section showcasing six capabilities in a three-column grid, each with an icon, headline, and descriptive paragraph, built from a data-driven array with staggered reveal animations.",
+  "snapshot_ref": "2d2627760226ff50b2b063dd1dd70241f3fa6003",
+  "checked_at": "2026-10-07T00:07:28.953Z",
+  "manual_override": false,
+  "override_reason": null
+}

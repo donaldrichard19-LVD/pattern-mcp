@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "feature_id": "ee290249",
+  "file_path": "website/components/Faq.tsx",
+  "ledger_entry_id": "8cafc046-3673-49b1-be45-70be6e1e829f",
+  "verdict": "custom_build",
+  "chosen_candidate": null,
+  "snapshot_ref": "2d2627760226ff50b2b063dd1dd70241f3fa6003",
+  "checked_at": "2026-10-07T00:07:31.126Z",
+  "manual_override": false,
+  "override_reason": null
+}
