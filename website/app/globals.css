@@ -184,12 +184,12 @@ button {
 .pt-hero {
   animation: pt-hero 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) both;
 }
-.pt-bob {
-  animation: pt-bob 2.6s ease-in-out infinite;
+.pt-pill:hover .pt-bob {
+  animation: pt-bob 1.2s ease-in-out infinite;
 }
 @media (prefers-reduced-motion: reduce) {
   .pt-hero,
-  .pt-bob,
+  .pt-pill:hover .pt-bob,
   .pt-grow {
     animation: none;
   }

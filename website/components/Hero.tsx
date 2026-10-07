@@ -31,15 +31,24 @@ const VERDICT_LINES = [
 const REQS_MET = 2;
 const REQS_TOTAL = 8;
 
-const AGENTS: { name: string; glyph: string; bg: string; round?: boolean; delay: number }[] = [
-  { name: "Claude Code", glyph: "✦", bg: "var(--amber-500)", delay: 0.15 },
-  { name: "Codex", glyph: "◎", bg: "var(--text-primary)", round: true, delay: 0.3 },
-  { name: "Cursor", glyph: "➤", bg: "var(--blue-500)", round: true, delay: 0.6 },
+const LOGOS = {
+  figma: "/logos/figma.svg",
+  claudeCode: "/logos/claude-code.svg",
+  codex: "/logos/codex.svg",
+  cursor: "/logos/cursor.svg",
+};
+
+const AGENTS: { name: string; logo: string; delay: number }[] = [
+  { name: "Claude Code", logo: LOGOS.claudeCode, delay: 0.1 },
+  { name: "Codex", logo: LOGOS.codex, delay: 0.2 },
+  { name: "Cursor", logo: LOGOS.cursor, delay: 0.3 },
 ];
 
-function Pill({ glyph, bg, round, delay, children }: { glyph: string; bg: string; round?: boolean; delay: number; children: ReactNode }) {
+// The logo only animates while the pointer is over its grey pill (see .pt-pill in globals.css).
+function Pill({ logo, delay, children }: { logo: string; delay: number; children: ReactNode }) {
   return (
     <span
+      className="pt-pill"
       style={{
         display: "inline-flex",
         verticalAlign: "middle",
@@ -47,30 +56,19 @@ function Pill({ glyph, bg, round, delay, children }: { glyph: string; bg: string
         gap: 8,
         background: "#eef1f4",
         borderRadius: 999,
-        padding: "5px 16px 5px 7px",
+        padding: "4px 16px 4px 6px",
         margin: "0 2px",
         whiteSpace: "nowrap",
       }}
     >
-      <span
+      <img
+        src={logo}
+        alt=""
+        width={32}
+        height={32}
         className="pt-bob"
-        style={{
-          width: 28,
-          height: 28,
-          borderRadius: round ? 999 : 8,
-          background: bg,
-          flex: "none",
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
-          color: "#fff",
-          fontSize: 13,
-          fontWeight: 700,
-          animationDelay: delay + "s",
-        }}
-      >
-        {glyph}
-      </span>
+        style={{ flex: "none", display: "block", animationDelay: delay + "s" }}
+      />
       {children}
     </span>
   );
@@ -191,11 +189,11 @@ function VerdictCard() {
   );
 }
 
-const WORKS_WITH: { name: string; bg: string }[] = [
-  { name: "Claude Code", bg: "var(--amber-500)" },
-  { name: "Cursor", bg: "var(--text-primary)" },
-  { name: "Codex", bg: "var(--green-500)" },
-  { name: "Figma", bg: "var(--blue-500)" },
+const WORKS_WITH: { name: string; logo: string }[] = [
+  { name: "Claude Code", logo: LOGOS.claudeCode },
+  { name: "Cursor", logo: LOGOS.cursor },
+  { name: "Codex", logo: LOGOS.codex },
+  { name: "Figma", logo: LOGOS.figma },
 ];
 
 export function Hero() {
@@ -219,7 +217,7 @@ export function Hero() {
           }}
         >
           A tool to build exactly what you designed in{" "}
-          <Pill glyph="◆" bg="linear-gradient(135deg,#F24E1E,#A259FF 50%,#1ABCFE)" delay={0}>
+          <Pill logo={LOGOS.figma} delay={0}>
             Figma
           </Pill>{" "}
           using{" "}
@@ -227,7 +225,7 @@ export function Hero() {
             <span key={a.name}>
               {/* Keep the pill and its punctuation on one line so a comma never wraps alone. */}
               <span style={{ whiteSpace: "nowrap" }}>
-                <Pill glyph={a.glyph} bg={a.bg} round={a.round} delay={a.delay}>
+                <Pill logo={a.logo} delay={a.delay}>
                   {a.name}
                 </Pill>
                 {i < AGENTS.length - 1 ? "," : "."}
@@ -282,7 +280,7 @@ export function Hero() {
             {WORKS_WITH.map((w, i) => (
               <span key={w.name} style={{ display: "contents" }}>
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
-                  <span style={{ width: 14, height: 14, borderRadius: 4, background: w.bg, flex: "none" }} />
+                  <img src={w.logo} alt="" width={14} height={14} style={{ flex: "none", display: "block" }} />
                   {w.name}
                 </span>
                 {i < WORKS_WITH.length - 1 && <span>&middot;</span>}
