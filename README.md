@@ -14,7 +14,21 @@ is recorded in an auditable ledger you can verify later.
 
 [Website](https://usepattern.sh) · [npm](https://www.npmjs.com/package/pattern-mcp) · [Report an issue](https://github.com/donaldrichard19-LVD/pattern-mcp/issues/new/choose)
 
-**Current release: v0.21.0** turns `npx pattern-mcp init` into a guided setup. It lists
+**Current release: v0.22.0** closes a gap in the CI check. It only looked at
+new files, so a component declared inside a file that already existed (a
+sub-component, say) was never checked. The check now also compares each
+modified `.tsx`/`.jsx` file against the base branch and requires a decision for
+every component name that is new. Cover it with a receipt that names the
+component (`pattern-check-gate write --file <path> --components Name`) or skip it
+with a reason (`// pattern-mcp:skip reason="..."`); each skip shows up on the pull
+request as an annotation and a summary table. Receipts gain an optional
+`components` list. A workflow you already copied keeps working but does not
+inspect modified files until you copy the new
+`templates/github-workflows/pattern-gate.yml`. A component rewritten under the
+same name is still not detected. See "Components added inside existing files"
+under the enforcement boundary below.
+
+**v0.21.0** turns `npx pattern-mcp init` into a guided setup. It lists
 five steps up front: your Anthropic key, a Figma token (if you use Figma), connecting
 your client, registering your design system, and the optional required check. Keys are
 checked as you paste them (including keys that need an Anthropic workspace id), a
