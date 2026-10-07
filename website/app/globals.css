@@ -93,16 +93,27 @@ button {
   background: var(--surface-sunken) !important;
 }
 
-/* "assemble" -- staggered slide-in, used once above the closing CTA.
+/* "assemble" -- the Pattern mark's blocks slide in alternately from left and
+   right on a 2.4s loop (per the logo kit), used above the closing CTA.
    "cascade" -- grow pulse, used next to "coverage scoring" while a
    checklist animates. Both named per the v2 design spec; apply via
    .pt-assemble / .pt-cascade on the mark's child rects or wrapper. */
-@keyframes pt-assemble {
-  0% {
-    transform: translateY(10px) scaleX(0.4);
+@keyframes pt-in-l {
+  from {
+    transform: translateX(-40px);
     opacity: 0;
   }
-  100% {
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+@keyframes pt-in-r {
+  from {
+    transform: translateX(40px);
+    opacity: 0;
+  }
+  to {
     transform: none;
     opacity: 1;
   }
@@ -116,29 +127,39 @@ button {
     transform: scale(1.12);
   }
 }
-.pt-assemble > * {
-  animation: pt-assemble 2.4s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+.pt-assemble svg {
+  display: block;
+  overflow: visible;
 }
-.pt-assemble > *:nth-child(2) {
-  animation-delay: 0.08s;
+.pt-assemble rect {
+  animation: pt-in-l 2.4s cubic-bezier(0.2, 0.7, 0.2, 1) infinite;
 }
-.pt-assemble > *:nth-child(3) {
-  animation-delay: 0.16s;
+.pt-assemble rect:nth-child(even) {
+  animation-name: pt-in-r;
 }
-.pt-assemble > *:nth-child(4) {
-  animation-delay: 0.24s;
+.pt-assemble rect:nth-child(1) {
+  animation-delay: 0.0s;
 }
-.pt-assemble > *:nth-child(5) {
-  animation-delay: 0.32s;
+.pt-assemble rect:nth-child(2) {
+  animation-delay: 0.09s;
 }
-.pt-assemble > *:nth-child(6) {
-  animation-delay: 0.4s;
+.pt-assemble rect:nth-child(3) {
+  animation-delay: 0.18s;
+}
+.pt-assemble rect:nth-child(4) {
+  animation-delay: 0.27s;
+}
+.pt-assemble rect:nth-child(5) {
+  animation-delay: 0.36s;
+}
+.pt-assemble rect:nth-child(6) {
+  animation-delay: 0.45s;
 }
 .pt-cascade {
   animation: pt-cascade 2.2s ease-in-out infinite;
 }
 @media (prefers-reduced-motion: reduce) {
-  .pt-assemble > * {
+  .pt-assemble rect {
     animation: none;
     opacity: 1;
     transform: none;

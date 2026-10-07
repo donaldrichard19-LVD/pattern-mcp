@@ -19,7 +19,7 @@ export function Close() {
             </div>
           </Reveal>
           <Reveal delay={60}>
-            <h2 style={{ ...H2, fontSize: "clamp(28px, 4.4vw, 40px)", textWrap: "balance", maxWidth: 720 }}>Make your agent pick from your design system.</h2>
+            <h2 style={{ ...H2, fontSize: "clamp(28px, 4.4vw, 40px)", textWrap: "balance", maxWidth: 720 }}>Make your agent follow your design system, languages and themes.</h2>
           </Reveal>
           <p style={{ margin: 0, fontSize: 17, color: "var(--text-secondary)" }}>Install once. Then ask for UI.</p>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 10, justifyContent: "center", alignItems: "stretch" }}>
