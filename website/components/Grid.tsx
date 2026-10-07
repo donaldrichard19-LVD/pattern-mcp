@@ -5,7 +5,7 @@ import { Reveal } from "./ui";
 
 const ITEMS: [string, string, string][] = [
   ["◻", "Your design system", "A Figma file, components folder, Storybook export, or JSON manifest. Registered once, and the only source Pattern judges against."],
-  ["≈", "Design summaries", "Haiku writes a text summary of each design, so your agent has it in words while it builds."],
+  ["≈", "Design summaries", "A text summary of each design, so your agent has it in words while it builds."],
   ["⇄", "Reuse or build", "A plain answer for every request: use this component, or build these missing pieces."],
   ["☰", "Requirements", "Each one is tagged as yours, inferred, or general practice."],
   ["✓", "Verified code", "Every pass comes with a quote from your file, confirmed by the server."],

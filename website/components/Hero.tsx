@@ -225,10 +225,14 @@ export function Hero() {
           using{" "}
           {AGENTS.map((a, i) => (
             <span key={a.name}>
-              <Pill glyph={a.glyph} bg={a.bg} round={a.round} delay={a.delay}>
-                {a.name}
-              </Pill>
-              {i < AGENTS.length - 2 ? ", " : i === AGENTS.length - 2 ? ", and " : "."}
+              {/* Keep the pill and its punctuation on one line so a comma never wraps alone. */}
+              <span style={{ whiteSpace: "nowrap" }}>
+                <Pill glyph={a.glyph} bg={a.bg} round={a.round} delay={a.delay}>
+                  {a.name}
+                </Pill>
+                {i < AGENTS.length - 1 ? "," : "."}
+              </span>
+              {i === AGENTS.length - 2 ? " and " : " "}
             </span>
           ))}
         </h1>
