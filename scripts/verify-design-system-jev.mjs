@@ -18,6 +18,8 @@ import { createServer } from "node:http";
 import { resolve, join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
+// Test traffic must not reach the production PostHog project (it was ~all of the recorded handshakes); export PATTERN_TELEMETRY=1 to override.
+process.env.PATTERN_TELEMETRY ??= "0";
 
 const serverEntry = resolve(dirname(fileURLToPath(import.meta.url)), "..", "dist/index.js");
 let failures = 0;

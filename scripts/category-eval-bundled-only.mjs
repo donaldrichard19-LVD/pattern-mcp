@@ -18,6 +18,8 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+// Test traffic must not reach the production PostHog project (it was ~all of the recorded handshakes); export PATTERN_TELEMETRY=1 to override.
+process.env.PATTERN_TELEMETRY ??= "0";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, "..");
