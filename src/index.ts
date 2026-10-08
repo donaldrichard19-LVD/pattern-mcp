@@ -5828,7 +5828,7 @@ async function main() {
   // shadowed by a tool name collision later.
   const argv = process.argv.slice(2);
   if (argv[0] === "init") {
-    captureCliStarted("init", PACKAGE_VERSION);
+    captureCliStarted("init", PACKAGE_VERSION, { stdinIsTTY: !!process.stdin.isTTY, subcommand: argv[0] });
     await runConnect(
       PROJECT_ROOT,
       { yes: argv.includes("--yes") },
@@ -5843,7 +5843,7 @@ async function main() {
     process.exit(0);
   }
 
-  captureCliStarted("server", PACKAGE_VERSION);
+  captureCliStarted("server", PACKAGE_VERSION, { stdinIsTTY: !!process.stdin.isTTY, subcommand: argv[0] });
   warnIfAnthropicKeyLooksWrong();
   printTelemetryNoticeOnce();
   // Piggybacks on this same first-run moment (Option B, see
@@ -5891,6 +5891,15 @@ async function main() {
       process.exit(0);
     });
   }
+  // A spawned stdio server normally ends because its client closed stdin,
+  // not because of a signal -- without this, those exits (and a client that
+  // dies before the handshake) leave a start with no exit event at all.
+  process.stdin.once("end", async () => {
+    if (idleNudgeTimer) clearTimeout(idleNudgeTimer);
+    captureExitOnce("stdin_closed");
+    await shutdownTelemetry();
+    process.exit(0);
+  });
 }
 
 // Guard exists so verification scripts (e.g. verify-ledger-boundary.mjs)

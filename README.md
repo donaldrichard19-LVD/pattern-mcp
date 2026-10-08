@@ -2321,7 +2321,9 @@ are a biased, tiny sample of everyone who installs.
    - On every invocation of the `pattern-mcp` binary, immediately at
      startup: a single `pattern_cli_started` event carrying only which
      mode it ran in (`server` -- the normal MCP-server start, or `init` --
-     the [connect wizard](#connect-pattern-to-your-mcp-client)). This
+     the [connect wizard](#connect-pattern-to-your-mcp-client)), whether
+     stdin was a terminal, and a coarse `invocation` bucket (`none`, `init`,
+     or `other` -- never the raw arguments). This
      exists to separate real executions from npm registry traffic that
      never runs the code at all (security scanners, mirrors) -- something
      neither `recommend_component` counts nor `@posthog/mcp`'s handshake
@@ -2329,8 +2331,8 @@ are a biased, tiny sample of everyone who installs.
      bare `npx pattern-mcp` run.
    - On process exit, as of v0.14.0: a single `pattern_cli_exited` event
      carrying only a coarse reason (`sigint`, `sigterm`,
-     `uncaught_exception`, `unhandled_rejection`, or
-     `fatal_startup_error`) and, for the two exception cases, the thrown
+     `uncaught_exception`, `unhandled_rejection`,
+     `fatal_startup_error`, or `stdin_closed` -- the client disconnected) and, for the two exception cases, the thrown
      value's constructor name (e.g. `TypeError`) -- never the error
      message or stack trace. Paired with `pattern_cli_started` so a start
      with no matching MCP handshake is diagnosable as a crash instead of

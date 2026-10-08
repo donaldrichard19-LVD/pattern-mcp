@@ -272,8 +272,25 @@ export function captureRecommendation(args: {
 // to say whether the crashing process was the old or new version. Without
 // it, "did the fix actually ship before this happened" is unanswerable
 // from telemetry alone.
-export function captureCliStarted(mode: "server" | "init", version: string): void {
-  capture("pattern_cli_started", { mode, version });
+//
+// `stdin_is_tty` and `invocation` (added 2026-10-08) split starts that a real
+// MCP client spawned (stdin is a pipe, no subcommand) from ones a human ran
+// by hand in a terminal or via `init` -- from 10-04 on, most starts had no
+// matching handshake and no exit event, and nothing in the payload could say
+// whether those were hand-run, scripted, or clients that died before
+// connecting. `invocation` is a coarse bucket, never the raw argv, so a
+// stray argument value can't travel (see this file's header).
+export function captureCliStarted(
+  mode: "server" | "init",
+  version: string,
+  ctx: { stdinIsTTY: boolean; subcommand: string | undefined } = { stdinIsTTY: false, subcommand: undefined },
+): void {
+  capture("pattern_cli_started", {
+    mode,
+    version,
+    stdin_is_tty: ctx.stdinIsTTY,
+    invocation: ctx.subcommand === undefined ? "none" : ctx.subcommand === "init" ? "init" : "other",
+  });
 }
 
 export type CliExitReason =
@@ -281,7 +298,10 @@ export type CliExitReason =
   | "sigterm"
   | "uncaught_exception"
   | "unhandled_rejection"
-  | "fatal_startup_error";
+  | "fatal_startup_error"
+  // The client closed stdin (disconnected, or died) -- the usual way a
+  // spawned stdio server ends, and invisible to the signal handlers.
+  | "stdin_closed";
 
 // Paired with captureCliStarted so a start with no matching handshake is
 // diagnosable instead of silent -- added after a 2026-09-13 incident where
