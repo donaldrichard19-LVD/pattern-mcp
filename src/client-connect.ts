@@ -18,6 +18,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { SKILL_NAME } from "./agent-guidance.js";
 import { deriveProjectId } from "./project-id.js";
 import { findPatternEntry, patternServersInClaudeList, type ClaudeListServer } from "./server-entry.js";
@@ -68,6 +70,9 @@ function hasCommand(cmd: string, versionFlag = "--version"): boolean {
 function claudeCodePatternServers(): ClaudeListServer[] {
   try {
     const out = execFileSync("claude", ["mcp", "list"], {
+      // `claude mcp list` health-checks every registered server, i.e. starts
+      // Pattern -- tag those starts so they don't read as real usage.
+      env: { ...process.env, PATTERN_FROM_INIT: "1" },
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
       timeout: 10000,
@@ -359,13 +364,59 @@ function offerCodexInstructions(env: WizardEnv): void {
   console.log(lines.join("\n"));
 }
 
+// Proves the server this install would launch can actually start and speak
+// MCP, independent of any client's config: spawn it the way a client would,
+// complete initialize, list tools. A "Connected" message from `claude mcp
+// add` only means a config entry was written. Telemetry is off in the child
+// so the check never counts as usage, and the prompts are suppressed so it
+// can't block on them.
+export async function selfTestServer(timeoutMs = 20000): Promise<boolean> {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [entry],
+    env: {
+      ...(process.env as Record<string, string>),
+      PATTERN_TELEMETRY: "0",
+      PATTERN_FROM_INIT: "1",
+      PATTERN_NO_CONNECT_NOTICE: "1",
+      PATTERN_NO_ENFORCEMENT_NOTICE: "1",
+    },
+    stderr: "ignore",
+  });
+  const client = new Client({ name: "pattern-init-selftest", version: "1.0.0" });
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    await Promise.race([
+      (async () => {
+        await client.connect(transport);
+        const { tools } = await client.listTools();
+        if (tools.length === 0) throw new Error("no tools");
+      })(),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error("timeout")), timeoutMs);
+      }),
+    ]);
+    return true;
+  } catch {
+    return false;
+  } finally {
+    if (timer) clearTimeout(timer);
+    await client.close().catch(() => {});
+    await transport.close().catch(() => {});
+  }
+}
+
 export interface RunConnectExtras {
   /** Design-system registration + project id for the guided steps; without it those steps are skipped. */
   wizard?: WizardDeps;
   fetchImpl?: typeof fetch;
+  /** Overridable in tests; `false` skips the startup check. */
+  selfTest?: (() => Promise<boolean>) | false;
 }
 
-export async function runConnect(root: string, options: ConnectOptions, extras: RunConnectExtras = {}): Promise<void> {
+export async function runConnect(root: string, options: ConnectOptions, extras: RunConnectExtras = {}): Promise<WizardState> {
   const state = newWizardState();
   const wizard = extras.wizard;
   console.log(options.yes ? "Connecting Pattern to your MCP client(s)..." : wizardIntro());
@@ -399,6 +450,12 @@ export async function runConnect(root: string, options: ConnectOptions, extras: 
       );
     }
 
+    if (state.clientConnected && extras.selfTest !== false) {
+      process.stdout.write("\nChecking that Pattern starts and answers on its own... ");
+      state.selfTest = (await (extras.selfTest ?? selfTestServer)()) ? "passed" : "failed";
+      console.log(state.selfTest === "passed" ? "ok." : "FAILED.");
+    }
+
     if (wizard) {
       await runDesignSystemStep(root, wizard, env, state, options);
       if (!options.yes) {
@@ -418,6 +475,7 @@ export async function runConnect(root: string, options: ConnectOptions, extras: 
   }
 
   console.log(wizardSummary(state, wizard?.projectId ?? deriveProjectId(root)));
+  return state;
 }
 
 // Option 1/#1 from the activation-funnel discussion: piggybacks on the

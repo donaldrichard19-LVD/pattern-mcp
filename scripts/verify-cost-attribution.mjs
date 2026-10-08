@@ -19,6 +19,8 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { resolve, join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
+// Test traffic must not reach the production PostHog project (it was ~all of the recorded handshakes); export PATTERN_TELEMETRY=1 to override.
+process.env.PATTERN_TELEMETRY ??= "0";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const tmp = mkdtempSync(join(tmpdir(), "pattern-verify-cost-attribution-"));

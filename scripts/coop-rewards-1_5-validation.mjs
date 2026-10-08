@@ -6,6 +6,8 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+// Test traffic must not reach the production PostHog project (it was ~all of the recorded handshakes); export PATTERN_TELEMETRY=1 to override.
+process.env.PATTERN_TELEMETRY ??= "0";
 
 const projectRoot = "/home/donaldrichard19/ui-component-judgment-mcp";
 if (!process.env.ANTHROPIC_API_KEY) {

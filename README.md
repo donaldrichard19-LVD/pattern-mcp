@@ -2321,16 +2321,31 @@ are a biased, tiny sample of everyone who installs.
    - On every invocation of the `pattern-mcp` binary, immediately at
      startup: a single `pattern_cli_started` event carrying only which
      mode it ran in (`server` -- the normal MCP-server start, or `init` --
-     the [connect wizard](#connect-pattern-to-your-mcp-client)). This
+     the [connect wizard](#connect-pattern-to-your-mcp-client)), whether
+     stdin was a terminal, and a coarse `invocation` bucket (`none`, `init`,
+     or `other` -- never the raw arguments), and whether the process was
+     started by the `init` wizard's own health check. This
      exists to separate real executions from npm registry traffic that
      never runs the code at all (security scanners, mirrors) -- something
      neither `recommend_component` counts nor `@posthog/mcp`'s handshake
      event below can answer, since both require getting further than a
      bare `npx pattern-mcp` run.
+   - When `init` finishes: a single `pattern_cli_init_completed` event with
+     only coarse outcomes -- whether a client was connected, whether the
+     wizard's startup self-test passed, whether an Anthropic key was set
+     (`valid`/`unverified`/`invalid`/`missing`, never the key), whether a
+     design system was registered, whether enforcement was set up, and how
+     many of the five steps finished. No paths, names or keys.
+   - When `recommend_component`, `extract_requirements` or
+     `register_design_system` fails: a single `pattern_cli_tool_error` event
+     with the tool name and a coarse `error_class` (`missing_api_key`,
+     `api_rate_limit`, `api_insufficient_credit`, `api_error`,
+     `truncated_output`, `session_cap`, `bad_arguments`, `file_not_found`,
+     `figma`, or `other`) -- never the message, paths or arguments.
    - On process exit, as of v0.14.0: a single `pattern_cli_exited` event
      carrying only a coarse reason (`sigint`, `sigterm`,
-     `uncaught_exception`, `unhandled_rejection`, or
-     `fatal_startup_error`) and, for the two exception cases, the thrown
+     `uncaught_exception`, `unhandled_rejection`,
+     `fatal_startup_error`, or `stdin_closed` -- the client disconnected) and, for the two exception cases, the thrown
      value's constructor name (e.g. `TypeError`) -- never the error
      message or stack trace. Paired with `pattern_cli_started` so a start
      with no matching MCP handshake is diagnosable as a crash instead of

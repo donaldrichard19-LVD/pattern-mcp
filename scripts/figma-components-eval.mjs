@@ -24,6 +24,8 @@ import { readFileSync, writeFileSync, existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve, dirname, basename } from "node:path";
 import { fileURLToPath } from "node:url";
+// Test traffic must not reach the production PostHog project (it was ~all of the recorded handshakes); export PATTERN_TELEMETRY=1 to override.
+process.env.PATTERN_TELEMETRY ??= "0";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const FILE_KEY = process.env.FIGMA_FILE_KEY || "eGmaKYgeO8AHj9FtE9aT5v";

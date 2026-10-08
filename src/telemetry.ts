@@ -196,6 +196,44 @@ export function classifyApiError(message: string): { type: ApiErrorType; status:
   return { type: "other", status };
 }
 
+// Coarse bucket for ANY failed tool call, derived from the message text but
+// never forwarding it. @posthog/mcp already reports that a call errored and
+// its latency, but every error arrives as a bare "Error" with no message, so
+// 2026-10 data showed extract_requirements failing 62 of 65 calls and
+// register_design_system 590 of 1,736 with nothing to say why. A bucket is
+// enough to tell "no API key" from "bad arguments" from "upstream failure"
+// without sending a path, project name or message.
+export type ToolErrorClass =
+  | "missing_api_key"
+  | "api_rate_limit"
+  | "api_insufficient_credit"
+  | "api_error"
+  | "truncated_output"
+  | "session_cap"
+  | "bad_arguments"
+  | "file_not_found"
+  | "figma"
+  | "other";
+
+export function classifyToolError(message: string): ToolErrorClass {
+  if (/ANTHROPIC_API_KEY is not set/i.test(message)) return "missing_api_key";
+  if (/Anthropic API error/i.test(message)) {
+    const { type } = classifyApiError(message);
+    return type === "rate_limit" ? "api_rate_limit" : type === "insufficient_credit" ? "api_insufficient_credit" : "api_error";
+  }
+  if (/truncated|max_tokens/i.test(message)) return "truncated_output";
+  if (/Session call cap/i.test(message)) return "session_cap";
+  if (/ENOENT|no such file|not found/i.test(message)) return "file_not_found";
+  if (/figma/i.test(message)) return "figma";
+  if (/requires exactly one|needs |must be|invalid|required/i.test(message)) return "bad_arguments";
+  return "other";
+}
+
+export function captureToolError(tool: string, err: unknown): void {
+  const message = err instanceof Error ? err.message : String(err);
+  capture("pattern_cli_tool_error", { tool, error_class: classifyToolError(message) });
+}
+
 let client: PostHog | undefined;
 
 // Exported so index.ts's @posthog/mcp instrument() call shares this same
@@ -272,8 +310,54 @@ export function captureRecommendation(args: {
 // to say whether the crashing process was the old or new version. Without
 // it, "did the fix actually ship before this happened" is unanswerable
 // from telemetry alone.
-export function captureCliStarted(mode: "server" | "init", version: string): void {
-  capture("pattern_cli_started", { mode, version });
+//
+// `stdin_is_tty` and `invocation` (added 2026-10-08) split starts that a real
+// MCP client spawned (stdin is a pipe, no subcommand) from ones a human ran
+// by hand in a terminal or via `init` -- from 10-04 on, most starts had no
+// matching handshake and no exit event, and nothing in the payload could say
+// whether those were hand-run, scripted, or clients that died before
+// connecting. `invocation` is a coarse bucket, never the raw argv, so a
+// stray argument value can't travel (see this file's header).
+export function captureCliStarted(
+  mode: "server" | "init",
+  version: string,
+  ctx: { stdinIsTTY: boolean; subcommand: string | undefined } = { stdinIsTTY: false, subcommand: undefined },
+): void {
+  capture("pattern_cli_started", {
+    mode,
+    version,
+    stdin_is_tty: ctx.stdinIsTTY,
+    invocation: ctx.subcommand === undefined ? "none" : ctx.subcommand === "init" ? "init" : "other",
+    // Set by the init wizard on the subprocesses it causes itself (`claude mcp
+    // list` health-checks every registered server, which starts Pattern), so
+    // those starts can be excluded from activation counts.
+    from_init: process.env.PATTERN_FROM_INIT === "1",
+  });
+}
+
+// One event per `init` run, with only coarse outcomes -- never keys, paths,
+// project names or component names. Exists because "init ran" and "the
+// client actually connected" are different things, and until now nothing
+// recorded which one a given run achieved.
+export type InitSelfTest = "passed" | "failed" | "skipped";
+export function captureInitCompleted(args: {
+  version: string;
+  clientConnected: boolean;
+  selfTest: InitSelfTest;
+  anthropicKey: string;
+  designSystemRegistered: boolean;
+  gate: string;
+  stepsDone: number;
+}): void {
+  capture("pattern_cli_init_completed", {
+    version: args.version,
+    client_connected: args.clientConnected,
+    self_test: args.selfTest,
+    anthropic_key: args.anthropicKey,
+    design_system_registered: args.designSystemRegistered,
+    gate: args.gate,
+    steps_done: args.stepsDone,
+  });
 }
 
 export type CliExitReason =
@@ -281,7 +365,10 @@ export type CliExitReason =
   | "sigterm"
   | "uncaught_exception"
   | "unhandled_rejection"
-  | "fatal_startup_error";
+  | "fatal_startup_error"
+  // The client closed stdin (disconnected, or died) -- the usual way a
+  // spawned stdio server ends, and invisible to the signal handlers.
+  | "stdin_closed";
 
 // Paired with captureCliStarted so a start with no matching handshake is
 // diagnosable instead of silent -- added after a 2026-09-13 incident where

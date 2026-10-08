@@ -46,6 +46,8 @@ import {
   captureApiError,
   captureCliExited,
   captureCliStarted,
+  captureToolError,
+  captureInitCompleted,
   captureRecommendation,
   getClient as getPostHogClient,
   installId,
@@ -57,6 +59,7 @@ import { offerEnforcementSetupOnce } from "./init-enforcement.js";
 import { connectInstructionsText, offerClientConnectSetupOnce, runConnect } from "./client-connect.js";
 import { deriveProjectId } from "./project-id.js";
 import type { RegisterRequest as WizardRegisterRequest, RegisterResult as WizardRegisterResult } from "./setup-wizard.js";
+import { stepsDone } from "./setup-wizard.js";
 import { collapseForJev, rankWithJev } from "./design-system-jev.js";
 import { describeFigma, fetchFigmaFile, formatFigmaEvidence, parseFigmaFile, rankFigmaCandidates, type FigmaCandidateInfo, type FigmaEvidence } from "./design-system-figma.js";
 import { captionFigmaDesigns, carryOverCaptions } from "./design-system-figma-captions.js";
@@ -2055,6 +2058,8 @@ export interface ExtractionResult {
   grounded_in: { project_id: string; candidates: string[] } | null;
   /** Only when project_id was passed: whether a design system is registered for it, so the caller knows whether registering is needed. */
   design_system?: { registered: boolean; source_kind?: string; candidate_count?: number };
+  /** Set when no checklist was extracted on purpose, with what the caller should do instead. */
+  note?: string;
   extraction_confidence: "high" | "medium" | "low";
   _meta: NonNullable<JudgmentResult["_meta"]>;
 }
@@ -2081,6 +2086,36 @@ async function runExtraction(input: { component_need: string; domain: string; pr
         grounded_in: null,
         ...designSystemStatus(input.project_id),
         extraction_confidence: "high",
+        _meta: {
+          total_ms: elapsedMs,
+          breakdown_ms: { extract: elapsedMs, search: 0, score: 0 },
+          tokens_used: { input: 0, output: 0 },
+          estimated_cost_usd: 0,
+        },
+      },
+    };
+  }
+
+  // Jev-only setup (no Anthropic key by design): recommend_component scores
+  // whole files and ignores a caller checklist, so there is nothing for
+  // extraction to feed. Erroring here made the documented first step
+  // (extract_requirements, then recommend_component) fail on every call --
+  // 62 of 65 in 2026-10 telemetry -- so hand back an empty checklist and say
+  // what to do instead. A setup that needs the key for recommend_component
+  // too still gets the missing-key error below.
+  if (!ANTHROPIC_API_KEY && DESIGN_SYSTEM_JEV_ENABLED) {
+    const elapsedMs = Math.max(1, Date.now() - startMs);
+    return {
+      ok: true,
+      result: {
+        checklist: [],
+        checklist_items: [],
+        grounded_in: null,
+        ...designSystemStatus(input.project_id),
+        note:
+          "No checklist was extracted: this setup scores with Jev, which needs no ANTHROPIC_API_KEY and matches whole files rather than per-requirement items. " +
+          "Call recommend_component directly, without a checklist.",
+        extraction_confidence: "low",
         _meta: {
           total_ms: elapsedMs,
           breakdown_ms: { extract: elapsedMs, search: 0, score: 0 },
@@ -5342,6 +5377,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       if (/Anthropic API error \d+/.test(message)) {
         captureApiError({ tool: TOOL_NAME, message, projectId: args.project_id });
       }
+      captureToolError(TOOL_NAME, err);
       return {
         content: [{ type: "text", text: `Error: ${message}` }],
         isError: true,
@@ -5379,6 +5415,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       if (/Anthropic API error \d+/.test(message)) {
         captureApiError({ tool: EXTRACT_REQUIREMENTS_TOOL_NAME, message });
       }
+      captureToolError(EXTRACT_REQUIREMENTS_TOOL_NAME, err);
       return {
         content: [{ type: "text", text: `Error: ${message}` }],
         isError: true,
@@ -5763,6 +5800,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      captureToolError(REGISTER_DESIGN_SYSTEM_TOOL_NAME, err);
       return {
         content: [{ type: "text", text: `Error: ${message}` }],
         isError: true,
@@ -5828,12 +5866,21 @@ async function main() {
   // shadowed by a tool name collision later.
   const argv = process.argv.slice(2);
   if (argv[0] === "init") {
-    captureCliStarted("init", PACKAGE_VERSION);
-    await runConnect(
+    captureCliStarted("init", PACKAGE_VERSION, { stdinIsTTY: !!process.stdin.isTTY, subcommand: argv[0] });
+    const wizardState = await runConnect(
       PROJECT_ROOT,
       { yes: argv.includes("--yes") },
       { wizard: { projectId: deriveProjectId(PROJECT_ROOT), register: registerForWizard } },
     );
+    captureInitCompleted({
+      version: PACKAGE_VERSION,
+      clientConnected: wizardState.clientConnected,
+      selfTest: wizardState.selfTest,
+      anthropicKey: wizardState.anthropicKey,
+      designSystemRegistered: wizardState.designSystem !== null,
+      gate: wizardState.gate,
+      stepsDone: stepsDone(wizardState).filter(Boolean).length,
+    });
     await shutdownTelemetry();
     // Explicit exit, not a bare return -- shutdownTelemetry races a
     // bounded timeout (see telemetry.ts) so this always reaches here
@@ -5843,7 +5890,7 @@ async function main() {
     process.exit(0);
   }
 
-  captureCliStarted("server", PACKAGE_VERSION);
+  captureCliStarted("server", PACKAGE_VERSION, { stdinIsTTY: !!process.stdin.isTTY, subcommand: argv[0] });
   warnIfAnthropicKeyLooksWrong();
   printTelemetryNoticeOnce();
   // Piggybacks on this same first-run moment (Option B, see
@@ -5891,6 +5938,15 @@ async function main() {
       process.exit(0);
     });
   }
+  // A spawned stdio server normally ends because its client closed stdin,
+  // not because of a signal -- without this, those exits (and a client that
+  // dies before the handshake) leave a start with no exit event at all.
+  process.stdin.once("end", async () => {
+    if (idleNudgeTimer) clearTimeout(idleNudgeTimer);
+    captureExitOnce("stdin_closed");
+    await shutdownTelemetry();
+    process.exit(0);
+  });
 }
 
 // Guard exists so verification scripts (e.g. verify-ledger-boundary.mjs)
