@@ -2336,6 +2336,12 @@ are a biased, tiny sample of everyone who installs.
      (`valid`/`unverified`/`invalid`/`missing`, never the key), whether a
      design system was registered, whether enforcement was set up, and how
      many of the five steps finished. No paths, names or keys.
+   - When `recommend_component`, `extract_requirements` or
+     `register_design_system` fails: a single `pattern_cli_tool_error` event
+     with the tool name and a coarse `error_class` (`missing_api_key`,
+     `api_rate_limit`, `api_insufficient_credit`, `api_error`,
+     `truncated_output`, `session_cap`, `bad_arguments`, `file_not_found`,
+     `figma`, or `other`) -- never the message, paths or arguments.
    - On process exit, as of v0.14.0: a single `pattern_cli_exited` event
      carrying only a coarse reason (`sigint`, `sigterm`,
      `uncaught_exception`, `unhandled_rejection`,

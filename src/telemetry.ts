@@ -196,6 +196,44 @@ export function classifyApiError(message: string): { type: ApiErrorType; status:
   return { type: "other", status };
 }
 
+// Coarse bucket for ANY failed tool call, derived from the message text but
+// never forwarding it. @posthog/mcp already reports that a call errored and
+// its latency, but every error arrives as a bare "Error" with no message, so
+// 2026-10 data showed extract_requirements failing 62 of 65 calls and
+// register_design_system 590 of 1,736 with nothing to say why. A bucket is
+// enough to tell "no API key" from "bad arguments" from "upstream failure"
+// without sending a path, project name or message.
+export type ToolErrorClass =
+  | "missing_api_key"
+  | "api_rate_limit"
+  | "api_insufficient_credit"
+  | "api_error"
+  | "truncated_output"
+  | "session_cap"
+  | "bad_arguments"
+  | "file_not_found"
+  | "figma"
+  | "other";
+
+export function classifyToolError(message: string): ToolErrorClass {
+  if (/ANTHROPIC_API_KEY is not set/i.test(message)) return "missing_api_key";
+  if (/Anthropic API error/i.test(message)) {
+    const { type } = classifyApiError(message);
+    return type === "rate_limit" ? "api_rate_limit" : type === "insufficient_credit" ? "api_insufficient_credit" : "api_error";
+  }
+  if (/truncated|max_tokens/i.test(message)) return "truncated_output";
+  if (/Session call cap/i.test(message)) return "session_cap";
+  if (/ENOENT|no such file|not found/i.test(message)) return "file_not_found";
+  if (/figma/i.test(message)) return "figma";
+  if (/requires exactly one|needs |must be|invalid|required/i.test(message)) return "bad_arguments";
+  return "other";
+}
+
+export function captureToolError(tool: string, err: unknown): void {
+  const message = err instanceof Error ? err.message : String(err);
+  capture("pattern_cli_tool_error", { tool, error_class: classifyToolError(message) });
+}
+
 let client: PostHog | undefined;
 
 // Exported so index.ts's @posthog/mcp instrument() call shares this same

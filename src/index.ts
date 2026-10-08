@@ -46,6 +46,7 @@ import {
   captureApiError,
   captureCliExited,
   captureCliStarted,
+  captureToolError,
   captureInitCompleted,
   captureRecommendation,
   getClient as getPostHogClient,
@@ -5344,6 +5345,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       if (/Anthropic API error \d+/.test(message)) {
         captureApiError({ tool: TOOL_NAME, message, projectId: args.project_id });
       }
+      captureToolError(TOOL_NAME, err);
       return {
         content: [{ type: "text", text: `Error: ${message}` }],
         isError: true,
@@ -5381,6 +5383,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       if (/Anthropic API error \d+/.test(message)) {
         captureApiError({ tool: EXTRACT_REQUIREMENTS_TOOL_NAME, message });
       }
+      captureToolError(EXTRACT_REQUIREMENTS_TOOL_NAME, err);
       return {
         content: [{ type: "text", text: `Error: ${message}` }],
         isError: true,
@@ -5765,6 +5768,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      captureToolError(REGISTER_DESIGN_SYSTEM_TOOL_NAME, err);
       return {
         content: [{ type: "text", text: `Error: ${message}` }],
         isError: true,
