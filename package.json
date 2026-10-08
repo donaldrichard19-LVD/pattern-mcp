@@ -1,6 +1,6 @@
 {
   "name": "pattern-mcp",
-  "version": "0.22.0",
+  "version": "0.23.0",
   "description": "Pattern checks a coding agent's UI decisions against your own design system, in code or Figma, before it builds. It helps the agent reuse what the product already has and build only what is actually missing. An opt-in enforcement boundary can make that check required, and every decision is recorded in an auditable ledger you can verify later.",
   "type": "module",
   "main": "dist/index.js",

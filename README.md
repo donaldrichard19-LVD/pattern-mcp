@@ -14,7 +14,19 @@ is recorded in an auditable ledger you can verify later.
 
 [Website](https://usepattern.sh) · [npm](https://www.npmjs.com/package/pattern-mcp) · [Report an issue](https://github.com/donaldrichard19-LVD/pattern-mcp/issues/new/choose)
 
-**Current release: v0.22.0** closes a gap in the CI check. It only looked at
+**Current release: v0.23.0** makes first runs easier to diagnose and fixes a
+first-step failure. `npx pattern-mcp init` now starts Pattern once on its own
+(telemetry off) and tells you whether it came up, so "Connected" no longer only
+means a config entry was written. `extract_requirements` no longer errors in a
+setup scored by Jev with no `ANTHROPIC_API_KEY`: it returns an empty checklist
+and a note to call `recommend_component` directly, and the agent guidance says
+to carry on if that first step fails. Telemetry gains a few coarse fields and
+events (`pattern_cli_init_completed`, `pattern_cli_tool_error`, a
+`stdin_closed` exit reason, and `stdin_is_tty` / `invocation` / `from_init` on
+the start event); none carry a message, path, key or argument value, and the
+disclosure below lists each one. Opt out as before with `PATTERN_TELEMETRY=0`.
+
+**v0.22.0** closes a gap in the CI check. It only looked at
 new files, so a component declared inside a file that already existed (a
 sub-component, say) was never checked. The check now also compares each
 modified `.tsx`/`.jsx` file against the base branch and requires a decision for
