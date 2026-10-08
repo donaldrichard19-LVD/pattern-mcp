@@ -1,0 +1,6 @@
+ok    Node 22.22.0
+ok    Project root: /home/user/pattern-mcp
+ok    Project id (what the gate hook derives): pattern-mcp. Pass this same id to register_design_system, extract_requirements and recommend_component.
+FAIL  No Pattern MCP server entry found in ~/.claude.json, .mcp.json or .cursor/mcp.json. Run `npx pattern-mcp` to connect a client.
+warn  No design system registered for project id "pattern-mcp". recommend_component needs register_design_system first.
+ok    Gate hook installed in .claude/settings.json (restart the session that installed it)

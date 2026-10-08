@@ -1,0 +1,2 @@
+{"ok":false,"ungated_files":["src/components/PriceBreakdown.tsx"],"reason":"One or more new UI components have no matching .pattern/receipts/*.json entry."}
+exit=1

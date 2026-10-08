@@ -1,0 +1,24 @@
+Setting up Pattern's enforcement boundary (hook + CI gate)...
+
+
+  Creating .claude/settings.json:
+    {
+      "matcher": "Edit|Write",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "npx --yes -p pattern-mcp pattern-check-gate-hook",
+          "timeout": 60
+        }
+      ]
+    }
+  Written.
+
+  No GitHub remote detected -- skipping the GitHub Action workflow file.
+
+Done. Review the changes with `git status` / `git diff`, then commit when ready.
+
+Restart Claude Code: hooks are read when a session starts, so this hook will NOT fire in the session you ran init from.
+The gate matches ledger entries by project_id. Pass project_id "booking-app" to recommend_component and record_component_decision,
+and set file_path on recommend_component (or on record_component_decision afterwards) so the gate can find the entry.
+exit=0

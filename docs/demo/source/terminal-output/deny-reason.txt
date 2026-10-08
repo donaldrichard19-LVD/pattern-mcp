@@ -1,0 +1,1 @@
+No ledger entry found with file_path="src/components/PriceBreakdown.tsx" for project_id="booking-app". Call recommend_component with file_path set to this exact path before creating it; if the need was already judged, call record_component_decision with file_path set to attach it without re-scoring; or add `// pattern-mcp:override reason="..."` to the file.
