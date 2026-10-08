@@ -43,10 +43,12 @@ export interface WizardState {
   summaries: number | null;
   /** True when the user said their design system is not in Figma, so step 2 has nothing to do. */
   figmaNotNeeded: boolean;
+  /** Did a throwaway copy of the server complete initialize + tools/list? "skipped" when no client was connected. */
+  selfTest: "passed" | "failed" | "skipped";
 }
 
 export function newWizardState(): WizardState {
-  return { anthropicKey: "missing", figmaToken: "missing", clientConnected: false, skill: null, designSystem: null, gate: "not asked", summaries: null, figmaNotNeeded: false };
+  return { anthropicKey: "missing", figmaToken: "missing", clientConnected: false, skill: null, designSystem: null, gate: "not asked", summaries: null, figmaNotNeeded: false, selfTest: "skipped" };
 }
 
 // Accepts a bare key or any figma.com/design|file|proto|board URL.
@@ -374,7 +376,7 @@ export function wizardSummary(state: WizardState, projectId: string): string {
     `\nSetup: ${done} of ${WIZARD_STEPS} steps done`,
     `  ${mark(state.anthropicKey === "valid" || state.anthropicKey === "unverified")} 1. ${keyLine}`,
     `  ${mark(stepsDone(state)[1])} 2. ${state.figmaToken === "missing" && state.figmaNotNeeded ? "Figma token not needed" : state.figmaToken === "missing" ? "Figma token not set" : "Figma token saved"}`,
-    `  ${mark(state.clientConnected)} 3. Client connected`,
+    `  ${mark(state.clientConnected)} 3. Client connected${state.selfTest === "passed" ? " (server startup check passed)" : state.selfTest === "failed" ? " (server startup check FAILED)" : ""}`,
     `      ${mark(state.skill === "installed" || state.skill === "updated" || state.skill === "current")} Agent skill installed`,
     `  ${mark(state.designSystem !== null)} 4. Design system registered${state.designSystem ? ` (${state.designSystem.candidateCount} components${state.summaries ? `, ${state.summaries} summarised` : ""}, project "${projectId}")` : ""}`,
     `  ${mark(state.gate === "set up")} 5. Enforcement ${state.gate === "set up" ? "on" : "off (optional, turn it on any time)"}`,
@@ -383,6 +385,7 @@ export function wizardSummary(state: WizardState, projectId: string): string {
   if (state.anthropicKey === "missing" || state.anthropicKey === "invalid") todo.push("Add ANTHROPIC_API_KEY to the Pattern server's env block in your client config.");
   if (!state.clientConnected) todo.push("Connect a client: see the README's \"Connect Pattern to your MCP client\".");
   if (!state.designSystem) todo.push("Register a design system: paste a Figma link to your agent, or point it at your components folder.");
+  if (state.selfTest === "failed") todo.push("Pattern's own startup check failed: run `npx -p pattern-mcp pattern doctor` to see why.");
   todo.push("Restart your client so it loads Pattern.");
   lines.push("\nStill to do:", ...todo.map((t) => `  - ${t}`));
   if (state.clientConnected && state.designSystem) {

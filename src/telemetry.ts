@@ -290,6 +290,35 @@ export function captureCliStarted(
     version,
     stdin_is_tty: ctx.stdinIsTTY,
     invocation: ctx.subcommand === undefined ? "none" : ctx.subcommand === "init" ? "init" : "other",
+    // Set by the init wizard on the subprocesses it causes itself (`claude mcp
+    // list` health-checks every registered server, which starts Pattern), so
+    // those starts can be excluded from activation counts.
+    from_init: process.env.PATTERN_FROM_INIT === "1",
+  });
+}
+
+// One event per `init` run, with only coarse outcomes -- never keys, paths,
+// project names or component names. Exists because "init ran" and "the
+// client actually connected" are different things, and until now nothing
+// recorded which one a given run achieved.
+export type InitSelfTest = "passed" | "failed" | "skipped";
+export function captureInitCompleted(args: {
+  version: string;
+  clientConnected: boolean;
+  selfTest: InitSelfTest;
+  anthropicKey: string;
+  designSystemRegistered: boolean;
+  gate: string;
+  stepsDone: number;
+}): void {
+  capture("pattern_cli_init_completed", {
+    version: args.version,
+    client_connected: args.clientConnected,
+    self_test: args.selfTest,
+    anthropic_key: args.anthropicKey,
+    design_system_registered: args.designSystemRegistered,
+    gate: args.gate,
+    steps_done: args.stepsDone,
   });
 }
 

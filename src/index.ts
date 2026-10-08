@@ -46,6 +46,7 @@ import {
   captureApiError,
   captureCliExited,
   captureCliStarted,
+  captureInitCompleted,
   captureRecommendation,
   getClient as getPostHogClient,
   installId,
@@ -57,6 +58,7 @@ import { offerEnforcementSetupOnce } from "./init-enforcement.js";
 import { connectInstructionsText, offerClientConnectSetupOnce, runConnect } from "./client-connect.js";
 import { deriveProjectId } from "./project-id.js";
 import type { RegisterRequest as WizardRegisterRequest, RegisterResult as WizardRegisterResult } from "./setup-wizard.js";
+import { stepsDone } from "./setup-wizard.js";
 import { collapseForJev, rankWithJev } from "./design-system-jev.js";
 import { describeFigma, fetchFigmaFile, formatFigmaEvidence, parseFigmaFile, rankFigmaCandidates, type FigmaCandidateInfo, type FigmaEvidence } from "./design-system-figma.js";
 import { captionFigmaDesigns, carryOverCaptions } from "./design-system-figma-captions.js";
@@ -5829,11 +5831,20 @@ async function main() {
   const argv = process.argv.slice(2);
   if (argv[0] === "init") {
     captureCliStarted("init", PACKAGE_VERSION, { stdinIsTTY: !!process.stdin.isTTY, subcommand: argv[0] });
-    await runConnect(
+    const wizardState = await runConnect(
       PROJECT_ROOT,
       { yes: argv.includes("--yes") },
       { wizard: { projectId: deriveProjectId(PROJECT_ROOT), register: registerForWizard } },
     );
+    captureInitCompleted({
+      version: PACKAGE_VERSION,
+      clientConnected: wizardState.clientConnected,
+      selfTest: wizardState.selfTest,
+      anthropicKey: wizardState.anthropicKey,
+      designSystemRegistered: wizardState.designSystem !== null,
+      gate: wizardState.gate,
+      stepsDone: stepsDone(wizardState).filter(Boolean).length,
+    });
     await shutdownTelemetry();
     // Explicit exit, not a bare return -- shutdownTelemetry races a
     // bounded timeout (see telemetry.ts) so this always reaches here

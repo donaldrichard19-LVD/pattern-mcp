@@ -2323,12 +2323,19 @@ are a biased, tiny sample of everyone who installs.
      mode it ran in (`server` -- the normal MCP-server start, or `init` --
      the [connect wizard](#connect-pattern-to-your-mcp-client)), whether
      stdin was a terminal, and a coarse `invocation` bucket (`none`, `init`,
-     or `other` -- never the raw arguments). This
+     or `other` -- never the raw arguments), and whether the process was
+     started by the `init` wizard's own health check. This
      exists to separate real executions from npm registry traffic that
      never runs the code at all (security scanners, mirrors) -- something
      neither `recommend_component` counts nor `@posthog/mcp`'s handshake
      event below can answer, since both require getting further than a
      bare `npx pattern-mcp` run.
+   - When `init` finishes: a single `pattern_cli_init_completed` event with
+     only coarse outcomes -- whether a client was connected, whether the
+     wizard's startup self-test passed, whether an Anthropic key was set
+     (`valid`/`unverified`/`invalid`/`missing`, never the key), whether a
+     design system was registered, whether enforcement was set up, and how
+     many of the five steps finished. No paths, names or keys.
    - On process exit, as of v0.14.0: a single `pattern_cli_exited` event
      carrying only a coarse reason (`sigint`, `sigterm`,
      `uncaught_exception`, `unhandled_rejection`,
