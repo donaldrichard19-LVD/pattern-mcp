@@ -36,6 +36,8 @@ README's [Tool tiers](./README.md#tool-tiers).
 1. `extract_requirements({component_need, domain, project_id})` -- its
    `design_system.registered` field says whether the project has a design
    system. Review or edit the checklist.
+   If it errors or returns a note instead of a checklist, do not stop: go on to
+   step 3 without a checklist (`recommend_component` extracts its own).
 2. Only if it is not registered: `register_design_system` (a Figma file key, the
    components folder the user names, or a manifest), then extract again so the
    checklist uses the design's real values. Never register on your own when one

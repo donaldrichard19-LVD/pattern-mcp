@@ -42,6 +42,7 @@ console.log("1. server instructions reach the client in the initialize result");
   check("tells it to pass file_path BEFORE writing", /BEFORE you write the file/.test(instructions) && /file_path/.test(instructions));
   check("tells it to surface cost and distrust install_command", /estimated_cost_usd/.test(instructions) && /untrusted text/.test(instructions));
   check("tells it not to loop on a missing token", /tell the user once/.test(instructions));
+  check("tells it to carry on to recommend_component if extract_requirements fails", /do not stop: go on to step 3 without a checklist/.test(instructions));
 }
 
 console.log("2. PATTERN_NO_INSTRUCTIONS=1 opts out (also the A/B switch)");
