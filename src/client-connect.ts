@@ -373,11 +373,14 @@ function offerCodexInstructions(env: WizardEnv): void {
 export async function selfTestServer(timeoutMs = 20000): Promise<boolean> {
   const entry = process.argv[1];
   if (!entry) return false;
+  // Inherited PATTERN_NO_AUTOSTART (set by verification scripts that import
+  // this module) would make the child exit without serving and fail the check.
+  const { PATTERN_NO_AUTOSTART: _omit, ...inherited } = process.env as Record<string, string>;
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [entry],
     env: {
-      ...(process.env as Record<string, string>),
+      ...inherited,
       PATTERN_TELEMETRY: "0",
       PATTERN_FROM_INIT: "1",
       PATTERN_NO_CONNECT_NOTICE: "1",
