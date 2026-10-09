@@ -24,13 +24,13 @@ const scene = (label, cap) => {
   };
 };
 const scenes = [
-  scene('use-existing', '6 · Ask first. Pattern finds your tab switcher and says reuse it'),
-  scene('custom-build', '7 · Nothing fits a date picker, so Pattern says build it'),
+  scene('use-existing', '6 · Ask first. Pattern finds your tab switcher and says reuse it||Your agent uses what your product already has.'),
+  scene('custom-build', '7 · Nothing fits a date picker, so Pattern says build it||Your team builds only what is actually missing.'),
 ];
 
 const html = `<!doctype html><meta charset=utf8><style>
 body{margin:0;background:#0b0f14;font-family:'Inter',system-ui,sans-serif;color:#e6edf3;height:720px;overflow:hidden}
-#cap{height:96px;display:flex;align-items:center;padding:0 56px;font-size:30px;font-weight:600;letter-spacing:-.01em;background:#fff;color:#0b0f14;border-bottom:1px solid #e5e8ec}
+#cap{height:96px;display:flex;flex-direction:column;justify-content:center;gap:6px;padding:0 56px;background:#fff;color:#0b0f14;border-bottom:1px solid #e5e8ec}#cap b{font-size:30px;font-weight:600;letter-spacing:-.01em}#cap span{font-size:21px;color:#5b6572}
 #win{margin:28px 56px;height:520px;border-radius:12px;background:#111821;border:1px solid #243040;box-shadow:0 20px 50px #0008;overflow:hidden}
 #bar{height:36px;background:#1a2330;display:flex;align-items:center;gap:8px;padding:0 14px;color:#8aa;font:13px ui-monospace,monospace}
 #bar i{width:12px;height:12px;border-radius:50%;display:inline-block}
@@ -44,7 +44,7 @@ await p.setContent(html);
 const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
 await p.waitForTimeout(600);
 for (const s of scenes) {
-  await p.evaluate(c => { document.getElementById('cap').textContent = c; document.getElementById('t').innerHTML = ''; }, s.cap);
+  await p.evaluate(c => { const [h, w] = c.split('||'); document.getElementById('cap').innerHTML = '<b>' + h + '</b><span>' + w + '</span>'; document.getElementById('t').innerHTML = ''; }, s.cap);
   await p.waitForTimeout(500);
   let typed = '';
   for (const ch of s.cmd) {
