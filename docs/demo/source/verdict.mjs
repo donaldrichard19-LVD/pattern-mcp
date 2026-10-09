@@ -24,8 +24,8 @@ const scene = (label, cap) => {
   };
 };
 const scenes = [
-  scene('use-existing', '6 · Ask Pattern before building: this need is already covered'),
-  scene('custom-build', '7 · And when it is not, Pattern says build, and only the gap'),
+  scene('use-existing', '6 · Ask first. Pattern finds your tab switcher and says reuse it'),
+  scene('custom-build', '7 · Nothing fits a date picker, so Pattern says build it'),
 ];
 
 const html = `<!doctype html><meta charset=utf8><style>

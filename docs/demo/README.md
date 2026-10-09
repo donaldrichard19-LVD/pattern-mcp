@@ -1,6 +1,6 @@
 # Pattern demo video
 
-`pattern-demo.mp4` (about 75 s, 1280x720) is built from real footage:
+`pattern-demo.mp4` (about 67 s, 1280x720, no intro or end card) is built from real footage:
 
 - **Website:** a Playwright screen recording of https://usepattern.sh (hero, verdict card tabs, scroll through the sections).
 - **Terminal:** the real `pattern-check-gate` commands from this repo's build, run against a throwaway `booking-app` project. The output shown is captured verbatim in `source/terminal-output/` (the `init` JSON body is abbreviated with "…" on screen). The commands are `init`, the Claude Code PreToolUse hook denying a new component with no decision on record, the `// pattern-mcp:override` path, and `verify` failing then passing in CI.
@@ -11,4 +11,4 @@ Nothing in the video is simulated.
 
 To regenerate, run the scripts in `source/` with Playwright and ffmpeg available (the Playwright import path is hard-coded for the recording environment).
 
-To refresh the verdict scene: `npm run build`, then `DEMO_COMPONENTS_DIR=website/components DEMO_PROJECT_ID=pattern-website node docs/demo/source/capture-live-verdicts.mjs` (keys from the environment or `.env`; the directory must be inside the repo), then run `verdict.mjs` and `assemble.sh` from `docs/demo/source`.
+To refresh the verdict scene: `npm run build`, then `DEMO_COMPONENTS_DIR=website/components DEMO_PROJECT_ID=pattern-website node docs/demo/source/capture-live-verdicts.mjs` (keys from the environment or `.env`; the directory must be inside the repo), then, from `docs/demo/source`, run `term.mjs` and `verdict.mjs` (set `PLAYWRIGHT` and `CHROMIUM` to your Playwright module and Chrome paths) and `assemble.sh`.
