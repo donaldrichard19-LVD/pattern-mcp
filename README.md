@@ -14,7 +14,12 @@ is recorded in an auditable ledger you can verify later.
 
 [Website](https://usepattern.sh) · [npm](https://www.npmjs.com/package/pattern-mcp) · [Report an issue](https://github.com/donaldrichard19-LVD/pattern-mcp/issues/new/choose)
 
-**Current release: v0.23.0** makes first runs easier to diagnose and fixes a
+**Current release: v0.23.1** fixes a misleading hint. In a Jev-only setup with no
+design system registered, `extract_requirements` told the agent to call
+`recommend_component` next, which would fail; the note now says to register a
+design system first.
+
+**v0.23.0** makes first runs easier to diagnose and fixes a
 first-step failure. `npx pattern-mcp init` now starts Pattern once on its own
 (telemetry off) and tells you whether it came up, so "Connected" no longer only
 means a config entry was written. `extract_requirements` no longer errors in a
