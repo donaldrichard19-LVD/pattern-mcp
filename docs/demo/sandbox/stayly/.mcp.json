@@ -1,0 +1,1 @@
+{ "mcpServers": { "pattern": { "command": "npx", "args": ["-y", "pattern-mcp@0.23.1"], "env": { "ANTHROPIC_API_KEY": "${DEMO_PATTERN_KEY}", "PATTERN_TELEMETRY": "0" } } } }

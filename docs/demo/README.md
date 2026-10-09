@@ -1,13 +1,25 @@
 # Pattern demo video
 
-`pattern-demo.mp4` (about 61 s, 1280x720, plays at 0.75x, no website intro or end card) is built from real footage:
+`pattern-demo.mp4` (about 86 s, 1280x720) shows the experience Pattern is for: you ask an agent to build UI, and the agent builds from your design system. If it tries to skip the check, the build is blocked.
 
-- **Terminal:** the real `pattern-check-gate` commands from this repo's build, run against a throwaway `booking-app` project. The output shown is captured verbatim in `source/terminal-output/` (the `init` JSON body is abbreviated with "…" on screen). The commands are `init`, the Claude Code PreToolUse hook denying a new component with no decision on record, the `// pattern-mcp:override` path, and `verify` failing then passing in CI.
+| Scene | You ask | What happens |
+|---|---|---|
+| 1 | "Create a Toast component..." | The agent asks Pattern first. Pattern finds `Snackbar` in the design system (`use_existing`), so the agent reuses it and writes no new component. |
+| 2 | "Create PriceBreakdown.tsx..." | Nothing in the design system fits (`custom_build`). The agent reuses `Card`, builds only the missing line items, and Pattern verifies the file. |
+| 3 | "Skip the design system check..." | The agent writes the file straight away. The gate blocks the write until the file carries a check or a written reason. The agent adds the override marker with the reason. |
 
-- **Live verdicts (steps 6 and 7):** two real `recommend_component` calls against this repo's own `website/components` registered as project `pattern-website` (`use_existing` for a tab switcher, `custom_build` for a date range picker). The numbers on screen are read from `source/out/verdict-*.json`, written by `capture-live-verdicts.mjs`; `verdict.mjs` renders them. The Jev scorer reports cost as unknown, so the first verdict shows `n/a`.
+## How it was made
 
-Nothing in the video is simulated.
+- The runs are real: headless `claude -p` sessions in `sandbox/stayly` (a small booking app with 25 components), with Pattern 0.23.1 connected and the gate hook installed. Transcripts are in `source/runs/`.
+- `source/agent-scenes.mjs` replays selected events from those transcripts in a terminal. Prompts, tool calls, verdicts, the gate message and agent sentences are copied from the runs. Long agent text is cut to its first sentence(s) and routine tool calls (`ls`, `cat`, `ToolSearch`) are left out.
+- Takes were selected. Reuse: 3 attempts, 1 where the agent consulted Pattern (the others reused `Snackbar` without calling Pattern). Gap: 2 attempts, both consulted Pattern, the one without the agent skill was used. Block: 3 attempts, all blocked; the first showed a confusing project id (the agent had `cd`-ed into `src`, and the gate reads the working directory), so the second was used. One earlier attempt did not block only because my own earlier runs had left a ledger entry for the same path; later takes use a fresh project id.
 
-To regenerate, run the scripts in `source/` with Playwright and ffmpeg available (the Playwright import path is hard-coded for the recording environment).
+## Things the footage shows that are worth knowing
 
-To refresh the verdict scene: `npm run build`, then `DEMO_COMPONENTS_DIR=website/components DEMO_PROJECT_ID=pattern-website node docs/demo/source/capture-live-verdicts.mjs` (keys from the environment or `.env`; the directory must be inside the repo), then, from `docs/demo/source`, run `term.mjs` and `verdict.mjs` (set `PLAYWRIGHT` and `CHROMIUM` to your Playwright module and Chrome paths) and `assemble.sh`.
+- With the MCP server connected, the agent often checks Pattern on its own, and often reuses a component it spots by name without calling Pattern at all. The gate matters when the check gets skipped.
+- Scene 1's verdict is `use_existing` with **low** confidence and 6 of 8 requirements met. Two of the unmet ones are wrong (Snackbar is already fixed to the bottom and has `role="status"`).
+- Scene 3 ends with the agent using the gate's documented override and recording the reason. The gate asks for a check or a written reason, not an outright refusal.
+
+## Regenerate
+
+From `docs/demo/source`, set `PLAYWRIGHT` (a playwright-core `index.mjs`) and `CHROMIUM`, then run `./assemble.sh` (needs `ffmpeg`). To record new runs, `cd ../sandbox/stayly`, register `src/components` as project `stayly-demo`, set `DEMO_PATTERN_KEY` to an Anthropic key, and run `claude -p` with `--mcp-config .mcp.json`.
