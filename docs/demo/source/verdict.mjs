@@ -24,8 +24,8 @@ const scene = (label, cap) => {
   };
 };
 const scenes = [
-  scene('use-existing', '6 · Ask first. Pattern finds your tab switcher and says reuse it||Your agent uses what your product already has.'),
-  scene('custom-build', '7 · Nothing fits a date picker, so Pattern says build it||Your team builds only what is actually missing.'),
+  scene('use-existing', '6 · Ask first. Pattern finds your tab switcher and says reuse it||Your agent uses the components in your design system.'),
+  scene('custom-build', '7 · Nothing fits a date picker, so Pattern says build it||Only the components not in your design system get built from scratch.'),
 ];
 
 const html = `<!doctype html><meta charset=utf8><style>
