@@ -2112,9 +2112,14 @@ async function runExtraction(input: { component_need: string; domain: string; pr
         checklist_items: [],
         grounded_in: null,
         ...designSystemStatus(input.project_id),
+        // recommend_component throws NO_DESIGN_SYSTEM_MESSAGE when the project
+        // has nothing registered, so pointing straight at it would just move
+        // the failure one call later.
         note:
           "No checklist was extracted: this setup scores with Jev, which needs no ANTHROPIC_API_KEY and matches whole files rather than per-requirement items. " +
-          "Call recommend_component directly, without a checklist.",
+          (input.project_id && getRegisteredDesignSystem(input.project_id)
+            ? "Call recommend_component directly, without a checklist."
+            : "No design system is registered for this project yet: register one with register_design_system, then call recommend_component directly, without a checklist."),
         extraction_confidence: "low",
         _meta: {
           total_ms: elapsedMs,
