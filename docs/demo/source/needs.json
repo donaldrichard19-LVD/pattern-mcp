@@ -1,14 +1,14 @@
 [
   {
     "label": "custom-build",
-    "component_need": "price breakdown with fees and taxes",
-    "domain": "Airbnb-style rental marketplace",
-    "framework": "React + Tailwind"
+    "component_need": "date range picker with minimum and maximum stay validation",
+    "domain": "developer tools marketing site",
+    "framework": "React + Next.js"
   },
   {
     "label": "use-existing",
-    "component_need": "confirmation dialog with confirm and cancel actions",
-    "domain": "Airbnb-style rental marketplace",
-    "framework": "React + Tailwind"
+    "component_need": "segmented tab switcher with two or three labelled options",
+    "domain": "developer tools marketing site",
+    "framework": "React + Next.js"
   }
 ]

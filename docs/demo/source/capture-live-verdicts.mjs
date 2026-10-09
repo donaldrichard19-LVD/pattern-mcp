@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 // Runs real register_design_system + recommend_component calls against the built
 // server and saves each result to out/verdict-<label>.json and out/verdict-<label>.txt.
+// DEMO_COMPONENTS_DIR must sit inside this repo (the server rejects paths outside its project root).
 // Usage (from the repo root, after `npm run build`):
 //   DEMO_COMPONENTS_DIR=/path/to/your/src/components node docs/demo/source/capture-live-verdicts.mjs
 // Keys come from the environment (ANTHROPIC_API_KEY, TYPESAFE_API_KEY) or the repo's .env.
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
-import { resolve, dirname, join } from "node:path";
+import { resolve, dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 process.env.PATTERN_TELEMETRY ??= "0"; // keep demo traffic out of production analytics
@@ -34,7 +35,7 @@ await client.connect(transport);
 
 const parse = (r) => { const t = r.content?.[0]?.text ?? ""; try { return JSON.parse(t); } catch { return t; } };
 
-const reg = await client.callTool({ name: "register_design_system", arguments: { project_id: projectId, directory_path: resolve(dir), replace: true } });
+const reg = await client.callTool({ name: "register_design_system", arguments: { project_id: projectId, directory_path: relative(root, resolve(dir)), replace: true } });
 console.log("register:", reg.isError ? "ERROR" : "ok");
 writeFileSync(join(outDir, "register.json"), JSON.stringify(parse(reg), null, 2));
 if (reg.isError) { console.error(parse(reg)); process.exit(1); }
