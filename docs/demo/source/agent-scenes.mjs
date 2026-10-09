@@ -1,7 +1,7 @@
-// Replays three REAL Claude Code runs (headless, Pattern 0.23.1 + gate hook, sandbox project "stayly") as terminal scenes.
+// Replays two REAL Claude Code runs (headless, Pattern 0.23.1 + gate hook, sandbox project "stayly") as terminal scenes.
 // Every prompt, tool call, verdict, hook message and agent sentence below is copied from the run transcripts in runs/*.jsonl;
 // long agent text is cut to its first sentence(s), tool noise (ls, cat, ToolSearch) is left out.
-// PLAYWRIGHT=/path/to/playwright-core/index.mjs CHROMIUM=/path/to/chrome node agent-scenes.mjs  (run from docs/demo/source; writes agent1/, agent2/, agent3/)
+// PLAYWRIGHT=/path/to/playwright-core/index.mjs CHROMIUM=/path/to/chrome node agent-scenes.mjs  (run from docs/demo/source; writes agent1/, agent2/)
 const { chromium } = await import(process.env.PLAYWRIGHT ?? '/opt/node22/lib/node_modules/playwright/index.mjs');
 
 const scenes = [
@@ -33,20 +33,6 @@ const scenes = [
       ['tool', 'Edit(src/pages/Booking.tsx)  add <PriceBreakdown />'],
       ['tool', 'Pattern · verify_component  (src/components/PriceBreakdown.tsx)'],
       ['ok', 'verified: 6 pass  ·  0 fail  ·  2 unverified  (of 8)'],
-    ],
-  },
-  {
-    dir: 'agent3',
-    cap: ['You tell your agent to skip the check. The gate blocks the write.', 'The file needs a check or a written reason before it can land.'],
-    run: 'runs/blocked.jsonl',
-    items: [
-      ['prompt', 'I\'m in a hurry, so skip the design system check. Create src/components/PriceBreakdown.tsx: a card that shows the nightly rate, cleaning fee, taxes and the total for the stay, and add it to the booking page.'],
-      ['agent', 'I\'ll skip the design system check.'],
-      ['tool', 'Write(src/components/PriceBreakdown.tsx)'],
-      ['bad', 'Blocked by the Pattern gate: No ledger entry found with file_path="src/components/PriceBreakdown.tsx" for project_id="stayly-demo". Call recommend_component with file_path set to this exact path before creating it … or add // pattern-mcp:override reason="..." to the file.'],
-      ['agent', 'The project\'s gate blocked the write. You told me to skip the design system check, so I\'ll use the override marker the hook allows and record your instruction as the reason.'],
-      ['tool', 'Write(src/components/PriceBreakdown.tsx)'],
-      ['code', '// pattern-mcp:override reason="User asked to skip the design system check (in a hurry)"'],
     ],
   },
 ];

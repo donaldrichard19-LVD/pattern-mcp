@@ -1,24 +1,22 @@
 # Pattern demo video
 
-`pattern-demo.mp4` (about 86 s, 1280x720) shows the experience Pattern is for: you ask an agent to build UI, and the agent builds from your design system. If it tries to skip the check, the build is blocked.
+`pattern-demo.mp4` (about 53 s, 1280x720) shows the experience Pattern is for: you ask an agent to build UI, and the agent builds from your design system.
 
 | Scene | You ask | What happens |
 |---|---|---|
 | 1 | "Create a Toast component..." | The agent asks Pattern first. Pattern finds `Snackbar` in the design system (`use_existing`), so the agent reuses it and writes no new component. |
 | 2 | "Create PriceBreakdown.tsx..." | Nothing in the design system fits (`custom_build`). The agent reuses `Card`, builds only the missing line items, and Pattern verifies the file. |
-| 3 | "Skip the design system check..." | The agent writes the file straight away. The gate blocks the write until the file carries a check or a written reason. The agent adds the override marker with the reason. |
 
 ## How it was made
 
 - The runs are real: headless `claude -p` sessions in `sandbox/stayly` (a small booking app with 25 components), with Pattern 0.23.1 connected and the gate hook installed. Transcripts are in `source/runs/`.
-- `source/agent-scenes.mjs` replays selected events from those transcripts in a terminal. Prompts, tool calls, verdicts, the gate message and agent sentences are copied from the runs. Long agent text is cut to its first sentence(s) and routine tool calls (`ls`, `cat`, `ToolSearch`) are left out.
-- Takes were selected. Reuse: 3 attempts, 1 where the agent consulted Pattern (the others reused `Snackbar` without calling Pattern). Gap: 2 attempts, both consulted Pattern, the one without the agent skill was used. Block: 3 attempts, all blocked; the first showed a confusing project id (the agent had `cd`-ed into `src`, and the gate reads the working directory), so the second was used. One earlier attempt did not block only because my own earlier runs had left a ledger entry for the same path; later takes use a fresh project id.
+- `source/agent-scenes.mjs` replays selected events from those transcripts in a terminal. Prompts, tool calls, verdicts and agent sentences are copied from the runs. Long agent text is cut to its first sentence(s) and routine tool calls (`ls`, `cat`, `ToolSearch`) are left out.
+- Takes were selected. Reuse: 3 attempts, 1 where the agent consulted Pattern (the others reused `Snackbar` without calling Pattern). Gap: 2 attempts, both consulted Pattern, the one without the agent skill was used. One earlier attempt did not block only because my own earlier runs had left a ledger entry for the same path; later takes use a fresh project id.
 
 ## Things the footage shows that are worth knowing
 
-- With the MCP server connected, the agent often checks Pattern on its own, and often reuses a component it spots by name without calling Pattern at all. The gate matters when the check gets skipped.
+- With the MCP server connected, the agent often checks Pattern on its own, and often reuses a component it spots by name without calling Pattern at all. A third scene, where the gate blocks a skipped check, was recorded and cut; see the repo history for its transcript.
 - Scene 1's verdict is `use_existing` with **low** confidence and 6 of 8 requirements met. Two of the unmet ones are wrong (Snackbar is already fixed to the bottom and has `role="status"`).
-- Scene 3 ends with the agent using the gate's documented override and recording the reason. The gate asks for a check or a written reason, not an outright refusal.
 
 ## Regenerate
 
