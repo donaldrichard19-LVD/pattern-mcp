@@ -30,6 +30,12 @@ await build({
   platform: "node",
   format: "esm",
   target: "node18",
+  // check-gate.ts loads ./index.js with a dynamic import, and only for a file
+  // that is actually gated. Left to esbuild that import is inlined, which
+  // makes check-gate (run by a hook on every edit) carry a second copy of the
+  // whole server. Keeping it external loads the sibling dist/index.js bundle
+  // at runtime instead, exactly as the unbundled build did.
+  external: ["./index.js"],
   // Some bundled dependencies are CommonJS and call require() on node
   // builtins; ESM output has no require, so provide one.
   banner: {
