@@ -2239,7 +2239,11 @@ are a biased, tiny sample of everyone who installs.
      value's constructor name (e.g. `TypeError`) -- never the error
      message or stack trace. Paired with `pattern_cli_started` so a start
      with no matching MCP handshake is diagnosable as a crash instead of
-     silent.
+     silent. It also carries how long the process ran (`uptime_ms`), how
+     many bytes the client ever sent on stdin (`stdin_bytes_read`, a count
+     only, never the contents), the Node major version and the OS
+     (`platform`, e.g. `linux`), so a client that timed out waiting can be
+     told apart from a probe that spawned and killed the process.
 2. Standard MCP tool-call analytics, via
    [`@posthog/mcp`](https://posthog.com/docs/mcp-analytics): which tool
    was called, call duration, and success/failure, so unique installs and

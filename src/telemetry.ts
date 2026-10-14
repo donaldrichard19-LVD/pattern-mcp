@@ -379,11 +379,25 @@ export type CliExitReason =
 // never the error message or stack, which could contain a file path, a
 // stray argument value, or other local detail never sent by design (see
 // this file's header).
+//
+// `uptime_ms`, `stdin_bytes_read`, `node_major` and `platform` (added
+// 2026-10-14) tell apart the ways a start ends with no handshake: a client
+// that gave up waiting (long uptime, nothing ever read), a scanner or probe
+// that spawns and kills the process (about a second, nothing read), and a
+// client that sent data but never completed initialize (bytes read, no
+// handshake). `stdin_bytes_read` is a byte count read off the stream
+// afterwards -- never the bytes themselves, and no listener is attached to
+// stdin to get it, so it cannot interfere with the transport.
 export function captureCliExited(reason: CliExitReason, err: unknown, version: string): void {
+  const bytesRead = (process.stdin as { bytesRead?: unknown }).bytesRead;
   capture("pattern_cli_exited", {
     exit_reason: reason,
     error_name: err instanceof Error ? err.name : null,
     version,
+    uptime_ms: Math.round(process.uptime() * 1000),
+    stdin_bytes_read: typeof bytesRead === "number" ? bytesRead : null,
+    node_major: Number(process.versions.node.split(".")[0]),
+    platform: process.platform,
   });
 }
 

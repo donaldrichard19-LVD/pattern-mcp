@@ -36,17 +36,16 @@
     "templates"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node scripts/bundle.mjs",
     "start": "node dist/index.js",
     "prepublishOnly": "npm run build"
   },
-  "dependencies": {
+  "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
     "@posthog/mcp": "^0.13.0",
-    "posthog-node": "^5.51.4"
-  },
-  "devDependencies": {
     "@types/node": "^22.0.0",
+    "esbuild": "0.28.2",
+    "posthog-node": "^5.51.4",
     "typescript": "^5.5.0"
   },
   "engines": {
