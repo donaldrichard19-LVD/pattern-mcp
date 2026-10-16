@@ -1928,6 +1928,16 @@ search+score entirely, when **all** of the following hold:
 - The stored entry's `reason` is `"scored"` or `"no_candidates_found"`.
 - The stored entry is no older than `PATTERN_LEDGER_TTL_DAYS` (default
   **30** days, configurable).
+- The project's registered design system is unchanged since the entry was
+  written. Each entry stores `design_system_fingerprint`, a content hash of
+  every registered candidate (name, props, docs, usage example, summary,
+  file path) plus any stored Figma evidence; a hit needs it to equal the
+  current one. It is a content hash, not a timestamp, so re-registering
+  identical content keeps entries valid while any real change to a
+  registered component invalidates them. Entries written before this field
+  existed are re-scored once, then stored with a fingerprint. It reflects
+  the *registered* snapshot: a component edited on disk is not seen until
+  you re-register, and the fresh score uses that same snapshot.
 
 When served this way, the response has `reason: "ledger_cache_hit"`,
 `served_from_ledger: true`, `ledger_entry_id`, and
@@ -1940,8 +1950,8 @@ the verdict/confidence/coverage/chosen-candidate, not the original
 per-requirement reasoning.
 
 Any mismatch on the criteria above -- a different `domain`, a changed
-`existing_stack`, an entry that's gone stale, or one that wasn't
-high-confidence -- falls through to a normal, fresh search+score call.
+`existing_stack`, a changed design system, an entry that's gone stale, or
+one that wasn't high-confidence -- falls through to a normal, fresh search+score call.
 
 ### Turning the cache-hit exception off
 
