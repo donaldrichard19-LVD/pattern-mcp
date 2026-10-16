@@ -3199,6 +3199,14 @@ export interface LedgerEntry {
   cost_usd: number;
   cache_hit: boolean;
   project_conventions_snapshot: string | null;
+  // Fingerprint of the registered design system (candidates + stored Figma
+  // evidence) this verdict was scored against; see designSystemFingerprint.
+  // findLedgerCacheHit only serves an entry whose fingerprint equals the
+  // current one, so changing a registered component's props/docs (by
+  // re-registering) invalidates its cached "fits". Absent on entries written
+  // before this field existed: those never match a project that has a
+  // registered design system, and are re-scored once.
+  design_system_fingerprint?: string | null;
   // Ledger integrity + decision provenance fields (see PROJECT_ROOT above).
   // file_path/snapshot_ref are set once at write time and never change;
   // last_verified_live/live_status are the write-time defaults ("not yet
@@ -3226,6 +3234,39 @@ export interface LedgerEntry {
 function hashConventions(existingStack?: string): string | null {
   if (!existingStack) return null;
   return createHash("sha256").update(existingStack).digest("hex").slice(0, 16);
+}
+
+// JSON.stringify with object keys sorted, so equal content always hashes the
+// same regardless of the order fields were written in.
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
+  if (value && typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    return `{${Object.keys(obj)
+      .sort()
+      .map((k) => `${JSON.stringify(k)}:${stableStringify(obj[k])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+// Content hash of what a verdict was scored against for this project: every
+// registered candidate (name, props, docs, usage, summary, file path...) plus
+// the stored Figma evidence. Deliberately a content hash, not a timestamp or
+// mtime: registered_at / captured_at and the source path are left out, so
+// re-registering identical content keeps cached verdicts valid, while any
+// real change to a candidate invalidates them. Null when no design system is
+// registered. Note it reflects the REGISTERED snapshot -- a component edited
+// on disk but not re-registered is scored from the same snapshot either way.
+export function designSystemFingerprint(projectId: string): string | null {
+  const reg = getRegisteredDesignSystem(projectId);
+  if (!reg) return null;
+  const candidates = [...reg.candidates].sort((a, b) =>
+    `${a.name}\u0000${a.file_path ?? ""}`.localeCompare(`${b.name}\u0000${b.file_path ?? ""}`)
+  );
+  const evidence = readFigmaEvidence(projectId);
+  const material = stableStringify({ source_kind: reg.source_kind, candidates, figma_evidence: evidence?.evidence ?? null });
+  return createHash("sha256").update(material).digest("hex").slice(0, 16);
 }
 
 // Stable id for rolling up cost across recommend_component (verdict) and
@@ -3751,9 +3792,11 @@ function appendLedgerEntry(entry: LedgerEntry): void {
 // just what gets listed back to a caller browsing history.
 function findLedgerCacheHit(
   input: { component_need: string; domain: string; framework: string; existing_stack?: string },
-  entries: LedgerEntry[]
+  entries: LedgerEntry[],
+  designFingerprint: string | null = null
 ): LedgerEntry | null {
   const snapshot = hashConventions(input.existing_stack);
+  let staleByDesignSystem = 0;
   const needLower = input.component_need.trim().toLowerCase();
   const ttlMs = LEDGER_TTL_DAYS * 24 * 60 * 60 * 1000;
   const now = Date.now();
@@ -3767,9 +3810,20 @@ function findLedgerCacheHit(
     if (e.reason !== "scored" && e.reason !== "no_candidates_found") return false;
     const age = now - new Date(e.timestamp).getTime();
     if (!Number.isFinite(age) || age > ttlMs) return false;
+    // Last on purpose, so the count below only reflects entries that every
+    // other rule would have served: the design system changed under them.
+    if ((e.design_system_fingerprint ?? null) !== designFingerprint) {
+      staleByDesignSystem++;
+      return false;
+    }
     return true;
   });
-  if (eligible.length === 0) return null;
+  if (eligible.length === 0) {
+    if (staleByDesignSystem > 0) {
+      console.error(JSON.stringify({ diagnostic: "ledger_cache_stale_design_system", entries: staleByDesignSystem }));
+    }
+    return null;
+  }
   return eligible.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0];
 }
 
@@ -4267,6 +4321,7 @@ function buildLedgerEntry(
     cost_usd: opts.costUsd,
     cache_hit: opts.cacheHit,
     project_conventions_snapshot: hashConventions(input.existing_stack),
+    design_system_fingerprint: designSystemFingerprint(projectId),
     // Feature 2 P0: captured fresh for every entry (cache hits included),
     // not inherited from a matched ledger_cache_hit -- this reflects the
     // codebase state at the moment *this line* was written, not the
@@ -4303,7 +4358,7 @@ async function judgeComponent(input: {
   // "always fresh" behavior can be restored without removing this code.
   const ledgerCacheHit =
     LEDGER_CACHE_HIT_ENABLED && !isSkipListMatch(input.component_need) && input.project_id
-      ? findLedgerCacheHit(input, readLedgerEntries(input.project_id))
+      ? findLedgerCacheHit(input, readLedgerEntries(input.project_id), designSystemFingerprint(input.project_id))
       : null;
 
   if (ledgerCacheHit) {
