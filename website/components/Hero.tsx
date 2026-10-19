@@ -1,16 +1,14 @@
 "use client";
 
 import { useState, type CSSProperties, type ReactNode } from "react";
-import { QUICKSTART } from "./constants";
+import { INSTALL_COMMAND, INSTALL_COMMAND_AGENT, QUICKSTART } from "./constants";
 import { MONO } from "./tokens";
 import { Chip, CopyBlock, SegTabs, trackClick } from "./ui";
 
-// `init --yes` (not the bare server command) so this is safe for a coding
-// agent to run non-interactively -- bare `npx pattern-mcp` starts a real
-// process that just sits on stdin waiting for a client, which would hang
-// an agent's shell tool call instead of completing. `init --yes` detects
-// and connects every supported client and exits, no prompts.
-const INSTALL_LINES = ["npx pattern-mcp init --yes"];
+// The interactive `init` (not the bare server command, which starts a real process that just
+// sits on stdin waiting for a client). A coding agent that can't answer prompts uses
+// `init --yes`, which only connects the client -- see the note under the command.
+const INSTALL_LINES = [INSTALL_COMMAND];
 
 const VERDICT_LINES = [
   "{",
@@ -254,6 +252,9 @@ export function Hero() {
         <VerdictCard />
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <CopyBlock label="install command" lines={INSTALL_LINES} />
+          <p style={{ margin: 0, fontSize: 13, lineHeight: 1.5, color: "var(--text-tertiary)" }}>
+            Running it from a coding agent? Use <code style={{ ...MONO, fontSize: 12, whiteSpace: "nowrap" }}>{INSTALL_COMMAND_AGENT}</code>: it connects your client with no prompts. Run the command above yourself afterward to add your key and design system.
+          </p>
           <a
             href={QUICKSTART}
             target="_blank"
