@@ -213,6 +213,7 @@ export type ToolErrorClass =
   | "bad_arguments"
   | "file_not_found"
   | "figma"
+  | "no_design_system"
   | "other";
 
 export function classifyToolError(message: string): ToolErrorClass {
@@ -223,6 +224,7 @@ export function classifyToolError(message: string): ToolErrorClass {
   }
   if (/truncated|max_tokens/i.test(message)) return "truncated_output";
   if (/Session call cap/i.test(message)) return "session_cap";
+  if (/No design system (is )?registered/i.test(message)) return "no_design_system";
   if (/ENOENT|no such file|not found/i.test(message)) return "file_not_found";
   if (/figma/i.test(message)) return "figma";
   if (/requires exactly one|needs |must be|invalid|required/i.test(message)) return "bad_arguments";
@@ -321,7 +323,7 @@ export function captureRecommendation(args: {
 export function captureCliStarted(
   mode: "server" | "init",
   version: string,
-  ctx: { stdinIsTTY: boolean; subcommand: string | undefined } = { stdinIsTTY: false, subcommand: undefined },
+  ctx: { stdinIsTTY: boolean; subcommand: string | undefined; hasAnthropicKey?: boolean; hasDesignSystem?: boolean } = { stdinIsTTY: false, subcommand: undefined },
 ): void {
   capture("pattern_cli_started", {
     mode,
@@ -332,6 +334,11 @@ export function captureCliStarted(
     // list` health-checks every registered server, which starts Pattern), so
     // those starts can be excluded from activation counts.
     from_init: process.env.PATTERN_FROM_INIT === "1",
+    // Whether this run is set up enough to give a verdict. Booleans only -- never the key or
+    // the project name. Without them a start that can only error is indistinguishable from a
+    // working one, so "started but unconfigured" could not be counted.
+    ...(ctx.hasAnthropicKey === undefined ? {} : { has_anthropic_key: ctx.hasAnthropicKey }),
+    ...(ctx.hasDesignSystem === undefined ? {} : { has_design_system: ctx.hasDesignSystem }),
   });
 }
 

@@ -60,6 +60,7 @@ import { connectInstructionsText, offerClientConnectSetupOnce, runConnect } from
 import { deriveProjectId } from "./project-id.js";
 import type { RegisterRequest as WizardRegisterRequest, RegisterResult as WizardRegisterResult } from "./setup-wizard.js";
 import { stepsDone } from "./setup-wizard.js";
+import { runKeysCommand } from "./keys-command.js";
 import { collapseForJev, rankWithJev } from "./design-system-jev.js";
 import { describeFigma, fetchFigmaFile, formatFigmaEvidence, parseFigmaFile, rankFigmaCandidates, type FigmaCandidateInfo, type FigmaEvidence } from "./design-system-figma.js";
 import { captionFigmaDesigns, carryOverCaptions } from "./design-system-figma-captions.js";
@@ -139,8 +140,8 @@ function warnIfAnthropicKeyLooksWrong(): void {
   if (!ANTHROPIC_API_KEY) {
     console.error(
       DESIGN_SYSTEM_JEV_ENABLED
-        ? "Pattern: ANTHROPIC_API_KEY is not set. recommend_component will score with Jev only (no custom-build gap list); extract_requirements will fail until it is set."
-        : "Pattern: ANTHROPIC_API_KEY is not set. recommend_component and extract_requirements will fail until it is."
+        ? "Pattern: ANTHROPIC_API_KEY is not set. recommend_component will score with Jev only (no custom-build gap list); extract_requirements will fail until it is set. Add it with: npx pattern-mcp keys"
+        : "Pattern: ANTHROPIC_API_KEY is not set. recommend_component and extract_requirements will fail until it is. Add it with: npx pattern-mcp keys"
     );
     return;
   }
@@ -163,12 +164,14 @@ function warnIfAnthropicKeyLooksWrong(): void {
 // the one method that works the same way across every client, since it
 // doesn't depend on any client-specific config format.
 const NO_DESIGN_SYSTEM_MESSAGE =
-  "No design system registered for this project_id. Pattern judges components against your own design system: call register_design_system first (figma_file_key, figma_json_path, directory_path, or manifest_path), then re-run with the same project_id.";
+  "SETUP NEEDED: no design system is registered for this project_id. Pattern judges components against the user's own design system, so ask them where it lives " +
+  "(a components folder in this repo, or a Figma file link), then call register_design_system (directory_path, figma_file_key, figma_json_path or manifest_path) and re-run with the same project_id. " +
+  "A Figma file also needs FIGMA_ACCESS_TOKEN in Pattern's config: tell the user to run `npx pattern-mcp keys` (never ask them to paste a token into chat).";
 
 const MISSING_API_KEY_MESSAGE =
-  "Pattern: ANTHROPIC_API_KEY is not set, so this call can't reach the Anthropic API. Fix it one of two ways: " +
-  "re-run `npx pattern-mcp init` to add it to your MCP client's config, or export it directly -- " +
-  "`export ANTHROPIC_API_KEY=sk-ant-...` in the shell your client launches Pattern from, then restart the client.";
+  "SETUP NEEDED: ANTHROPIC_API_KEY is not set, so this call can't reach the Anthropic API. Tell the user to run `npx pattern-mcp keys` in a terminal " +
+  "(it writes the key into their MCP client's config for Pattern; never ask them to paste a key into chat), then restart the client. " +
+  "Alternatively they can export it in the shell the client is launched from and restart the client.";
 // Configurable so Sonnet vs. Haiku can be A/B tested without a code change.
 // Defaults to Sonnet 5. Try MODEL=claude-haiku-4-5-20251001 to test the
 // cheaper tier -- re-run the 5 validated test cases from the product brief
@@ -5925,12 +5928,33 @@ async function main() {
   // starting the server. Checked before anything else so it can't be
   // shadowed by a tool name collision later.
   const argv = process.argv.slice(2);
+  // Setup state, as booleans only, for the start event (see telemetry.ts captureCliStarted).
+  const setupState = () => ({
+    hasAnthropicKey: !!ANTHROPIC_API_KEY,
+    hasDesignSystem: !!getRegisteredDesignSystem(deriveProjectId(PROJECT_ROOT)),
+  });
+  const flagValue = (name: string): string | undefined => {
+    const i = argv.indexOf(name);
+    const v = i >= 0 ? argv[i + 1] : undefined;
+    return v && !v.startsWith("--") ? v : undefined;
+  };
+
+  // `npx pattern-mcp keys` -- add or change the keys in the client config; see keys-command.ts.
+  if (argv[0] === "keys") {
+    const code = await runKeysCommand(PROJECT_ROOT, argv.slice(1));
+    process.exit(code);
+  }
+
   if (argv[0] === "init") {
-    captureCliStarted("init", PACKAGE_VERSION, { stdinIsTTY: !!process.stdin.isTTY, subcommand: argv[0] });
+    captureCliStarted("init", PACKAGE_VERSION, { stdinIsTTY: !!process.stdin.isTTY, subcommand: argv[0], ...setupState() });
+    const yes = argv.includes("--yes");
     const wizardState = await runConnect(
       PROJECT_ROOT,
-      { yes: argv.includes("--yes") },
-      { wizard: { projectId: deriveProjectId(PROJECT_ROOT), register: registerForWizard } },
+      { yes },
+      {
+        wizard: { projectId: deriveProjectId(PROJECT_ROOT), register: registerForWizard },
+        flags: { designSystem: flagValue("--design-system"), figma: flagValue("--figma") },
+      },
     );
     captureInitCompleted({
       version: PACKAGE_VERSION,
@@ -5947,10 +5971,13 @@ async function main() {
     // promptly, but an explicit exit is the same defense-in-depth the
     // SIGINT/SIGTERM handlers below already use rather than trusting the
     // event loop to drain on its own if some other handle is lingering.
-    process.exit(0);
+    // Non-zero only when nothing was connected: an unattended run (a coding agent, a script)
+    // must not read "exit 0" as "Pattern is usable". Connected-but-incomplete exits 0 and the
+    // output says SETUP INCOMPLETE and what is missing.
+    process.exit(yes && !wizardState.clientConnected ? 2 : 0);
   }
 
-  captureCliStarted("server", PACKAGE_VERSION, { stdinIsTTY: !!process.stdin.isTTY, subcommand: argv[0] });
+  captureCliStarted("server", PACKAGE_VERSION, { stdinIsTTY: !!process.stdin.isTTY, subcommand: argv[0], ...setupState() });
   warnIfAnthropicKeyLooksWrong();
   printTelemetryNoticeOnce();
   // Piggybacks on this same first-run moment (Option B, see

@@ -79,10 +79,13 @@ export interface ClaudeListServer {
 export function patternServersInClaudeList(output: string): ClaudeListServer[] {
   const found: ClaudeListServer[] = [];
   for (const line of output.split("\n")) {
-    const m = /^(.+?): (.+) - ([✔✘!].*)$/.exec(line.trim());
+    // Claude Code prints a different tick/cross per platform and terminal
+    // (✔ ✘ on most, √ × where it can't draw them); an unrecognised glyph used to
+    // hide a healthy Pattern entry, so init tried to add a second one.
+    const m = /^(.+?): (.+) - ([✔✓√✘✗×!⚠].*)$/.exec(line.trim());
     if (!m) continue;
     const [, name, command, status] = m;
-    if (name === "pattern" || RUNS_PATTERN.test(command)) found.push({ name, ok: status.startsWith("✔") });
+    if (name === "pattern" || RUNS_PATTERN.test(command)) found.push({ name, ok: /^[✔✓√]/.test(status) });
   }
   return found;
 }

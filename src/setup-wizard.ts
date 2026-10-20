@@ -7,9 +7,27 @@
 
 import { existsSync, statSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
-import { askLine, confirm, promptText, type PromptOptions } from "./prompt.js";
+import { askLine, askSecret, confirm, promptText, type PromptOptions } from "./prompt.js";
 
 export type WizardEnv = Record<string, string>;
+
+/** What `init --design-system <path>` / `init --figma <link>` ask for, so one unattended command can finish setup. */
+export interface InitFlags {
+  designSystem?: string;
+  figma?: string;
+}
+
+const ENV_KEYS = ["ANTHROPIC_API_KEY", "ANTHROPIC_WORKSPACE_ID", "FIGMA_ACCESS_TOKEN"] as const;
+
+/** The keys already set in this shell, so a non-interactive run can write them into the client config. */
+export function pickEnvKeys(src: NodeJS.ProcessEnv = process.env): WizardEnv {
+  const out: WizardEnv = {};
+  for (const k of ENV_KEYS) {
+    const v = src[k]?.trim();
+    if (v) out[k] = v;
+  }
+  return out;
+}
 
 export type RegisterRequest =
   | { kind: "figma"; fileKey: string; token: string; replace?: boolean; excludePages?: string[] }
@@ -120,14 +138,14 @@ export function wizardIntro(): string {
   ].join("\n");
 }
 
-async function askKey(
+export async function askKey(
   label: string,
   hint: string,
   check: (k: string) => Promise<KeyCheck>,
   options: PromptOptions,
 ): Promise<{ value: string | null; status: WizardState["anthropicKey"]; needsWorkspace?: boolean }> {
   for (let attempt = 0; attempt < 3; attempt++) {
-    const answer = (await askLine(`${hint ? `${hint}\n` : ""}  Paste your ${label}, or press Enter to skip: `)).trim();
+    const answer = (await askSecret(`${hint ? `${hint}\n` : ""}  Paste your ${label} (input is hidden), or press Enter to skip: `)).trim();
     if (!answer) return { value: null, status: "missing" };
     process.stdout.write("  Checking it... ");
     const result = await check(answer);
@@ -151,7 +169,20 @@ export async function runKeysSteps(
   fetchImpl?: typeof fetch,
 ): Promise<WizardEnv> {
   const env: WizardEnv = {};
-  if (options.yes) return env;
+  if (options.yes) {
+    // Non-interactive: nothing to ask, but a key already exported in this shell is
+    // exactly what the user would have pasted, so carry it into the client config
+    // (in plain text, same as the interactive path) instead of dropping it.
+    const picked = pickEnvKeys();
+    for (const [k, v] of Object.entries(picked)) {
+      env[k] = v;
+      console.log(`  Using ${k} from your environment (written into the client config in plain text; not checked).`);
+    }
+    if (picked.ANTHROPIC_API_KEY) state.anthropicKey = "unverified";
+    if (picked.FIGMA_ACCESS_TOKEN) state.figmaToken = "unverified";
+    if (!picked.ANTHROPIC_API_KEY) console.log("  No ANTHROPIC_API_KEY in your environment. Add it afterward with: npx pattern-mcp keys");
+    return env;
+  }
 
   stepHeader(1, WIZARD_STEPS, "Anthropic key");
   console.log(
@@ -275,10 +306,24 @@ export async function runDesignSystemStep(
   env: WizardEnv,
   state: WizardState,
   options: PromptOptions,
+  flags: InitFlags = {},
 ): Promise<void> {
   stepHeader(4, WIZARD_STEPS, "Your design system");
   if (options.yes) {
-    console.log("  Skipped in --yes mode (it needs your input). Run `npx pattern-mcp init` again to register one.");
+    const req = flagRegisterRequest(root, env, flags);
+    if (typeof req === "string") {
+      console.log(`  ${req}`);
+      return;
+    }
+    if (!req) {
+      console.log(
+        "  Skipped: --yes cannot ask where your design system lives. Pass --design-system <components folder> or\n" +
+          "  --figma <file link>, run `npx pattern-mcp init` for the guided version, or ask your agent to register one.",
+      );
+      return;
+    }
+    console.log(req.kind === "figma" ? "  Fetching the file from Figma (large files take a minute)..." : "  Reading your components...");
+    await finishRegistration(deps, req, state, options);
     return;
   }
   console.log(
@@ -337,6 +382,29 @@ export async function runDesignSystemStep(
   if (!req) return;
 
   console.log(choice === "1" ? "  Fetching the file from Figma (large files take a minute)..." : "  Reading your components...");
+  await finishRegistration(deps, req, state, options);
+}
+
+// Turns --figma / --design-system into a registration request. A string is a
+// message to print instead (bad input); null means no flag was given.
+function flagRegisterRequest(root: string, env: WizardEnv, flags: InitFlags): RegisterRequest | string | null {
+  if (flags.figma) {
+    const token = env.FIGMA_ACCESS_TOKEN ?? process.env.FIGMA_ACCESS_TOKEN;
+    if (!token) return "--figma needs FIGMA_ACCESS_TOKEN in your environment (or run `npx pattern-mcp keys`). Skipping.";
+    const fileKey = parseFigmaFileKey(flags.figma);
+    if (!fileKey) return `"${flags.figma}" does not look like a Figma file link or key. Skipping.`;
+    return { kind: "figma", fileKey, token };
+  }
+  if (flags.designSystem) {
+    const rel = toRootRelative(root, flags.designSystem);
+    if ("error" in rel) return `${rel.error} Skipping.`;
+    const isFile = statSync(join(root, rel.rel)).isFile();
+    return { kind: isFile ? "manifest" : "directory", path: rel.rel };
+  }
+  return null;
+}
+
+async function finishRegistration(deps: WizardDeps, req: RegisterRequest, state: WizardState, options: PromptOptions): Promise<void> {
   const result = await registerWithReplacePrompt(deps, req, options);
   if (!result) {
     console.log("  Nothing registered. Your agent can register one later; the tool explains what it needs.");
@@ -356,6 +424,7 @@ export async function runDesignSystemStep(
   }
 }
 
+
 // The five steps announced in wizardIntro, in order. Optional ones count: a step
 // the user chose not to do (enforcement) is still a step that is not done yet.
 export function stepsDone(state: WizardState): boolean[] {
@@ -366,6 +435,30 @@ export function stepsDone(state: WizardState): boolean[] {
     state.designSystem !== null,
     state.gate === "set up",
   ];
+}
+
+export interface SetupGaps {
+  client: boolean;
+  key: boolean;
+  designSystem: boolean;
+}
+
+/** What still blocks a first successful recommend_component. A Jev-scored setup needs no Anthropic key. */
+export function setupGaps(state: WizardState, env: NodeJS.ProcessEnv = process.env): SetupGaps {
+  const jev = env.PATTERN_SCORER === "jev" || (env.PATTERN_SCORER !== "anthropic" && !!env.TYPESAFE_API_KEY);
+  return {
+    client: !state.clientConnected,
+    key: !jev && !(state.anthropicKey === "valid" || state.anthropicKey === "unverified"),
+    designSystem: state.designSystem === null,
+  };
+}
+
+export function setupStatusLine(state: WizardState): string {
+  const g = setupGaps(state);
+  const missing = [g.client && "a connected client", g.key && "ANTHROPIC_API_KEY", g.designSystem && "a registered design system"].filter(Boolean);
+  return missing.length === 0
+    ? "Status: SETUP COMPLETE -- restart your client, then ask your agent for a screen."
+    : `Status: SETUP INCOMPLETE -- missing: ${missing.join(", ")}. Pattern will not give verdicts until these are done.`;
 }
 
 export function wizardSummary(state: WizardState, projectId: string): string {
@@ -382,12 +475,12 @@ export function wizardSummary(state: WizardState, projectId: string): string {
     `  ${mark(state.gate === "set up")} 5. Enforcement ${state.gate === "set up" ? "on" : "off (optional, turn it on any time)"}`,
   ];
   const todo: string[] = [];
-  if (state.anthropicKey === "missing" || state.anthropicKey === "invalid") todo.push("Add ANTHROPIC_API_KEY to the Pattern server's env block in your client config.");
+  if (setupGaps(state).key) todo.push("Add ANTHROPIC_API_KEY: run `npx pattern-mcp keys` (it writes the key into your client config; never paste it into chat).");
   if (!state.clientConnected) todo.push("Connect a client: see the README's \"Connect Pattern to your MCP client\".");
-  if (!state.designSystem) todo.push("Register a design system: paste a Figma link to your agent, or point it at your components folder.");
+  if (!state.designSystem) todo.push("Register a design system: `npx pattern-mcp init --yes --design-system <components folder>`, or paste a Figma link to your agent (needs FIGMA_ACCESS_TOKEN: `npx pattern-mcp keys`).");
   if (state.selfTest === "failed") todo.push("Pattern's own startup check failed: run `npx -p pattern-mcp pattern doctor` to see why.");
   todo.push("Restart your client so it loads Pattern.");
-  lines.push("\nStill to do:", ...todo.map((t) => `  - ${t}`));
+  lines.push("\n" + setupStatusLine(state), "\nStill to do:", ...todo.map((t) => `  - ${t}`));
   if (state.clientConnected && state.designSystem) {
     lines.push(
       "\nTry it: after the restart, ask your agent for a screen, for example \"build a settings page\".",

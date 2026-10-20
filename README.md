@@ -43,6 +43,24 @@ does step by step, or
 [Connect Pattern to your MCP client](#connect-pattern-to-your-mcp-client)
 if you'd rather connect a client by hand.
 
+**Unattended (a script, or a coding agent running it for you):**
+`npx pattern-mcp init --yes` asks nothing. It connects the clients it finds,
+and writes `ANTHROPIC_API_KEY` / `FIGMA_ACCESS_TOKEN` into the client config
+if they are exported in your shell (the key is never printed). Add
+`--design-system <components folder>` or `--figma <file link>` to register
+your design system in the same command. It ends with `Status: SETUP COMPLETE`
+or `Status: SETUP INCOMPLETE -- missing: ...`, and exits non-zero (2) only if
+no client was connected, so a caller can tell "connected but not finished"
+from "nothing happened".
+
+**Add or change a key later:** `npx pattern-mcp keys` prompts with the input
+hidden and writes the key into every Pattern entry it finds (Claude Code,
+Claude Desktop, this project's Cursor config). Use `--from-env` to take
+`ANTHROPIC_API_KEY` / `ANTHROPIC_WORKSPACE_ID` / `FIGMA_ACCESS_TOKEN` from the
+shell instead. Re-running `init` does the same for an entry that already
+exists. Keys are never sent through the agent or chat; restart your client
+afterward.
+
 ## What Pattern Does
 
 Pattern looks at what you need, checks the components in your own
@@ -2224,7 +2242,9 @@ are a biased, tiny sample of everyone who installs.
      the [connect wizard](#connect-pattern-to-your-mcp-client)), whether
      stdin was a terminal, and a coarse `invocation` bucket (`none`, `init`,
      or `other` -- never the raw arguments), and whether the process was
-     started by the `init` wizard's own health check. This
+     started by the `init` wizard's own health check, and two booleans,
+     `has_anthropic_key` and `has_design_system`, saying whether this run is set
+     up enough to give a verdict (never the key or the project name). This
      exists to separate real executions from npm registry traffic that
      never runs the code at all (security scanners, mirrors) -- something
      neither `recommend_component` counts nor `@posthog/mcp`'s handshake

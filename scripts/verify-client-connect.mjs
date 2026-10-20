@@ -269,7 +269,7 @@ console.log("4. pattern-mcp init: no client detected -> fallback instructions, e
 {
   const { root, home } = scratch();
   const result = runInit(root, home, ["--yes"]);
-  check("exits 0", result.status === 0);
+  check("exits 2: nothing was connected, so an unattended run must not read as success", result.status === 2);
   check("prints fallback instructions", result.stdout.includes("No supported MCP client was detected"));
   check("does not hang waiting on stdio (would have timed out above otherwise)", true);
   cleanup(root, home);
@@ -312,7 +312,7 @@ console.log("6. pattern-mcp init: Codex detected -> prints instructions, writes 
   const { root, home } = scratch();
   mkdirSync(join(home, ".codex"), { recursive: true });
   const result = runInit(root, home, ["--yes"]);
-  check("exits 0", result.status === 0);
+  check("exits 2: nothing was connected, so an unattended run must not read as success", result.status === 2);
   check("detected Codex", result.stdout.includes("Codex CLI detected"));
   check("printed manual TOML snippet", result.stdout.includes("mcp_servers.pattern"));
   check("did not write a config.toml", !existsSync(join(home, ".codex", "config.toml")));
@@ -338,7 +338,7 @@ console.log("8. pattern-mcp init: Codex + no key -> generic export reminder, no 
   const { root, home } = scratch();
   mkdirSync(join(home, ".codex"), { recursive: true });
   const result = runInit(root, home, ["--yes"]);
-  check("exits 0", result.status === 0);
+  check("exits 2: nothing was connected, so an unattended run must not read as success", result.status === 2);
   check("prints the generic export reminder", result.stdout.includes("export ANTHROPIC_API_KEY=sk-ant-..."));
   check("does not claim a key was entered", !result.stdout.includes("You entered an API key above"));
   cleanup(root, home);
@@ -394,7 +394,7 @@ console.log("10. recommend_component: a skip-list primitive succeeds with no ANT
     });
     check(
       "a real (non-skip-list) call still fails without a key, with the actionable message",
-      realCallResult.isError && (realCallResult.content?.[0]?.text ?? "").includes("re-run `npx pattern-mcp init`"),
+      realCallResult.isError && (realCallResult.content?.[0]?.text ?? "").includes("SETUP NEEDED") && (realCallResult.content?.[0]?.text ?? "").includes("npx pattern-mcp keys"),
     );
   } finally {
     await client.close();
