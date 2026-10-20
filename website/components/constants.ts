@@ -8,4 +8,4 @@ export const QUICKSTART = REPO + "#quickstart";
 export const INSTALL_COMMAND = "npx pattern-mcp init";
 export const INSTALL_COMMAND_AGENT = "npx pattern-mcp init --yes";
 // Update by hand alongside each pattern-mcp release (this directory deploys in isolation).
-export const PATTERN_VERSION = "0.24.0";
+export const PATTERN_VERSION = "0.24.1";

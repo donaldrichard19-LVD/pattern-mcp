@@ -168,6 +168,22 @@ const NO_DESIGN_SYSTEM_MESSAGE =
   "(a components folder in this repo, or a Figma file link), then call register_design_system (directory_path, figma_file_key, figma_json_path or manifest_path) and re-run with the same project_id. " +
   "A Figma file also needs FIGMA_ACCESS_TOKEN in Pattern's config: tell the user to run `npx pattern-mcp keys` (never ask them to paste a token into chat).";
 
+// A design system registered under another name is the commonest reason a set-up
+// repo still hits NO_DESIGN_SYSTEM_MESSAGE (the agent picked a different
+// project_id than the one init used). Never alias silently -- the registry is shared
+// across repos -- but name the likely id so the agent retries with it.
+function noDesignSystemMessage(projectId: string | undefined): string {
+  const here = deriveProjectId(PROJECT_ROOT);
+  const registered = Object.keys(readDesignSystems());
+  let hint = "";
+  if (projectId && projectId !== here && getRegisteredDesignSystem(here)) {
+    hint = ` This repo's design system is registered under project_id "${here}": retry with that exact project_id.`;
+  } else if (registered.length > 0) {
+    hint = ` Registered project_ids on this machine: ${registered.slice(0, 10).join(", ")}. If one of them is this repo, retry with that exact project_id.`;
+  }
+  return NO_DESIGN_SYSTEM_MESSAGE + hint;
+}
+
 const MISSING_API_KEY_MESSAGE =
   "SETUP NEEDED: ANTHROPIC_API_KEY is not set, so this call can't reach the Anthropic API. Tell the user to run `npx pattern-mcp keys` in a terminal " +
   "(it writes the key into their MCP client's config for Pattern; never ask them to paste a key into chat), then restart the client. " +
@@ -1512,14 +1528,14 @@ async function runSinglePass(input: {
   // A Jev-only setup has no Anthropic key by design, so report the missing
   // design system first there; otherwise the key check leads (see
   // verify-client-connect.mjs).
-  if (noDesignSystem && DESIGN_SYSTEM_JEV_ENABLED) throw new Error(NO_DESIGN_SYSTEM_MESSAGE);
+  if (noDesignSystem && DESIGN_SYSTEM_JEV_ENABLED) throw new Error(noDesignSystemMessage(input.project_id));
 
   if (!ANTHROPIC_API_KEY) {
     throw new Error(MISSING_API_KEY_MESSAGE);
   }
 
   if (noDesignSystem) {
-    throw new Error(NO_DESIGN_SYSTEM_MESSAGE);
+    throw new Error(noDesignSystemMessage(input.project_id));
   }
 
   // Coverage still computes fresh below regardless of what this finds --
@@ -2038,10 +2054,10 @@ async function runVerifyComponent(input: { project_id: string; file_path: string
 }
 
 /** Lets a caller tell "registered" from "not registered" without trying to register (which could replace). */
-function designSystemStatus(projectId: string | undefined): { design_system?: { registered: boolean; source_kind?: string; candidate_count?: number } } {
+function designSystemStatus(projectId: string | undefined): { design_system?: { registered: boolean; try_project_id?: string; source_kind?: string; candidate_count?: number } } {
   if (!projectId) return {};
   const reg = getRegisteredDesignSystem(projectId);
-  return { design_system: reg ? { registered: true, source_kind: reg.source_kind, candidate_count: reg.candidate_count } : { registered: false } };
+  return { design_system: reg ? { registered: true, source_kind: reg.source_kind, candidate_count: reg.candidate_count } : { registered: false, ...(projectId !== deriveProjectId(PROJECT_ROOT) && getRegisteredDesignSystem(deriveProjectId(PROJECT_ROOT)) ? { try_project_id: deriveProjectId(PROJECT_ROOT) } : {}) } };
 }
 
 export type ChecklistBasis = "figma-evidenced" | "inferred" | "general-practice";
