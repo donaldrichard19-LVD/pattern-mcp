@@ -22,7 +22,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { SKILL_NAME } from "./agent-guidance.js";
 import { deriveProjectId } from "./project-id.js";
-import { findPatternEntry, patternServersInClaudeList, type ClaudeListServer } from "./server-entry.js";
+import { findPatternEntry, patternServersInClaudeList, type ClaudeListServer, type McpEntryLike } from "./server-entry.js";
 import { askLine, closeRl, confirm, type PromptOptions } from "./prompt.js";
 import { runInit } from "./init-enforcement.js";
 import {
@@ -32,6 +32,7 @@ import {
   WIZARD_STEPS,
   wizardIntro,
   wizardSummary,
+  type InitFlags,
   type WizardDeps,
   type WizardEnv,
   type WizardState,
@@ -67,7 +68,7 @@ function hasCommand(cmd: string, versionFlag = "--version"): boolean {
 
 // Pattern servers Claude Code already has, under ANY name (a hand-made entry
 // for a dev checkout is "connected" too), with whether each one is healthy.
-function claudeCodePatternServers(): ClaudeListServer[] {
+export function claudeCodePatternServers(): ClaudeListServer[] {
   try {
     const out = execFileSync("claude", ["mcp", "list"], {
       // `claude mcp list` health-checks every registered server, i.e. starts
@@ -83,6 +84,112 @@ function claudeCodePatternServers(): ClaudeListServer[] {
   }
 }
 
+// What `claude mcp get <name>` reports about one registered server. Output looks like:
+//   pattern:
+//     Scope: User config (available in all your projects)
+//     Command: npx
+//     Args: pattern-mcp
+//     Environment:
+//       FOO=bar
+/** Secrets must not reach the terminal, scrollback or an agent's transcript: show KEY=*** instead of KEY=value. */
+export function maskEnvArgs(args: string[]): string[] {
+  return args.map((a, i) => (args[i - 1] === "-e" ? a.replace(/=.*$/s, "=***") : a));
+}
+export function maskEntryEnv(entry: Record<string, unknown>): Record<string, unknown> {
+  const env = entry.env as Record<string, string> | undefined;
+  if (!env) return entry;
+  return { ...entry, env: Object.fromEntries(Object.keys(env).map((k) => [k, "***"])) };
+}
+
+export interface ClaudeMcpEntry {
+  scope: "user" | "local" | "project";
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+}
+
+export function parseClaudeMcpGet(text: string): ClaudeMcpEntry | null {
+  const scopeWord = /^\s*Scope:\s*(User|Local|Project)/im.exec(text)?.[1]?.toLowerCase();
+  const command = /^\s*Command:\s*(.+)$/im.exec(text)?.[1]?.trim();
+  if (!scopeWord || !command) return null;
+  const args = (/^\s*Args:\s*(.*)$/im.exec(text)?.[1] ?? "").trim().split(/\s+/).filter(Boolean);
+  const env: Record<string, string> = {};
+  const envBlock = /^\s*Environment:\s*\n((?:\s+[A-Za-z_][A-Za-z0-9_]*=.*\n?)*)/im.exec(text)?.[1] ?? "";
+  for (const line of envBlock.split("\n")) {
+    const m = /^\s+([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(line);
+    if (m) env[m[1]] = m[2];
+  }
+  return { scope: scopeWord as ClaudeMcpEntry["scope"], command, args, env };
+}
+
+/** Which of these keys the registered Claude Code entry lacks or has with a different value. Unreadable entry -> all of them. */
+export function keysDifferingInClaudeEntry(name: string, env: WizardEnv): string[] {
+  try {
+    const entry = parseClaudeMcpGet(execFileSync("claude", ["mcp", "get", name], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 15000 }));
+    if (!entry) return Object.keys(env);
+    return Object.keys(env).filter((k) => entry.env[k] !== env[k]);
+  } catch {
+    return Object.keys(env);
+  }
+}
+
+export type EnvUpdate = { ok: true; added: string[] } | { ok: false; reason: string };
+
+/**
+ * Adds keys to an ALREADY registered Claude Code server. The CLI has no "edit", so this reads the
+ * entry, removes it and adds it back with the merged environment; if the add fails it puts the
+ * original back, so a failure never leaves the user without Pattern.
+ */
+export function updateClaudeCodeEntryEnv(name: string, newEnv: WizardEnv): EnvUpdate {
+  const run = (args: string[]): string => execFileSync("claude", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 20000 });
+  let entry: ClaudeMcpEntry | null;
+  try {
+    entry = parseClaudeMcpGet(run(["mcp", "get", name]));
+  } catch (err) {
+    return { ok: false, reason: `could not read the "${name}" entry (${err instanceof Error ? err.message.split("\n")[0] : String(err)})` };
+  }
+  if (!entry) return { ok: false, reason: `could not read the scope and command of the "${name}" entry from \`claude mcp get\`` };
+
+  const add = (env: Record<string, string>): void => {
+    const args = ["mcp", "add", name, "--scope", entry!.scope];
+    for (const [k, v] of Object.entries(env)) args.push("-e", `${k}=${v}`);
+    args.push("--", entry!.command, ...entry!.args);
+    run(args);
+  };
+  const merged = { ...entry.env, ...newEnv };
+  try {
+    run(["mcp", "remove", name, "-s", entry.scope]);
+  } catch (err) {
+    return { ok: false, reason: `could not remove the old "${name}" entry (${err instanceof Error ? err.message.split("\n")[0] : String(err)}); nothing was changed` };
+  }
+  try {
+    add(merged);
+    return { ok: true, added: Object.keys(newEnv).filter((k) => entry!.env[k] !== newEnv[k]) };
+  } catch (err) {
+    try {
+      add(entry.env); // restore what was there
+    } catch {
+      return { ok: false, reason: `adding it back failed AND restoring the original failed. Re-add it by hand: claude mcp add ${name} --scope ${entry.scope} -- ${entry.command} ${entry.args.join(" ")}` };
+    }
+    return { ok: false, reason: `adding the updated entry failed (${err instanceof Error ? err.message.split("\n")[0] : String(err)}); the original was restored` };
+  }
+}
+
+/** Same, for a JSON client config (Claude Desktop, Cursor): sets env on the existing Pattern entry. */
+export function updateJsonServerEnv(path: string, newEnv: WizardEnv): EnvUpdate | { ok: false; reason: string; notFound: true } {
+  const { config, existed, valid } = readJsonConfig(path);
+  if (!existed) return { ok: false, reason: "file not found", notFound: true };
+  if (!valid) return { ok: false, reason: "not valid JSON; fix it by hand first" };
+  const servers = { ...(config.mcpServers ?? {}) } as Record<string, McpEntryLike & { env?: Record<string, string> }>;
+  const found = findPatternEntry(servers);
+  if (!found) return { ok: false, reason: "no Pattern entry", notFound: true };
+  const current = (found.entry.env ?? {}) as Record<string, string>;
+  const added = Object.keys(newEnv).filter((k) => current[k] !== newEnv[k]);
+  servers[found.name] = { ...found.entry, env: { ...current, ...newEnv } } as McpEntryLike & { env?: Record<string, string> };
+  writeFileSync(path, JSON.stringify({ ...config, mcpServers: servers }, null, 2) + "\n", "utf8");
+  return { ok: true, added };
+}
+
 async function setupClaudeCode(env: WizardEnv, options: ConnectOptions, state: WizardState): Promise<void> {
   if (!hasCommand("claude")) return;
   console.log("\nClaude Code detected (`claude` on PATH).");
@@ -93,6 +200,17 @@ async function setupClaudeCode(env: WizardEnv, options: ConnectOptions, state: W
     if (existing.some((s) => s.ok)) {
       console.log(`  Already connected (\`claude mcp list\` shows Pattern as ${names}) -- skipping.`);
       state.clientConnected = true;
+      // A key given this run (typed, or exported in this shell) used to be dropped here. Add it to the entry that exists.
+      if (Object.keys(env).length > 0) {
+        const name = existing.find((x) => x.ok)!.name;
+        const differing = keysDifferingInClaudeEntry(name, env);
+        if (differing.length === 0) {
+          console.log("  That entry already has those keys.");
+        } else if (await confirm(`  Add ${differing.join(", ")} to the existing "${name}" entry?`, options, true)) {
+          const r = updateClaudeCodeEntryEnv(name, env);
+          console.log(r.ok ? `  Updated "${name}": set ${r.added.join(", ") || "nothing new"}. Restart Claude Code.` : `  Could not update it: ${r.reason}.`);
+        }
+      }
     } else {
       console.log(
         `  Pattern is already registered as ${names}, but Claude Code reports it failed to connect.\n` +
@@ -116,7 +234,7 @@ async function setupClaudeCode(env: WizardEnv, options: ConnectOptions, state: W
   if (everywhere) args.push("--scope", "user");
   args.push("--", SERVER_COMMAND, ...SERVER_ARGS);
 
-  console.log(`  Running: claude ${args.map((a) => (a.includes(" ") ? `"${a}"` : a)).join(" ")}`);
+  console.log(`  Running: claude ${maskEnvArgs(args).map((a) => (a.includes(" ") ? `"${a}"` : a)).join(" ")}`);
   const proceed = await confirm("  Proceed?", options, true);
   if (!proceed) {
     console.log("  Skipped.");
@@ -227,6 +345,16 @@ async function mergeServerConfig(
   if (already) {
     console.log(`\n${label}: Pattern already configured in ${path} (as "${already.name}") -- skipping.`);
     state.clientConnected = true;
+    if (Object.keys(env).length > 0) {
+      const current = ((already.entry as { env?: Record<string, string> }).env ?? {}) as Record<string, string>;
+      const differing = Object.keys(env).filter((k) => current[k] !== env[k]);
+      if (differing.length === 0) {
+        console.log("That entry already has those keys.");
+      } else if (await confirm(`Add ${differing.join(", ")} to that entry?`, options, true)) {
+        const r = updateJsonServerEnv(path, env);
+        console.log(r.ok ? `Updated ${label}: set ${r.added.join(", ") || "nothing new"}. Restart ${label}.` : `Could not update it: ${r.reason}.`);
+      }
+    }
     return;
   }
 
@@ -235,7 +363,7 @@ async function mergeServerConfig(
 
   console.log(`\n${existed ? "Merging into" : "Creating"} ${label} config at ${path}:`);
   console.log(
-    JSON.stringify({ pattern: entry }, null, 2)
+    JSON.stringify({ pattern: maskEntryEnv(entry) }, null, 2)
       .split("\n")
       .map((l) => `  ${l}`)
       .join("\n"),
@@ -281,7 +409,7 @@ export function isAnyClientConnected(root: string): boolean {
 // Claude Desktop isn't shipped on Linux -- there's no config path to
 // even guess at there, so this target is simply not offered on that
 // platform rather than writing a file no client will ever read.
-function claudeDesktopConfigPath(): string | null {
+export function claudeDesktopConfigPath(): string | null {
   const home = homedir();
   switch (platform()) {
     case "darwin":
@@ -417,6 +545,8 @@ export interface RunConnectExtras {
   fetchImpl?: typeof fetch;
   /** Overridable in tests; `false` skips the startup check. */
   selfTest?: (() => Promise<boolean>) | false;
+  /** `--design-system` / `--figma`, used by the non-interactive design-system step. */
+  flags?: InitFlags;
 }
 
 export async function runConnect(root: string, options: ConnectOptions, extras: RunConnectExtras = {}): Promise<WizardState> {
@@ -460,7 +590,7 @@ export async function runConnect(root: string, options: ConnectOptions, extras: 
     }
 
     if (wizard) {
-      await runDesignSystemStep(root, wizard, env, state, options);
+      await runDesignSystemStep(root, wizard, env, state, options, extras.flags);
       if (!options.yes) {
         console.log(`\n[5/${WIZARD_STEPS}] Enforcement (optional)`);
         console.log("  A project hook plus a CI check that stops a new component shipping without a recorded Pattern decision.");

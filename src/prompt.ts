@@ -18,6 +18,7 @@
 // (queue path).
 
 import { createInterface, type Interface } from "node:readline";
+import { Writable } from "node:stream";
 
 export interface PromptOptions {
   yes: boolean;
@@ -45,6 +46,31 @@ export function askLine(promptStr: string): Promise<string> {
   const queued = lineQueue.shift();
   if (queued !== undefined) return Promise.resolve(queued);
   return new Promise((resolve) => waiters.push(resolve));
+}
+
+// Like askLine, but the typed characters are not echoed when stdin is a terminal,
+// so a pasted API key does not end up on screen or in scrollback. Piped input
+// (scripts, tests) has nothing to hide and falls back to askLine.
+export async function askSecret(promptStr: string): Promise<string> {
+  if (!process.stdin.isTTY) return askLine(promptStr);
+  closeRl();
+  process.stdout.write(promptStr);
+  let muted = true;
+  const out = new Writable({
+    write(chunk, _enc, cb) {
+      if (!muted) process.stdout.write(chunk);
+      cb();
+    },
+  });
+  const secret = createInterface({ input: process.stdin, output: out, terminal: true });
+  return new Promise((resolve) => {
+    secret.question("", (answer) => {
+      muted = false;
+      secret.close();
+      process.stdout.write("\n");
+      resolve(answer);
+    });
+  });
 }
 
 export function closeRl(): void {

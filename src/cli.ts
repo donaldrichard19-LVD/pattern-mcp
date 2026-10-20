@@ -127,7 +127,7 @@ export async function runDoctor(root: string, opts: { online: boolean; projectId
     for (const k of KEYS) {
       const present = typeof entry.env[k] === "string" && entry.env[k].length > 0;
       const why = { ANTHROPIC_API_KEY: "recommend_component scoring", TYPESAFE_API_KEY: "Jev fast matching", FIGMA_ACCESS_TOKEN: "figma_file_key registration" }[k];
-      out.push(present ? { level: "ok", text: `${k} set in server env (${why})` } : { level: k === "ANTHROPIC_API_KEY" ? "fail" : "warn", text: `${k} NOT in the server's env block (${why} unavailable)` });
+      out.push(present ? { level: "ok", text: `${k} set in server env (${why})` } : { level: k === "ANTHROPIC_API_KEY" ? "fail" : "warn", text: `${k} NOT in the server's env block (${why} unavailable)${k === "ANTHROPIC_API_KEY" || k === "FIGMA_ACCESS_TOKEN" ? "; add it with: npx pattern-mcp keys" : ""}` });
     }
     const dotenv = parseDotEnv(join(root, ".env"));
     const stranded = KEYS.filter((k) => dotenv.has(k) && !entry.env[k]);
