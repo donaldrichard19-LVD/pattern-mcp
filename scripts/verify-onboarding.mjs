@@ -92,7 +92,7 @@ function run(d, args, extraEnv = {}, { stdin = "" } = {}) {
   const r = spawnSync(join(d, "bin", "node"), [join(dist, "index.js"), ...args], {
     cwd: join(d, "proj"), input: stdin, encoding: "utf8", timeout: 90000,
     env: { HOME: join(d, "home"), PATH: join(d, "bin"), PATTERN_PROJECT_ROOT: join(d, "proj"), PATTERN_TELEMETRY: "0", PATTERN_TELEMETRY_NOTICE_PATH: join(d, "notice"),
-      PATTERN_DESIGN_SYSTEMS_PATH: join(d, "ds.json"), PATTERN_LEDGER_PATH: join(d, "ledger.jsonl"), PATTERN_MEMORY_PATH: join(d, "mem.json"), PATTERN_NO_SUMMARIES: "1",
+      PATTERN_DESIGN_SYSTEMS_PATH: join(d, "ds.json"), PATTERN_LEDGER_PATH: join(d, "ledger.jsonl"), PATTERN_MEMORY_PATH: join(d, "mem.json"), PATTERN_NO_SUMMARIES: "1", PATTERN_ANTHROPIC_URL: "http://127.0.0.1:9",
       STUB_STATE: join(d, "state.json"), STUB_LOG: join(d, "claude.log"), ...extraEnv },
   });
   return { out: (r.stdout ?? "") + (r.stderr ?? ""), code: r.status };
@@ -276,6 +276,37 @@ console.log("11. the start event says whether this run is set up (booleans only)
   const props = JSON.stringify(full?.properties ?? {});
 check("the key is never in the event, and only these two setup fields were added", !props.includes(KEY) && !/"anthropic_api_key"/i.test(props) && Object.keys(full?.properties ?? {}).filter((k) => /^has_/.test(k)).sort().join() === "has_anthropic_key,has_design_system", props);
   srv.close();
+}
+
+console.log("12. init --yes checks the key it carries instead of reporting a rejected one as done");
+{
+  // The stub API runs in its own process: run() blocks this one with spawnSync.
+  const api = spawn(NODE, ["-e", `const s=require("http").createServer((q,r)=>{r.statusCode=q.headers["x-api-key"]==="sk-ant-GOOD"?200:401;r.end("{}")});s.listen(0,"127.0.0.1",()=>console.log(s.address().port))`], { stdio: ["ignore", "pipe", "inherit"] });
+  const port = await new Promise((res) => api.stdout.once("data", (b) => res(Number(String(b).trim()))));
+  const url = `http://127.0.0.1:${port}`;
+  const good = run(world("yes-good"), ["init", "--yes", "--design-system", "src/components"], { ANTHROPIC_API_KEY: "sk-ant-GOOD", PATTERN_ANTHROPIC_URL: url });
+  check("accepted key: says ok, SETUP COMPLETE, exit 0", /ANTHROPIC_API_KEY: ok/.test(good.out) && /SETUP COMPLETE/.test(good.out) && good.code === 0, good.out);
+  const bad = run(world("yes-bad"), ["init", "--yes", "--design-system", "src/components"], { ANTHROPIC_API_KEY: "sk-ant-BAD", PATTERN_ANTHROPIC_URL: url });
+  check("rejected key: says WRONG and SETUP INCOMPLETE naming the rejected key", /ANTHROPIC_API_KEY: WRONG/.test(bad.out) && /SETUP INCOMPLETE -- missing: a working ANTHROPIC_API_KEY/.test(bad.out), bad.out);
+  check("rejected key: still never printed", !bad.out.includes("sk-ant-BAD"));
+  const down = run(world("yes-down"), ["init", "--yes", "--design-system", "src/components"], { ANTHROPIC_API_KEY: "sk-ant-GOOD" });
+  check("API unreachable: 'not confirmed', does not block setup", /not confirmed/.test(down.out) && /SETUP COMPLETE/.test(down.out), down.out);
+  api.kill();
+}
+
+console.log("13. a wrong project_id points at the id this repo is registered under");
+{
+  const d = world("pid-hint");
+  run(d, ["init", "--yes", "--design-system", "src/components"], {});
+  const here = deriveProjectId(join(d, "proj"));
+  const t = new StdioClientTransport({ command: join(d, "bin", "node"), args: [join(dist, "index.js")], cwd: join(d, "proj"), stderr: "ignore",
+    env: { HOME: join(d, "home"), PATH: join(d, "bin"), PATTERN_PROJECT_ROOT: join(d, "proj"), PATTERN_TELEMETRY: "0", PATTERN_DESIGN_SYSTEMS_PATH: join(d, "ds.json"), PATTERN_LEDGER_PATH: join(d, "l.jsonl"), PATTERN_MEMORY_PATH: join(d, "m.json"), ANTHROPIC_API_KEY: "sk-ant-x" } });
+  const c = new Client({ name: "t", version: "1" }, { capabilities: {} });
+  await c.connect(t);
+  const call = async (name, args) => JSON.stringify(await c.callTool({ name, arguments: args }));
+  const wrong = await call("recommend_component", { component_need: "a data table", domain: "saas", framework: "react", project_id: "some-other-name" });
+  check("error says SETUP NEEDED and names the right project_id", wrong.includes("SETUP NEEDED") && wrong.includes(`registered under project_id \\"${here}\\"`), wrong);
+  await c.close();
 }
 
 console.log(failures === 0 ? "\nAll checks passed." : `\n${failures} check(s) FAILED.`);

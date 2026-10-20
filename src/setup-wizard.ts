@@ -176,10 +176,18 @@ export async function runKeysSteps(
     const picked = pickEnvKeys();
     for (const [k, v] of Object.entries(picked)) {
       env[k] = v;
-      console.log(`  Using ${k} from your environment (written into the client config in plain text; not checked).`);
+      console.log(`  Using ${k} from your environment (written into the client config in plain text).`);
     }
-    if (picked.ANTHROPIC_API_KEY) state.anthropicKey = "unverified";
-    if (picked.FIGMA_ACCESS_TOKEN) state.figmaToken = "unverified";
+    if (picked.ANTHROPIC_API_KEY) {
+      const r = await checkAnthropicKey(picked.ANTHROPIC_API_KEY, fetchImpl, picked.ANTHROPIC_WORKSPACE_ID);
+      state.anthropicKey = r.status;
+      console.log(`  ANTHROPIC_API_KEY: ${r.status === "valid" ? "ok" : r.status === "invalid" ? "WRONG" : "not confirmed"} (${r.message}).`);
+    }
+    if (picked.FIGMA_ACCESS_TOKEN) {
+      const r = await checkFigmaToken(picked.FIGMA_ACCESS_TOKEN, fetchImpl);
+      state.figmaToken = r.status;
+      console.log(`  FIGMA_ACCESS_TOKEN: ${r.status === "valid" ? "ok" : r.status === "invalid" ? "WRONG" : "not confirmed"} (${r.message}).`);
+    }
     if (!picked.ANTHROPIC_API_KEY) console.log("  No ANTHROPIC_API_KEY in your environment. Add it afterward with: npx pattern-mcp keys");
     return env;
   }
@@ -455,7 +463,7 @@ export function setupGaps(state: WizardState, env: NodeJS.ProcessEnv = process.e
 
 export function setupStatusLine(state: WizardState): string {
   const g = setupGaps(state);
-  const missing = [g.client && "a connected client", g.key && "ANTHROPIC_API_KEY", g.designSystem && "a registered design system"].filter(Boolean);
+  const missing = [g.client && "a connected client", g.key && (state.anthropicKey === "invalid" ? "a working ANTHROPIC_API_KEY (the saved one was rejected)" : "ANTHROPIC_API_KEY"), g.designSystem && "a registered design system"].filter(Boolean);
   return missing.length === 0
     ? "Status: SETUP COMPLETE -- restart your client, then ask your agent for a screen."
     : `Status: SETUP INCOMPLETE -- missing: ${missing.join(", ")}. Pattern will not give verdicts until these are done.`;
