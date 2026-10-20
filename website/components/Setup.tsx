@@ -1,14 +1,15 @@
 "use client";
 
-import { BODY, H2, LABEL, SECTION } from "./tokens";
+import { INSTALL_COMMAND, INSTALL_COMMAND_AGENT } from "./constants";
+import { BODY, H2, LABEL, MONO, SECTION } from "./tokens";
 import { CopyBlock, Reveal } from "./ui";
 
-const INSTALL_LINES = ["npx pattern-mcp init --yes"];
+const INSTALL_LINES = [INSTALL_COMMAND];
 
 const STEPS: [string, string][] = [
   ["Add your Anthropic key.", "Pattern checks it on the spot, so a bad paste shows up now and not in the middle of a build."],
   ["Add a Figma token, if your design system lives in Figma.", "It gets the same check."],
-  ["Connect your tools.", "Pattern is added to Claude Code, Claude Desktop or Cursor, along with a skill that tells your agent to check before it builds UI."],
+  ["Connect your tools.", "Pattern is added to Claude Code and Claude Desktop, and to Cursor when your project has a .cursor folder. Codex gets a snippet to paste. Claude Code also gets a skill that tells your agent to check before it builds UI."],
   ["Register your design system.", "Paste a Figma link or point it at your components folder. If a Figma file is huge, the setup offers to leave out the icon pages."],
   ["Turn on the required check, or leave it for later.", "It is optional and off by default."],
 ];
@@ -37,6 +38,10 @@ export function Setup() {
               The setup lists all five steps up front, then shows how many are done and which come next, so you always know where you are.
             </p>
             <CopyBlock label="install command" lines={INSTALL_LINES} />
+            <p style={{ margin: 0, fontSize: 14, lineHeight: 1.55, color: "var(--text-tertiary)" }}>
+              Restart your client afterward so it loads Pattern. A coding agent that can&apos;t answer prompts can run{" "}
+              <code style={{ ...MONO, fontSize: 13, whiteSpace: "nowrap" }}>{INSTALL_COMMAND_AGENT}</code>, which only connects your client. Run the command above yourself to finish the other steps.
+            </p>
           </div>
         </Reveal>
         <Reveal delay={80}>

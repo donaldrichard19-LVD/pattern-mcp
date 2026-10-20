@@ -1,10 +1,10 @@
 "use client";
 
-import { DOCS, QUICKSTART, REPO } from "./constants";
+import { DOCS, INSTALL_COMMAND, PATTERN_VERSION, QUICKSTART, REPO } from "./constants";
 import { H2, SECTION } from "./tokens";
 import { CopyBlock, Mark, Reveal, Wordmark, trackClick } from "./ui";
 
-const INSTALL_LINES = ["npx pattern-mcp init --yes"];
+const INSTALL_LINES = [INSTALL_COMMAND];
 
 const FOOT_LINK = { color: "var(--text-secondary)" } as const;
 
@@ -65,9 +65,9 @@ export function Close() {
             </div>
           </div>
           {/* Vercel deploys this website/ directory in isolation, so it can't read
-              the pattern-mcp package's version at build time -- update this literal
-              by hand alongside each pattern-mcp release. */}
-          <span style={{ fontFamily: "var(--font-mono)", fontSize: 11 }}>v0.22.0 &middot; MIT &middot; Don Richard</span>
+              the pattern-mcp package's version at build time -- PATTERN_VERSION in
+              constants.ts is updated by hand alongside each pattern-mcp release. */}
+          <span style={{ fontFamily: "var(--font-mono)", fontSize: 11 }}>v{PATTERN_VERSION} &middot; MIT &middot; Don Richard</span>
         </div>
       </footer>
     </>
