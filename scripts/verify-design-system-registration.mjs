@@ -368,5 +368,29 @@ console.log("\n=== 11. No registration for a project_id -> recommend_component's
   check("zero cost (no API call reached)", body?._meta?.estimated_cost_usd === 0);
 }
 
+console.log("\n=== Directory scan skips SCREAMING_SNAKE constants (Hydrogen: sort options, GraphQL fragments) ===");
+{
+  mkdirSync(join(root, "hydrogen-components"), { recursive: true });
+  writeFileSync(
+    join(root, "hydrogen-components", "ProductCard.tsx"),
+    [
+      "export const PRODUCT_CARD_FRAGMENT = gql(`fragment ProductCard on Product { id }`);",
+      "export const SORT_OPTIONS = [{ label: 'Newest' }];",
+      "export const FAQ = () => null;",
+      "export function ProductCard({ product, priority }: { product: unknown; priority?: boolean }) {",
+      "  return null;",
+      "}",
+    ].join("\n")
+  );
+  const result = await client.callTool({
+    name: "register_design_system",
+    arguments: { replace: true, project_id: "hydrogen-project", directory_path: "hydrogen-components" },
+  });
+  const { isError, body } = parseResult(result);
+  const names = (body?.registration?.candidates ?? []).map((c) => c.name).sort();
+  check("no error", !isError);
+  check("constants are not registered; components (incl. all-caps FAQ) are", JSON.stringify(names) === JSON.stringify(["FAQ", "ProductCard"]), JSON.stringify(names));
+}
+
 console.log(failures === 0 ? "\nAll checks passed." : `\n${failures} check(s) FAILED.`);
 process.exit(failures === 0 ? 0 : 1);

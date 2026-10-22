@@ -2784,8 +2784,11 @@ function scanComponentFile(absPath: string, relPath: string): DesignSystemCandid
   const fnRe = /export\s+(?:default\s+)?function\s+([A-Z][A-Za-z0-9_]*)\s*(?:<[^>(]*>\s*)?\(/g;
   const constRe = /export\s+(?:default\s+)?const\s+([A-Z][A-Za-z0-9_]*)\s*(?::[^=\n]+)?=/g;
   let m: RegExpExecArray | null;
-  while ((m = fnRe.exec(content)) !== null) names.set(m[1], m.index);
-  while ((m = constRe.exec(content)) !== null) if (!names.has(m[1])) names.set(m[1], m.index);
+  // SCREAMING_SNAKE exports are constants (sort options, GraphQL fragments), not components.
+  // A single all-caps word (`FAQ`) can still be a component, so only underscored names are dropped.
+  const isComponentName = (n: string) => !/^[A-Z0-9]+(?:_[A-Z0-9]+)+$/.test(n);
+  while ((m = fnRe.exec(content)) !== null) if (isComponentName(m[1])) names.set(m[1], m.index);
+  while ((m = constRe.exec(content)) !== null) if (isComponentName(m[1]) && !names.has(m[1])) names.set(m[1], m.index);
   for (const n of extractExportListNames(content)) if (!names.has(n)) names.set(n, null);
 
   const fileWideProps = extractFileWidePropNames(content);
