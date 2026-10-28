@@ -262,6 +262,7 @@ function reportSkips(skipped: SkippedComponent[]): void {
 async function runVerify(root: string, files: string[], modified: string[], base: string | null): Promise<void> {
   const receipts = readAllGateReceipts(root);
   const ungated: string[] = [];
+  const skippedInAdded: SkippedComponent[] = [];
   let checked = 0;
   // Non-blocking: what the receipts say about the built file (schema v2).
   const verification = { verified: 0, stale: 0, unverified_receipts: 0, failed_items: 0 };
@@ -279,8 +280,19 @@ async function runVerify(root: string, files: string[], modified: string[], base
 
     checked++;
     const receipt = receipts.find((r) => normalize(r.file_path) === relPath);
-    if (!receipt) ungated.push(relPath);
-    else if (!receipt.verification) verification.unverified_receipts++;
+    if (!receipt) {
+      // A new file with no receipt is still fine when every component it
+      // declares carries a reasoned skip (or the file has a file-level
+      // override): the same exemption a modified file already gets, shown in
+      // the PR the same way.
+      const decls = newComponentDeclarations(null, content);
+      const reasons = decls.map((d) => ({ d, reason: skipReasonFor(content, d) }));
+      if (decls.length > 0 && reasons.every((r) => r.reason)) {
+        for (const r of reasons) skippedInAdded.push({ file: relPath, component: r.d.name, reason: r.reason as string });
+      } else {
+        ungated.push(relPath);
+      }
+    } else if (!receipt.verification) verification.unverified_receipts++;
     else {
       // A later edit changes the hash: the verification no longer describes this file.
       if (receipt.verification.file_sha256 === createHash("sha256").update(content).digest("hex")) verification.verified++;
@@ -293,11 +305,15 @@ async function runVerify(root: string, files: string[], modified: string[], base
     base !== null && modified.length > 0
       ? checkNewComponentsInModified(root, base, modified, receipts)
       : { missing: [], skipped: [], checked: 0 };
-  reportSkips(inModified.skipped);
+  const allSkipped = [...skippedInAdded, ...inModified.skipped];
+  reportSkips(allSkipped);
 
   if (ungated.length > 0 || inModified.missing.length > 0) {
     const reasons: string[] = [];
-    if (ungated.length > 0) reasons.push("One or more new UI components have no matching .pattern/receipts/*.json entry.");
+    if (ungated.length > 0)
+      reasons.push(
+        "One or more new UI component files have no matching .pattern/receipts/*.json entry. Mint one with `pattern-check-gate write --file <path> --components <Name>` after recommend_component, or, if every component in the file is exempt, add `// pattern-mcp:skip reason=\"...\"` above each declaration (or one `// pattern-mcp:override reason=\"...\"` for the whole file)."
+      );
     if (inModified.missing.length > 0) {
       reasons.push(
         "New component(s) were added inside existing files with no receipt naming them. Record the decision " +
@@ -310,7 +326,7 @@ async function runVerify(root: string, files: string[], modified: string[], base
         ok: false,
         ...(ungated.length > 0 ? { ungated_files: ungated } : {}),
         ...(inModified.missing.length > 0 ? { ungated_components: inModified.missing } : {}),
-        ...(inModified.skipped.length > 0 ? { skipped_components: inModified.skipped } : {}),
+        ...(allSkipped.length > 0 ? { skipped_components: allSkipped } : {}),
         reason: reasons.join(" "),
       },
       false,
@@ -321,7 +337,7 @@ async function runVerify(root: string, files: string[], modified: string[], base
       ok: true,
       checked,
       new_components_checked: inModified.checked,
-      ...(inModified.skipped.length > 0 ? { skipped_components: inModified.skipped } : {}),
+      ...(allSkipped.length > 0 ? { skipped_components: allSkipped } : {}),
       verification,
     },
     true,

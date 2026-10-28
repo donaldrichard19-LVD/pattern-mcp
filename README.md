@@ -596,7 +596,9 @@ either:
 - a receipt for that file whose `components` list names it. Mint one with
   `pattern-check-gate write --file <path> --components Pill,Tag` after
   `recommend_component` was called with that `file_path`; or
-- an explicit skip, a comment on the line above the declaration:
+- an explicit skip, a comment on the line above the declaration (honored for
+  new files as well as modified ones; a new file is exempt when every component
+  it declares is skipped):
   `// pattern-mcp:skip reason="CSS-only variant of Hero"`. The reason is
   required, and every skip is shown in the PR as a workflow annotation and a
   job-summary table, so an exemption is visible to a reviewer. A file-level
