@@ -22,7 +22,7 @@ export function PatternWordmark({ className }: { className?: string }) {
 
 export function PatternLogoPill() {
   return (
-    <div className="inline-flex items-center gap-3 md:gap-4" role="img" aria-label="Pattern">
+    <div id="hero-logo" className="inline-flex items-center gap-3 md:gap-4" role="img" aria-label="Pattern">
       <PatternMark className="size-14 md:size-18" />
       <PatternWordmark className="text-5xl md:text-6xl" />
     </div>
