@@ -1,29 +1,31 @@
-import { AskBeforeBuilding } from "@/components/AskBeforeBuilding";
-import { Close } from "@/components/Close";
-import { Cost } from "@/components/Cost";
-import { Faq } from "@/components/Faq";
-import { FounderNote } from "@/components/FounderNote";
-import { Grid } from "@/components/Grid";
-import { Hero } from "@/components/Hero";
-import { MakeItRequired } from "@/components/MakeItRequired";
-import { SeeTheProof } from "@/components/SeeTheProof";
-import { Setup } from "@/components/Setup";
-import { TopBar } from "@/components/TopBar";
+import { DecisionBoard } from '@/components/site/decision-board'
+import { Faq } from '@/components/site/faq'
+import { FeatureGrid } from '@/components/site/feature-grid'
+import { Hero } from '@/components/site/hero'
+import { InstallCta } from '@/components/site/install-cta'
+import { ProofWindow } from '@/components/site/proof-window'
+import { ReceiptSection } from '@/components/site/receipt-section'
+import { RuleSection } from '@/components/site/rule-section'
+import { SiteFooter } from '@/components/site/site-footer'
+import { TerminalSetup } from '@/components/site/terminal-setup'
+import { TopNav } from '@/components/site/top-nav'
 
-export default function Home() {
+export default function Page() {
   return (
-    <div style={{ background: "#fff" }}>
-      <TopBar />
-      <Hero />
-      <Grid />
-      <AskBeforeBuilding />
-      <SeeTheProof />
-      <MakeItRequired />
-      <Cost />
-      <Setup />
-      <Faq />
-      <FounderNote />
-      <Close />
-    </div>
-  );
+    <>
+      <TopNav />
+      <main>
+        <Hero />
+        <DecisionBoard />
+        <TerminalSetup />
+        <ProofWindow />
+        <RuleSection />
+        <FeatureGrid />
+        <ReceiptSection />
+        <InstallCta />
+        <Faq />
+      </main>
+      <SiteFooter />
+    </>
+  )
 }
