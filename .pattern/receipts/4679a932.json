@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "feature_id": "4679a932",
+  "file_path": "website/components/site/section-heading.tsx",
+  "ledger_entry_id": null,
+  "verdict": null,
+  "chosen_candidate": null,
+  "snapshot_ref": "08f8317441f7f562a45ae2c406e2eaa49717dbca",
+  "checked_at": "2026-10-28T03:43:33.899Z",
+  "manual_override": true,
+  "override_reason": "trivial primitive: centered h2 wrapper"
+}

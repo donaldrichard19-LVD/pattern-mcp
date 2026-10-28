@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "feature_id": "c3cb788f",
+  "file_path": "website/components/site/proof-window.tsx",
+  "ledger_entry_id": "d538d87b-6af2-43ce-b119-ef51dfb281c2",
+  "verdict": "custom_build",
+  "chosen_candidate": null,
+  "snapshot_ref": "08f8317441f7f562a45ae2c406e2eaa49717dbca",
+  "checked_at": "2026-10-28T03:42:59.935Z",
+  "manual_override": false,
+  "override_reason": null,
+  "components": [
+    "Token",
+    "ProofWindow"
+  ]
+}

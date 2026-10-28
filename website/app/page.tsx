@@ -10,6 +10,7 @@ import { SiteFooter } from '@/components/site/site-footer'
 import { TerminalSetup } from '@/components/site/terminal-setup'
 import { TopNav } from '@/components/site/top-nav'
 
+// pattern-mcp:skip reason="composes already-checked sections, adds no UI of its own"
 export default function Page() {
   return (
     <>

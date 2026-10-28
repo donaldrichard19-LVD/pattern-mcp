@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "feature_id": "b0cf3ed8",
+  "file_path": "website/components/site/faq.tsx",
+  "ledger_entry_id": "a57b851c-9508-401f-8307-32ca1db5410a",
+  "verdict": "use_existing",
+  "chosen_candidate": "Faq is an accordion-style FAQ section that displays collapsible question-and-answer pairs with only one item expanded at a time, featuring animated transitions, ARIA accessibility, and a rotating plus-icon indicator.",
+  "snapshot_ref": "08f8317441f7f562a45ae2c406e2eaa49717dbca",
+  "checked_at": "2026-10-28T03:43:02.608Z",
+  "manual_override": false,
+  "override_reason": null,
+  "components": [
+    "Faq"
+  ]
+}

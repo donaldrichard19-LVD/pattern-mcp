@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "feature_id": "806dcd6b",
+  "file_path": "website/components/site/hero.tsx",
+  "ledger_entry_id": "300c0000-4dcd-4359-9537-e6d5563caa32",
+  "verdict": "use_existing",
+  "chosen_candidate": "Hero is this project's existing landing-page banner featuring an animated headline with interactive logo pills for supported design sources (Figma) and coding agents (Claude Code, Cursor, Codex), plus a demo verdict card and responsive typography.",
+  "snapshot_ref": "08f8317441f7f562a45ae2c406e2eaa49717dbca",
+  "checked_at": "2026-10-28T03:43:03.571Z",
+  "manual_override": false,
+  "override_reason": null,
+  "components": [
+    "Chip",
+    "Hero"
+  ]
+}

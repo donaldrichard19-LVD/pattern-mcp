@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "feature_id": "cafbfb6b",
+  "file_path": "website/components/site/terminal-setup.tsx",
+  "ledger_entry_id": "42640743-60bd-402e-8996-bafd27ecb226",
+  "verdict": "custom_build",
+  "chosen_candidate": null,
+  "snapshot_ref": "08f8317441f7f562a45ae2c406e2eaa49717dbca",
+  "checked_at": "2026-10-28T03:42:59.198Z",
+  "manual_override": false,
+  "override_reason": null,
+  "components": [
+    "TerminalSetup"
+  ]
+}

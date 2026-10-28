@@ -1,3 +1,4 @@
+// pattern-mcp:override reason="static link row, no decision to check"
 import { links } from './links'
 import { PatternMark } from './logo'
 

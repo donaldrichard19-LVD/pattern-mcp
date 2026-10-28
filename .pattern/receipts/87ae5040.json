@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "feature_id": "87ae5040",
+  "file_path": "website/components/site/top-nav.tsx",
+  "ledger_entry_id": null,
+  "verdict": null,
+  "chosen_candidate": null,
+  "snapshot_ref": "08f8317441f7f562a45ae2c406e2eaa49717dbca",
+  "checked_at": "2026-10-28T03:43:35.575Z",
+  "manual_override": true,
+  "override_reason": "static link row, no decision to check"
+}

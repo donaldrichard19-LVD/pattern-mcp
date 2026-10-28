@@ -1,3 +1,4 @@
+// pattern-mcp:override reason="trivial primitive: centered h2 wrapper"
 import { ArrowRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
 

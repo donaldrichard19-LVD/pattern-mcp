@@ -1,3 +1,4 @@
+// pattern-mcp:override reason="brand mark, wordmark and lockup, not design-system components"
 import { cn } from '@/lib/utils'
 
 export function PatternMark({ className }: { className?: string }) {

@@ -1,3 +1,4 @@
+// pattern-mcp:override reason="trivial primitive: copy-to-clipboard pill, no decision to check"
 'use client'
 
 import { Check, Copy } from 'lucide-react'
