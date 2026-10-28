@@ -58,6 +58,7 @@ import {
 import { offerEnforcementSetupOnce } from "./init-enforcement.js";
 import { connectInstructionsText, offerClientConnectSetupOnce, runConnect } from "./client-connect.js";
 import { deriveProjectId } from "./project-id.js";
+import { resolveProjectFile, toRootRelative } from "./project-files.js";
 import type { RegisterRequest as WizardRegisterRequest, RegisterResult as WizardRegisterResult } from "./setup-wizard.js";
 import { stepsDone } from "./setup-wizard.js";
 import { runKeysCommand } from "./keys-command.js";
@@ -781,7 +782,7 @@ const VERIFY_COMPONENT_INPUT_SCHEMA = {
     file_path: {
       type: "string",
       description:
-        "Path of the BUILT component file, relative to the project root. Must be the same file_path passed to recommend_component (that is how the ledger entry and its checklist are found).",
+        "Path of the BUILT component file: relative to the project root, relative to a git repo nested under it, or absolute inside it (the server tries each spelling). Must name the same file passed as file_path to recommend_component, in any of those spellings (that is how the ledger entry and its checklist are found). If the ledger entry has no checklist (a design-system match), one is extracted from its component_need.",
     },
   },
   required: ["project_id", "file_path"],
@@ -1401,7 +1402,7 @@ async function runDesignSystemJevPass(
     breakdown_ms: { extract: 0, search: 0, score: elapsed },
     tokens_used: { input: usage.input_tokens, output: usage.output_tokens },
     estimated_cost_usd: cost,
-    ...(rated ? {} : { cost_note: "Jev scorer: cost unknown (set PATTERN_JEV_USD_PER_MTOK_IN/OUT to estimate); 0 here does not mean free." }),
+    ...(rated ? {} : { cost_known: false, cost_note: "Jev scorer: cost unknown (set PATTERN_JEV_USD_PER_MTOK_IN/OUT to estimate); 0 here does not mean free." }),
   };
 
   const base = {
@@ -1839,6 +1840,11 @@ Return one entry per checklist item, using the item's number as "index".`;
 export interface VerifyComponentResult {
   ledger_entry_id: string;
   file_path: string;
+  /** "extracted_at_verify" when the ledger entry had no checklist and one was extracted from its component_need. */
+  checklist_source: "ledger" | "extracted_at_verify";
+  /** Set when the file was found via an absolute path or a repo nested under the server root. */
+  resolved_via?: "absolute" | "nested_repo";
+  repo_root?: string;
   file_sha256: string;
   summary: ReceiptVerification["summary"];
   items: VerificationItem[];
@@ -1962,37 +1968,57 @@ export function reconcileDivergences(
 }
 
 async function runVerifyComponent(input: { project_id: string; file_path: string }): Promise<VerifyComponentResult> {
-  const rel = normalizeRelPath(input.file_path);
-  const abs = resolveWithinRoot(PROJECT_ROOT, rel);
-  if (!abs) throw new Error(`file_path "${input.file_path}" must be a relative path within the project root (${PROJECT_ROOT}).`);
-  if (!existsSync(abs) || !statSync(abs).isFile()) throw new Error(`No file found at "${rel}" (resolved to ${abs}). Build the component first.`);
+  const found = resolveProjectFile(PROJECT_ROOT, input.file_path);
+  if (!found) {
+    if (resolveWithinRoot(PROJECT_ROOT, toRootRelative(PROJECT_ROOT, input.file_path)) === null) {
+      throw new Error(`file_path "${input.file_path}" must be a path within the project root (${PROJECT_ROOT}); it escapes it or is absolute outside it.`);
+    }
+    throw new Error(
+      `No file found for "${input.file_path}" under the project root (${PROJECT_ROOT}). Pass a path relative to that root, a path relative to a git repo nested under it, or an absolute path inside it. Build the component first if it does not exist yet.`
+    );
+  }
+  const rel = found.repoRel;
+  const abs = found.abs;
   const fileText = readFileSync(abs, "utf8");
   if (fileText.length > VERIFY_MAX_FILE_CHARS) {
     throw new Error(`"${rel}" is ${fileText.length} characters, over the ${VERIFY_MAX_FILE_CHARS} verify limit. Split the component, or verify its main file.`);
   }
 
+  // A ledger entry may have been stored under any spelling of this file
+  // (server-root-relative, repo-relative, as typed): match all of them.
+  const spellings = new Set(found.spellings);
   const entry = readLedgerEntries(input.project_id)
-    .filter((e) => e.file_path && normalizeRelPath(e.file_path) === rel)
+    .filter((e) => e.file_path && spellings.has(normalizeRelPath(e.file_path)))
     .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
     .pop();
   if (!entry) {
     throw new Error(
-      `No ledger entry for project "${input.project_id}" is attached to "${rel}". Pass this file_path to recommend_component (or record_component_decision) first so there is a checklist to verify against.`
+      `No ledger entry for project "${input.project_id}" is attached to "${rel}" (also tried: ${found.spellings.join(", ")}). Pass this file_path to recommend_component (or record_component_decision) first so there is a checklist to verify against.`
     );
   }
-  if (!entry.checklist || entry.checklist.length === 0) {
-    throw new Error(`The ledger entry for "${rel}" has no checklist (verdict ${entry.verdict}, reason ${entry.reason}); nothing to verify against.`);
+  // Entries from a design-system (Jev) match carry no checklist; extract one
+  // from the recorded need instead of failing, and say so in the result.
+  let checklist = entry.checklist ?? [];
+  let checklistSource: "ledger" | "extracted_at_verify" = "ledger";
+  if (checklist.length === 0) {
+    if (!ANTHROPIC_API_KEY) throw new Error(MISSING_API_KEY_MESSAGE);
+    const extracted = await runExtraction({ component_need: entry.component_need, domain: entry.domain, project_id: input.project_id });
+    if (!extracted.ok || extracted.result.checklist.length === 0) {
+      throw new Error(`The ledger entry for "${rel}" has no checklist (verdict ${entry.verdict}, reason ${entry.reason}) and one could not be extracted from its component_need; nothing to verify against.`);
+    }
+    checklist = extracted.result.checklist;
+    checklistSource = "extracted_at_verify";
   }
   if (!ANTHROPIC_API_KEY) throw new Error(MISSING_API_KEY_MESSAGE);
 
   // Design facts to detect divergence against, when the project's design
   // system is a Figma registration with stored evidence.
   const registration = getRegisteredDesignSystem(input.project_id);
-  const evidence = registration ? buildFigmaEvidenceBlock(registration, entry.component_need, entry.checklist) : { block: "", names: [] as string[] };
+  const evidence = registration ? buildFigmaEvidenceBlock(registration, entry.component_need, checklist) : { block: "", names: [] as string[] };
   const designBlock =
     `\n\nChosen design: ${entry.chosen_candidate ?? "(none -- custom build)"}; verdict recorded: ${entry.verdict} (${entry.coverage ?? "no coverage"}).` + evidence.block;
 
-  const userMessage = `component_need: ${entry.component_need}\ndomain: ${entry.domain}\n\nChecklist:\n${entry.checklist
+  const userMessage = `component_need: ${entry.component_need}\ndomain: ${entry.domain}\n\nChecklist:\n${checklist
     .map((c, i) => `${i + 1}. ${c}`)
     .join("\n")}${designBlock}\n\nSource of ${rel}:\n<<<FILE\n${fileText}\nFILE>>>`;
 
@@ -2013,7 +2039,7 @@ async function runVerifyComponent(input: { project_id: string; file_path: string
     throw new Error("Verification response did not parse as JSON; retry.");
   }
 
-  const items = reconcileVerification(entry.checklist, parsed.items, fileText);
+  const items = reconcileVerification(checklist, parsed.items, fileText);
   const divCheck = reconcileDivergences(parsed.divergences, evidence.block, evidence.names, fileText);
   const divergences = divCheck.kept;
   const summary = {
@@ -2035,7 +2061,7 @@ async function runVerifyComponent(input: { project_id: string; file_path: string
   }
   let receipt: { updated: boolean; feature_id?: string } = { updated: false };
   try {
-    receipt = attachVerificationToReceipt(PROJECT_ROOT, rel, verification);
+    receipt = attachVerificationToReceipt(found.repoRoot, rel, verification);
   } catch (err) {
     console.error(JSON.stringify({ diagnostic: "receipt_verification_write_failed", message: String((err as Error)?.message ?? err) }));
   }
@@ -2043,6 +2069,8 @@ async function runVerifyComponent(input: { project_id: string; file_path: string
   return {
     ledger_entry_id: entry.id,
     file_path: rel,
+    checklist_source: checklistSource,
+    ...(found.via !== "root" ? { resolved_via: found.via, repo_root: found.repoRoot } : {}),
     file_sha256: fileSha,
     summary,
     items,
@@ -2053,11 +2081,79 @@ async function runVerifyComponent(input: { project_id: string; file_path: string
   };
 }
 
+/**
+ * How many of a directory-scan registration's candidate files no longer exist
+ * on disk. A registration is a snapshot: if the components it indexed were
+ * moved or deleted, every verdict against it is about code that is gone.
+ * Other source kinds have no per-candidate file to check.
+ */
+export function designSystemStaleness(reg: DesignSystemRegistration): { checked: number; missing: number; stale: boolean } {
+  if (reg.source_kind !== "directory_scan") return { checked: 0, missing: 0, stale: false };
+  const base = resolveWithinRoot(PROJECT_ROOT, reg.source_path);
+  const files = reg.candidates.map((c) => c.file_path).filter((f): f is string => !!f);
+  const unique = [...new Set(files)];
+  const missing = unique.filter((f) => !base || !existsSync(join(base, f))).length;
+  return { checked: unique.length, missing, stale: unique.length > 0 && missing / unique.length >= 0.5 };
+}
+
+const STALE_NOTE =
+  "More than half of this design system's registered component files no longer exist on disk, so verdicts against it describe code that has been moved or deleted. Re-register it (register_design_system) before trusting use_existing results.";
+
+/**
+ * Adds what the caller needs to read a recommend_component result correctly,
+ * without changing the verdict: a stale-registry warning, and a caveat when
+ * use_existing is partial coverage (or contradicts the Jev screen).
+ */
+export function annotateRecommendation(resultText: string, projectId: string | undefined): string {
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(resultText);
+  } catch {
+    return resultText;
+  }
+  if (!parsed || typeof parsed !== "object" || parsed.verdict === undefined) return resultText;
+
+  const reg = projectId ? getRegisteredDesignSystem(projectId) : null;
+  if (reg) {
+    const st = designSystemStaleness(reg);
+    const match = parsed.design_system_match as { file?: string } | null | undefined;
+    const matchedFile = match?.file;
+    const base = resolveWithinRoot(PROJECT_ROOT, reg.source_path);
+    const matchGone = !!(matchedFile && base && !existsSync(join(base, matchedFile)));
+    if (st.stale || matchGone) {
+      parsed.design_system_warning = {
+        stale: true,
+        missing_candidate_files: st.missing,
+        checked_candidate_files: st.checked,
+        ...(matchGone ? { matched_file_missing: matchedFile } : {}),
+        note: STALE_NOTE,
+      };
+    }
+  }
+
+  if (parsed.verdict === "use_existing") {
+    const pct = parseCoveragePercent(parsed.coverage as string | null | undefined);
+    const unmet = Array.isArray(parsed.requirements_checked)
+      ? (parsed.requirements_checked as Array<{ requirement?: string; met?: boolean }>).filter((r) => r.met === false).map((r) => r.requirement ?? "")
+      : [];
+    const screen = parsed.jev_screen as { verdict?: string } | undefined;
+    const disagrees = screen?.verdict === "custom_build";
+    if ((pct !== null && pct < 100 && unmet.length > 0) || disagrees) {
+      const parts: string[] = [];
+      if (unmet.length > 0) parts.push(`Covers ${parsed.coverage ?? "part of the need"}; unmet: ${unmet.join("; ")}.`);
+      if (disagrees) parts.push("The fast Jev screen scored this need custom_build; treat the match as weak.");
+      parts.push("Reuse the candidate for what it covers and build the unmet items, or treat this as custom_build if those gaps matter.");
+      parsed.caveat = parts.join(" ");
+    }
+  }
+  return JSON.stringify(parsed);
+}
+
 /** Lets a caller tell "registered" from "not registered" without trying to register (which could replace). */
-function designSystemStatus(projectId: string | undefined): { design_system?: { registered: boolean; try_project_id?: string; source_kind?: string; candidate_count?: number } } {
+function designSystemStatus(projectId: string | undefined): { design_system?: { registered: boolean; try_project_id?: string; source_kind?: string; candidate_count?: number; stale?: boolean; stale_note?: string } } {
   if (!projectId) return {};
   const reg = getRegisteredDesignSystem(projectId);
-  return { design_system: reg ? { registered: true, source_kind: reg.source_kind, candidate_count: reg.candidate_count } : { registered: false, ...(projectId !== deriveProjectId(PROJECT_ROOT) && getRegisteredDesignSystem(deriveProjectId(PROJECT_ROOT)) ? { try_project_id: deriveProjectId(PROJECT_ROOT) } : {}) } };
+  return { design_system: reg ? { registered: true, source_kind: reg.source_kind, candidate_count: reg.candidate_count, ...(designSystemStaleness(reg).stale ? { stale: true, stale_note: STALE_NOTE } : {}) } : { registered: false, ...(projectId !== deriveProjectId(PROJECT_ROOT) && getRegisteredDesignSystem(deriveProjectId(PROJECT_ROOT)) ? { try_project_id: deriveProjectId(PROJECT_ROOT) } : {}) } };
 }
 
 export type ChecklistBasis = "figma-evidenced" | "inferred" | "general-practice";
@@ -2076,7 +2172,7 @@ export interface ExtractionResult {
   /** Set when stored Figma evidence for this project was shown to the extractor. */
   grounded_in: { project_id: string; candidates: string[] } | null;
   /** Only when project_id was passed: whether a design system is registered for it, so the caller knows whether registering is needed. */
-  design_system?: { registered: boolean; source_kind?: string; candidate_count?: number };
+  design_system?: { registered: boolean; source_kind?: string; candidate_count?: number; stale?: boolean; stale_note?: string };
   /** Set when no checklist was extracted on purpose, with what the caller should do instead. */
   note?: string;
   extraction_confidence: "high" | "medium" | "low";
@@ -4688,6 +4784,9 @@ export interface JudgmentResult {
     estimated_cost_usd: number;
     // Jev path only, when no per-token rate is configured: cost is reported
     // as 0 because it is unknown, not because the call was free.
+    // cost_known is false in exactly that case, so a caller summing or
+    // displaying estimated_cost_usd can tell "unknown" from a real $0.
+    cost_known?: false;
     cost_note?: string;
     // Diagnostic only, mirrors search_calls/fetch_calls stderr diagnostics
     // -- whether step 4's single candidate-verification fetch (see
@@ -5447,7 +5546,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     };
 
     try {
-      const resultText = await judgeComponent(args);
+      if (typeof args.file_path === "string") args.file_path = toRootRelative(PROJECT_ROOT, args.file_path);
+      const resultText = annotateRecommendation(await judgeComponent(args), args.project_id);
       return {
         content: [{ type: "text", text: resultText }],
       };
@@ -5516,6 +5616,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     };
 
     try {
+      if (typeof args.file_path === "string") args.file_path = toRootRelative(PROJECT_ROOT, args.file_path);
       // Validate before writing anything, so a bad path never leaves a
       // half-applied record behind.
       if (args.file_path !== undefined && (!args.file_path.trim() || resolveWithinRoot(PROJECT_ROOT, normalizeRelPath(args.file_path)) === null)) {
