@@ -2679,6 +2679,29 @@ The summary includes:
 Repeated component needs can be useful to investigate alongside the
 [session call cap](#session-call-cap).
 
+## Story layer (prototype)
+
+Opt in with `PATTERN_STORY=1` (or `PATTERN_TOOLS=full`). Where the ledger
+records whether a UI decision matched your design system, the story layer
+records what the project believes and says, and pushes back on it.
+
+- `record_claim`: a message, belief, assumption, goal or constraint, with a
+  source, confidence and evidence. Claims are superseded or retracted with a
+  reason, never edited, so the history stays readable.
+- `link_decision`: a decision, the claim ids it serves, and optionally the
+  surface it lives on.
+- `challenge`: no model call. Flags unsupported claims (worse when decisions
+  rest on them), contradictions, decisions resting on claims that were since
+  superseded or retracted, one surface carrying several messages, orphan
+  decisions and a missing message. Each finding cites what it rests on and can
+  be dismissed with a recorded reason.
+- `read_story` and `ingest_notes` (pattern-matches claims out of a notes file;
+  preview unless `commit: true`).
+
+Stored per project in `~/.pattern/story/` (override with `PATTERN_STORY_DIR`).
+Contradiction detection beyond a shared `topic` is a wording heuristic and is
+labeled as one. Verify with `node scripts/verify-story.mjs` after a build.
+
 ## Known limitations
 
 ### Model judgment can vary
