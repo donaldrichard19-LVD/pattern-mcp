@@ -5996,7 +5996,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
   }
 
-  const storyResult = handleStoryTool(
+  const storyResult = await handleStoryTool(
     request.params.name,
     (request.params.arguments ?? {}) as Record<string, unknown>,
     PROJECT_ROOT

@@ -2695,8 +2695,12 @@ records what the project believes and says, and pushes back on it.
   superseded or retracted, one surface carrying several messages, orphan
   decisions and a missing message. Each finding cites what it rests on and can
   be dismissed with a recorded reason.
-- `read_story` and `ingest_notes` (pattern-matches claims out of a notes file;
-  preview unless `commit: true`).
+- `read_story` and `ingest_notes` (pulls claims out of a notes file; preview
+  unless `commit: true`). Default is sentence pattern matching, which has low
+  recall. `use_model: true` runs a Haiku pass instead (needs
+  `ANTHROPIC_API_KEY`, sends the file's text to Anthropic): every proposed
+  claim must quote a line that really exists in the file, and proposals that
+  don't are dropped and counted.
 
 Stored per project in `~/.pattern/story/` (override with `PATTERN_STORY_DIR`).
 Contradiction detection beyond a shared `topic` is a wording heuristic and is

@@ -381,6 +381,69 @@ export function extractCandidates(text: string, source: string): Array<{ text: s
   return out.slice(0, 50);
 }
 
+// Model-assisted extraction (opt-in: sends the file's text to Anthropic). The
+// model proposes claims, but each must carry a QUOTE that really appears on a
+// single line of the file; the server locates it and uses that line as the
+// source. A proposal whose quote is not in the file is dropped, so a
+// hallucinated claim can't enter the record with a believable-looking source.
+
+export type StoryModelCall = (prompt: string) => Promise<string>;
+const STORY_MODEL = process.env.PATTERN_STORY_MODEL ?? "claude-haiku-4-5-20251001";
+const MODEL_INPUT_CHARS = 30_000;
+
+export function makeAnthropicStoryCall(apiKey: string): StoryModelCall {
+  return async (prompt) => {
+    const res = await fetch(process.env.PATTERN_STORY_API_URL ?? "https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({ model: STORY_MODEL, max_tokens: 4000, messages: [{ role: "user", content: prompt }] }),
+    });
+    if (!res.ok) throw new Error(`Anthropic ${res.status}: ${(await res.text()).slice(0, 200)}`);
+    const j = (await res.json()) as { content?: Array<{ text?: string }> };
+    return (j.content ?? []).map((c) => c.text ?? "").join("").trim();
+  };
+}
+
+export async function extractCandidatesWithModel(
+  text: string,
+  source: string,
+  complete: StoryModelCall
+): Promise<{ candidates: Array<{ text: string; kind: ClaimKind; source: string }>; dropped: number }> {
+  const body = text.slice(0, MODEL_INPUT_CHARS);
+  const prompt =
+    "You extract the claims a product team is making from their own notes. A claim is one of: " +
+    CLAIM_KINDS.map((k) => `"${k}"`).join(", ") +
+    ' ("message" = the one thing the product should make someone believe or do; "belief" = a statement about users or the world; "assumption" = something taken as true without proof; "goal"; "constraint" = a rule or boundary).\n' +
+    "Return ONLY a JSON array of objects {\"text\": a one-sentence claim in plain words, \"kind\": one of the kinds, \"quote\": an EXACT contiguous substring copied from a single line of the notes that the claim is based on}. " +
+    "Skip anything that is not a claim. Do not invent claims the notes do not support.\n\nNOTES:\n" +
+    body;
+  const raw = await complete(prompt);
+  const start = raw.indexOf("[");
+  const end = raw.lastIndexOf("]");
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw.slice(start, end + 1));
+  } catch {
+    throw new Error("Model did not return a JSON array of claims");
+  }
+  if (!Array.isArray(parsed)) throw new Error("Model did not return a JSON array of claims");
+  const lines = body.split("\n");
+  const candidates: Array<{ text: string; kind: ClaimKind; source: string }> = [];
+  let dropped = 0;
+  for (const item of parsed.slice(0, 80)) {
+    const o = item as { text?: unknown; kind?: unknown; quote?: unknown };
+    const claimText = typeof o.text === "string" ? o.text.trim().slice(0, 300) : "";
+    const quote = typeof o.quote === "string" ? o.quote.trim() : "";
+    const lineIdx = quote ? lines.findIndex((l) => l.includes(quote)) : -1;
+    if (!claimText || !CLAIM_KINDS.includes(o.kind as ClaimKind) || lineIdx < 0) {
+      dropped++;
+      continue;
+    }
+    candidates.push({ text: claimText, kind: o.kind as ClaimKind, source: `${source}:${lineIdx + 1}` });
+  }
+  return { candidates, dropped };
+}
+
 // ---------------------------------------------------------------------------
 // MCP tool surface
 // ---------------------------------------------------------------------------
@@ -468,13 +531,19 @@ export const STORY_TOOLS = [
     name: STORY_TOOL_NAMES.ingest_notes,
     description:
       "Scans a notes/doc file in the project (relative path) for sentences that look like claims (messages, beliefs, assumptions, goals, constraints) and returns candidates with file:line sources. " +
-      "Pattern-matching only, no model call. Candidates are only recorded (low confidence, no evidence) when commit is true, so a human or agent should review first.",
+      "Pattern-matching by default (no model call; low recall); use_model: true for a verified model pass. Candidates are only recorded (low confidence, no evidence) when commit is true, so a human or agent should review first.",
     inputSchema: {
       type: "object",
       properties: {
         project_id: projectIdProp,
         file_path: { type: "string", description: "Path relative to the project root. Absolute paths and '..' are rejected." },
         commit: { type: "boolean", description: "Record the candidates as claims. Default false (preview only)." },
+        use_model: {
+          type: "boolean",
+          description:
+            "Use a model (Haiku, needs ANTHROPIC_API_KEY) instead of pattern matching. Sends the file's text (first 30k chars) to Anthropic. " +
+            "Each proposed claim must quote a line that really exists in the file; unverifiable proposals are dropped and counted.",
+        },
       },
       required: ["project_id", "file_path"],
     },
@@ -596,7 +665,7 @@ function readStory(a: Args): unknown {
   };
 }
 
-function ingestNotes(a: Args, root: string): unknown {
+async function ingestNotes(a: Args, root: string, deps: StoryDeps): Promise<unknown> {
   const projectId = need(str(a.project_id), "project_id");
   const rel = need(str(a.file_path), "file_path");
   const abs = resolve(root, rel);
@@ -606,7 +675,19 @@ function ingestNotes(a: Args, root: string): unknown {
   if (!existsSync(abs)) throw new Error(`File not found: ${rel}`);
   const story = fold(loadEvents(projectId));
   const existing = new Set([...story.claims.values()].filter((c) => c.status === "active").map((c) => c.text.toLowerCase()));
-  const candidates = extractCandidates(readFileSync(abs, "utf8"), rel).filter((c) => !existing.has(c.text.toLowerCase()));
+  const fileText = readFileSync(abs, "utf8");
+  let dropped: number | undefined;
+  let found: Array<{ text: string; kind: ClaimKind; source: string }>;
+  if (a.use_model === true) {
+    const complete = deps.complete ?? (process.env.ANTHROPIC_API_KEY ? makeAnthropicStoryCall(process.env.ANTHROPIC_API_KEY) : undefined);
+    if (!complete) throw new Error("use_model needs ANTHROPIC_API_KEY (run `npx pattern-mcp keys`), or call without use_model for pattern matching");
+    const r = await extractCandidatesWithModel(fileText, rel, complete);
+    found = r.candidates;
+    dropped = r.dropped;
+  } else {
+    found = extractCandidates(fileText, rel);
+  }
+  const candidates = found.filter((c) => !existing.has(c.text.toLowerCase()));
   if (a.commit === true) {
     const ids: string[] = [];
     for (const c of candidates) {
@@ -615,24 +696,34 @@ function ingestNotes(a: Args, root: string): unknown {
       append(projectId, { t: "claim", id, ts: new Date().toISOString(), text: c.text, kind: c.kind, source: c.source, confidence: "low", evidence: [] });
       ids.push(id);
     }
-    return { committed: ids.length, claim_ids: ids, candidates };
+    return { committed: ids.length, claim_ids: ids, candidates, ...(dropped !== undefined ? { dropped_unverifiable: dropped } : {}) };
   }
-  return { committed: 0, candidates, note: "Preview only. Pass commit: true to record these as low-confidence claims." };
+  return { committed: 0, candidates, ...(dropped !== undefined ? { dropped_unverifiable: dropped } : {}), note: "Preview only. Pass commit: true to record these as low-confidence claims." };
+}
+
+export interface StoryDeps {
+  /** Model call for ingest_notes use_model; tests inject a stub. */
+  complete?: StoryModelCall;
 }
 
 /** Returns the tool result, or undefined when `name` is not a story tool. */
-export function handleStoryTool(name: string, args: Args, projectRoot: string): { content: Array<{ type: "text"; text: string }>; isError?: boolean } | undefined {
-  const handlers: Record<string, (a: Args) => unknown> = {
+export async function handleStoryTool(
+  name: string,
+  args: Args,
+  projectRoot: string,
+  deps: StoryDeps = {}
+): Promise<{ content: Array<{ type: "text"; text: string }>; isError?: boolean } | undefined> {
+  const handlers: Record<string, (a: Args) => unknown | Promise<unknown>> = {
     [STORY_TOOL_NAMES.record_claim]: recordClaim,
     [STORY_TOOL_NAMES.link_decision]: linkDecision,
     [STORY_TOOL_NAMES.challenge]: challenge,
     [STORY_TOOL_NAMES.read_story]: readStory,
-    [STORY_TOOL_NAMES.ingest_notes]: (a) => ingestNotes(a, projectRoot),
+    [STORY_TOOL_NAMES.ingest_notes]: (a) => ingestNotes(a, projectRoot, deps),
   };
   const handler = handlers[name];
   if (!handler) return undefined;
   try {
-    return { content: [{ type: "text", text: JSON.stringify(handler(args ?? {})) }] };
+    return { content: [{ type: "text", text: JSON.stringify(await handler(args ?? {})) }] };
   } catch (err) {
     return { content: [{ type: "text", text: `Error: ${err instanceof Error ? err.message : String(err)}` }], isError: true };
   }
