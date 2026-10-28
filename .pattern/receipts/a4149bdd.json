@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "feature_id": "a4149bdd",
+  "file_path": "website/components/site/receipt-section.tsx",
+  "ledger_entry_id": "03b8f394-db93-40cc-931a-e185ed5207f6",
+  "verdict": "custom_build",
+  "chosen_candidate": null,
+  "snapshot_ref": "08f8317441f7f562a45ae2c406e2eaa49717dbca",
+  "checked_at": "2026-10-28T03:43:00.728Z",
+  "manual_override": false,
+  "override_reason": null,
+  "components": [
+    "Card",
+    "FileHeader",
+    "Ledger",
+    "Receipt",
+    "BlockedWrite",
+    "GateCheck",
+    "SkipAnnotation",
+    "ReceiptSection"
+  ]
+}

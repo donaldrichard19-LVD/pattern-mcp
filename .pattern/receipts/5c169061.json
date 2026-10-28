@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "feature_id": "5c169061",
+  "file_path": "website/components/site/rule-section.tsx",
+  "ledger_entry_id": "a7a1d3bc-4712-4c5c-82ac-e4cdecc18eda",
+  "verdict": "use_existing",
+  "chosen_candidate": "MakeItRequired (MakeItRequired.tsx)",
+  "snapshot_ref": "08f8317441f7f562a45ae2c406e2eaa49717dbca",
+  "checked_at": "2026-10-28T03:43:01.675Z",
+  "manual_override": false,
+  "override_reason": null,
+  "components": [
+    "RuleSection"
+  ]
+}

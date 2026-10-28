@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "feature_id": "a5b6811f",
+  "file_path": "website/components/site/decision-board.tsx",
+  "ledger_entry_id": "f2123e44-6f1d-4659-b96e-aaa6e0d42004",
+  "verdict": "custom_build",
+  "chosen_candidate": null,
+  "snapshot_ref": "08f8317441f7f562a45ae2c406e2eaa49717dbca",
+  "checked_at": "2026-10-28T03:42:58.224Z",
+  "manual_override": false,
+  "override_reason": null,
+  "components": [
+    "Panel",
+    "PriceMock",
+    "CoverageCard",
+    "VerdictCard",
+    "RequirementsCard",
+    "ChipList",
+    "DecisionPanel",
+    "AgentView",
+    "DecisionBoard"
+  ]
+}

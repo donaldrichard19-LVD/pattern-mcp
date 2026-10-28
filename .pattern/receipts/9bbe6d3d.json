@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "feature_id": "9bbe6d3d",
+  "file_path": "website/components/site/install-cta.tsx",
+  "ledger_entry_id": "e315eec6-c28b-4d9e-8a98-89a25ae6067c",
+  "verdict": "custom_build",
+  "chosen_candidate": null,
+  "snapshot_ref": "08f8317441f7f562a45ae2c406e2eaa49717dbca",
+  "checked_at": "2026-10-28T03:43:05.445Z",
+  "manual_override": false,
+  "override_reason": null,
+  "components": [
+    "InstallCta"
+  ]
+}

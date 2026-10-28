@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "feature_id": "cd83a6ba",
+  "file_path": "website/components/site/copy-command.tsx",
+  "ledger_entry_id": null,
+  "verdict": null,
+  "chosen_candidate": null,
+  "snapshot_ref": "08f8317441f7f562a45ae2c406e2eaa49717dbca",
+  "checked_at": "2026-10-28T03:43:32.461Z",
+  "manual_override": true,
+  "override_reason": "trivial primitive: copy-to-clipboard pill, no decision to check"
+}

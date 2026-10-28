@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "feature_id": "4b95b4d6",
+  "file_path": "website/components/site/feature-grid.tsx",
+  "ledger_entry_id": "d60f4aa6-2d06-405a-b42d-7993e762e0a0",
+  "verdict": "use_existing",
+  "chosen_candidate": "Grid is a responsive auto-fit feature grid that renders cards with an icon glyph, title, and descriptive text, used to showcase product capabilities on marketing pages.",
+  "snapshot_ref": "08f8317441f7f562a45ae2c406e2eaa49717dbca",
+  "checked_at": "2026-10-28T03:43:04.666Z",
+  "manual_override": false,
+  "override_reason": null,
+  "components": [
+    "FeatureGrid"
+  ]
+}
