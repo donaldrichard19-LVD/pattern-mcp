@@ -37,10 +37,6 @@ export function TopNav() {
   }, [])
 
   useEffect(() => {
-    if (!pastHero) setOpen(false)
-  }, [pastHero])
-
-  useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false)
     window.addEventListener('keydown', onKey)
@@ -67,33 +63,34 @@ export function TopNav() {
           <PatternWordmark className="text-xl" />
         </a>
 
-        {pastHero ? (
-          <button
-            type="button"
-            aria-label={open ? 'Close menu' : 'Open menu'}
-            aria-expanded={open}
-            aria-controls="nav-menu"
-            onClick={() => setOpen((o) => !o)}
-            className="rounded-md p-2 text-muted-foreground transition-colors hover:text-foreground"
-          >
-            {open ? <X className="size-5" /> : <Menu className="size-5" />}
-          </button>
-        ) : (
-          <nav aria-label="Primary" className="flex items-center gap-8 text-sm font-medium text-muted-foreground">
-            {items.map((item) => (
-              <a key={item.label} href={item.href} className="transition-colors hover:text-foreground">
-                {item.label}
-              </a>
-            ))}
-          </nav>
-        )}
+        <button
+          type="button"
+          aria-label={open ? 'Close menu' : 'Open menu'}
+          aria-expanded={open}
+          aria-controls="nav-menu"
+          onClick={() => setOpen((o) => !o)}
+          className="rounded-md p-2 text-muted-foreground transition-colors hover:text-foreground md:hidden"
+        >
+          {open ? <X className="size-5" /> : <Menu className="size-5" />}
+        </button>
+
+        <nav
+          aria-label="Primary"
+          className="hidden items-center gap-8 text-sm font-medium text-muted-foreground md:flex"
+        >
+          {items.map((item) => (
+            <a key={item.label} href={item.href} className="transition-colors hover:text-foreground">
+              {item.label}
+            </a>
+          ))}
+        </nav>
       </div>
 
-      {pastHero && open && (
+      {open && (
         <nav
           id="nav-menu"
           aria-label="Primary"
-          className="flex flex-col border-t border-border bg-background px-6 py-2 text-sm font-medium md:px-12"
+          className="flex flex-col border-t border-border bg-background px-6 py-2 text-sm font-medium md:hidden"
         >
           {items.map((item) => (
             <a
