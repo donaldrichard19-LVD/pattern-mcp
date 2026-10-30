@@ -65,6 +65,7 @@ import { runKeysCommand } from "./keys-command.js";
 import { collapseForJev, rankWithJev } from "./design-system-jev.js";
 import { describeFigma, fetchFigmaFile, formatFigmaEvidence, parseFigmaFile, rankFigmaCandidates, type FigmaCandidateInfo, type FigmaEvidence } from "./design-system-figma.js";
 import { captionFigmaDesigns, carryOverCaptions } from "./design-system-figma-captions.js";
+import { handleStoryTool, STORY_TOOLS, STORY_TOOL_NAMES } from "./story.js";
 import {
   SUMMARY_MODEL,
   carryOverSummaries,
@@ -432,6 +433,7 @@ const LEDGER_CACHE_HIT_ENABLED = !process.env.PATTERN_NO_LEDGER_CACHE_HIT;
 // front-loading all fourteen tools on day one. Set
 // PATTERN_TOOLS=full to advertise every tool immediately.
 const TOOL_TIER = process.env.PATTERN_TOOLS === "full" ? "full" : "core";
+const STORY_ENABLED = process.env.PATTERN_STORY === "1";
 
 // $/1M tokens, checked against the Anthropic pricing page rather than
 // recalled from training data (rates drift). Both current and legacy
@@ -5523,13 +5525,19 @@ const ALL_TOOLS = [
         "registration is a point-in-time snapshot, not a live link.",
       inputSchema: REGISTER_DESIGN_SYSTEM_INPUT_SCHEMA,
     },
+    ...STORY_TOOLS,
 ];
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools:
     TOOL_TIER === "full"
       ? ALL_TOOLS
-      : ALL_TOOLS.filter((tool) => CORE_TOOL_NAMES.has(tool.name)),
+      : ALL_TOOLS.filter(
+          (tool) =>
+            CORE_TOOL_NAMES.has(tool.name) ||
+            // Story layer prototype: opt in with PATTERN_STORY=1 without turning on every advanced tool.
+            (STORY_ENABLED && Object.values(STORY_TOOL_NAMES).includes(tool.name as never))
+        ),
 }));
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
@@ -5987,6 +5995,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       };
     }
   }
+
+  const storyResult = await handleStoryTool(
+    request.params.name,
+    (request.params.arguments ?? {}) as Record<string, unknown>,
+    PROJECT_ROOT
+  );
+  if (storyResult) return storyResult;
 
   throw new Error(`Unknown tool: ${request.params.name}`);
 });
