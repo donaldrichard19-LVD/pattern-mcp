@@ -275,12 +275,16 @@ export function runChallenges(story: Story, now = new Date()): Finding[] {
         findings.push({
           id: key,
           kind: "contradiction",
-          severity: "high",
+          // A shared topic only shows the claims are about the same thing, not that they
+          // disagree, so it is a prompt to review. Opposite wording is the real clash signal.
+          severity: polarityClash ? "high" : "medium",
           heuristic: !sameTopic,
-          message: sameTopic
-            ? `Two active claims on topic "${a.topic}" and neither replaces the other.`
-            : "Two active claims read as opposites (wording overlap with reversed polarity). Heuristic match; confirm.",
-          question: "Which of these is true now? Supersede the older one, or explain why both hold.",
+          message: polarityClash && !sameTopic
+            ? "Two active claims read as opposites (wording overlap with reversed polarity). Heuristic match; confirm."
+            : `Two active claims on topic "${a.topic}" and neither replaces the other.`,
+          question: polarityClash
+            ? "Which of these is true now? Supersede the older one, or explain why both hold."
+            : "Do these agree or conflict? If they conflict, supersede the older one. If they agree, dismiss this with that reason.",
           cites: [claimCite(a), claimCite(b)],
         });
       }
@@ -478,7 +482,7 @@ export const STORY_TOOLS = [
         source: { type: "string", description: "Where this came from: a person, a doc, a conversation, a metric. Required for add/supersede." },
         confidence: { type: "string", enum: ["low", "medium", "high"], description: "Defaults to 'low'." },
         evidence: { type: "array", items: { type: "string" }, description: "What you have seen or measured that supports it." },
-        topic: { type: "string", description: "Optional tag. Two active claims on one topic are flagged as a contradiction unless one supersedes the other." },
+        topic: { type: "string", description: "Optional tag. Two active claims on one topic are flagged for review (medium) unless one supersedes the other; opposite wording on the same topic is flagged high." },
         supersedes: { type: "string", description: "Claim id this replaces (action 'supersede')." },
         claim_id: { type: "string", description: "Target claim id (action 'retract' or 'add_evidence')." },
         reason: { type: "string", description: "Why it was superseded or retracted. Required for those actions." },

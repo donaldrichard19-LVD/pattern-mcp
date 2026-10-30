@@ -63,13 +63,16 @@ console.log("contradiction");
 const c3 = (await call("record_claim", { text: "Onboarding should be slow and deliberate", kind: "belief", source: "design lead", topic: "onboarding", evidence: ["x"] })).json.claim_id;
 ch = await call("challenge", {});
 check("same-topic contradiction flagged", ch.json.findings.some((f) => f.kind === "contradiction" && f.cites.map((c) => c.id).sort().join() === [c2, c3].sort().join()));
+check("same-topic alone is medium, not high", ch.json.findings.some((f) => f.kind === "contradiction" && !f.heuristic && f.severity === "medium" && f.cites.some((c) => c.id === c3)));
 const polA = (await call("record_claim", { text: "Show pricing on the landing page", kind: "constraint", source: "cfo" })).json.claim_id;
 const polB = (await call("record_claim", { text: "Never show pricing on the landing page", kind: "constraint", source: "ceo" })).json.claim_id;
 ch = await call("challenge", {});
 check("opposite-polarity wording flagged as heuristic", ch.json.findings.some((f) => f.kind === "contradiction" && f.heuristic && f.cites.some((c) => c.id === polB)));
 
 console.log("supersede -> stale rationale");
-await call("record_claim", { action: "supersede", supersedes: c3, text: "Onboarding should be fast", kind: "belief", source: "design lead", reason: "interviews", evidence: ["y"], topic: "onboarding" });
+const c3b = (await call("record_claim", { action: "supersede", supersedes: c3, text: "Onboarding should be fast", kind: "belief", source: "design lead", reason: "interviews", evidence: ["y"], topic: "onboarding" })).json.claim_id;
+ch = await call("challenge", {});
+check("superseding c3 leaves c2/replacement as a medium review prompt, never high", ch.json.findings.some((f) => f.kind === "contradiction" && f.severity === "medium" && f.cites.some((c) => c.id === c3b)) && !ch.json.findings.some((f) => f.kind === "contradiction" && f.severity === "high" && f.cites.some((c) => c.id === c3b)));
 await call("record_claim", { action: "supersede", supersedes: c2, text: "Users want fewer steps", kind: "belief", source: "research", reason: "reworded", evidence: ["z"] });
 ch = await call("challenge", {});
 check("contradiction on c2/c3 cleared by supersede", !ch.json.findings.some((f) => f.kind === "contradiction" && f.cites.some((c) => c.id === c3)));
