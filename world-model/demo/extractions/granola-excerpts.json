@@ -1,0 +1,47 @@
+{
+  "nodes": [
+    {
+      "ref": "s1",
+      "type": "segment",
+      "title": "Product managers and product leaders"
+    },
+    {
+      "ref": "o5",
+      "type": "outcome",
+      "title": "Turn meeting conversations into written artifacts without retyping",
+      "description": "Meeting conversations should flow into PRDs and briefs without manual rework.",
+      "quote": "I like that I can share the notes with my team. I wish they linked to the document where the decision ends up."
+    },
+    {
+      "ref": "p5",
+      "type": "problem",
+      "title": "AI meeting notes are unstructured, so PMs reshape them by hand",
+      "description": "AI notes summarize what was said but not the problem, outcome and metric structure of a PRD.",
+      "quote": "Granola's notes are accurate, but they are a transcript summary, not a PRD. I still rebuild the structure by hand."
+    },
+    {
+      "ref": "a2",
+      "type": "assumption",
+      "title": "AI meeting notes are a primary input to PRDs",
+      "quote": "Granola's notes are accurate, but they are a transcript summary, not a PRD."
+    }
+  ],
+  "edges": [
+    {
+      "from": "s1",
+      "to": "o5",
+      "type": "wants"
+    },
+    {
+      "from": "o5",
+      "to": "p5",
+      "type": "blocked_by"
+    }
+  ],
+  "evidence": [
+    {
+      "ref": "p5",
+      "quote": "It captures what was said. It does not know which user outcome we were talking about."
+    }
+  ]
+}

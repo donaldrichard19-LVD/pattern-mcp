@@ -1,0 +1,41 @@
+{
+  "nodes": [
+    {
+      "ref": "p1",
+      "type": "problem",
+      "title": "Blank-page start: PMs copy an old document",
+      "quote": "Seven of eight PMs said they start a PRD by copying the last one they wrote."
+    },
+    {
+      "ref": "p2",
+      "type": "problem",
+      "title": "Drafts ship without a measurable success metric",
+      "quote": "Six of eight PMs said the success metrics section is the part they rewrite or skip."
+    },
+    {
+      "ref": "p3",
+      "type": "problem",
+      "title": "Documents go stale as decisions are made in Slack",
+      "quote": "Five PMs said documents are out of date within two weeks of kickoff because decisions are made in Slack and never written back."
+    },
+    {
+      "ref": "s2",
+      "type": "segment",
+      "title": "Cross-functional teammates (design and engineering)",
+      "quote": "Engineers and designers said they usually read the one-page brief and only open the PRD to check details."
+    },
+    {
+      "ref": "a1",
+      "type": "assumption",
+      "title": "PMs will trust AI-suggested metrics enough to keep them in the document"
+    }
+  ],
+  "edges": [],
+  "evidence": [
+    {
+      "ref": "a1",
+      "quote": "Most PMs said they edit AI-suggested text heavily before sharing it with anyone.",
+      "stance": "contradicts"
+    }
+  ]
+}

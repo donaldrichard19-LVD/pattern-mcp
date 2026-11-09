@@ -1,0 +1,494 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Product World Model</title>
+<style>
+:root {
+  --bg:#f6f7f9; --panel:#fff; --ink:#1b1f27; --muted:#5d6675; --line:#dfe3ea; --accent:#3b5bdb; --accent-ink:#fff;
+  --warn:#b45309; --bad:#b42318; --ok:#157347;
+  --segment:#2563eb; --outcome:#15803d; --problem:#c2410c; --feature:#7c3aed; --metric:#0e7490; --assumption:#a16207; --decision:#475569;
+  --shadow:0 1px 2px rgba(16,24,40,.08);
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg:#12151b; --panel:#1b2029; --ink:#e8ebf0; --muted:#9aa4b2; --line:#2c3340; --accent:#7c93ff; --accent-ink:#0b1020;
+    --warn:#f5b255; --bad:#ff8a80; --ok:#6ee7a0;
+    --segment:#7aa7ff; --outcome:#58d68d; --problem:#ff9f6b; --feature:#b79bff; --metric:#5fd3e8; --assumption:#f0c75e; --decision:#a7b3c5; }
+}
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+button, select, input, textarea { font:inherit; color:inherit; }
+button { cursor:pointer; background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:5px 10px; }
+button:hover { border-color:var(--accent); }
+button.primary { background:var(--accent); color:var(--accent-ink); border-color:var(--accent); }
+button.danger { color:var(--bad); }
+button:disabled { opacity:.5; cursor:default; }
+select, input[type=text], input[type=number], textarea { background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:5px 8px; }
+textarea { width:100%; min-height:70px; resize:vertical; }
+:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+header { display:flex; flex-wrap:wrap; gap:10px 16px; align-items:center; padding:10px 16px; background:var(--panel); border-bottom:1px solid var(--line); position:sticky; top:0; z-index:20; }
+header h1 { font-size:15px; margin:0; }
+nav { display:flex; gap:2px; flex-wrap:wrap; }
+nav button { border:0; background:none; border-radius:6px; padding:6px 12px; color:var(--muted); }
+nav button[aria-selected=true] { background:var(--bg); color:var(--ink); font-weight:600; }
+.badge { display:inline-block; min-width:18px; padding:0 6px; border-radius:9px; background:var(--accent); color:var(--accent-ink); font-size:11px; text-align:center; margin-left:4px; }
+.spacer { flex:1; }
+main { padding:14px 16px 60px; }
+.filters { display:flex; flex-wrap:wrap; gap:8px 12px; align-items:center; margin-bottom:10px; color:var(--muted); }
+.filters label { display:flex; gap:5px; align-items:center; }
+.legend { display:flex; gap:12px; flex-wrap:wrap; font-size:12px; color:var(--muted); margin-bottom:8px; }
+.legend i { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:4px; vertical-align:-1px; }
+#mapwrap { position:relative; overflow:auto; border:1px solid var(--line); border-radius:10px; background:var(--panel); }
+#map { position:relative; display:flex; gap:52px; padding:16px 20px 24px; min-width:max-content; }
+#edges { position:absolute; inset:0; pointer-events:none; }
+.col { width:184px; display:flex; flex-direction:column; gap:10px; position:relative; z-index:1; }
+.col h3 { margin:0 0 2px; font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); }
+.node { text-align:left; width:100%; border:1px solid var(--line); border-left:4px solid var(--c); border-radius:8px; background:var(--panel); padding:7px 9px; box-shadow:var(--shadow); transition:opacity .15s; }
+.node:hover { border-color:var(--c); }
+.node.dim { opacity:.18; }
+.node.selected { outline:2px solid var(--accent); }
+.node.hl { box-shadow:0 0 0 2px var(--c); }
+.node .t { font-weight:600; font-size:13px; }
+.node .m { display:flex; flex-wrap:wrap; gap:4px; margin-top:4px; font-size:11px; color:var(--muted); }
+.chip { border:1px solid var(--line); border-radius:10px; padding:0 6px; font-size:11px; color:var(--muted); background:var(--bg); }
+.chip.warn { color:var(--warn); border-color:var(--warn); }
+.chip.bad { color:var(--bad); border-color:var(--bad); }
+.chip.ok { color:var(--ok); border-color:var(--ok); }
+.t-segment{--c:var(--segment)} .t-outcome{--c:var(--outcome)} .t-problem{--c:var(--problem)} .t-feature{--c:var(--feature)}
+.t-metric{--c:var(--metric)} .t-assumption{--c:var(--assumption)} .t-decision{--c:var(--decision)}
+.edge { fill:none; stroke:var(--muted); stroke-width:1.2; opacity:.45; }
+.edge.affects { stroke-dasharray:4 3; }
+.edge.dim { opacity:.08; }
+.edge.hl { stroke:var(--accent); stroke-width:2.2; opacity:1; }
+#drawer { position:fixed; top:0; right:0; bottom:0; width:min(440px,100%); background:var(--panel); border-left:1px solid var(--line); box-shadow:-6px 0 24px rgba(0,0,0,.12); overflow:auto; padding:16px; z-index:30; }
+#drawer h2 { margin:6px 0 4px; font-size:17px; }
+#drawer h4 { margin:16px 0 6px; font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); }
+.kv { display:grid; grid-template-columns:90px 1fr; gap:2px 10px; font-size:13px; }
+.kv dt { color:var(--muted); } .kv dd { margin:0; }
+blockquote { margin:0 0 8px; padding:6px 10px; border-left:3px solid var(--line); background:var(--bg); border-radius:0 6px 6px 0; }
+blockquote.contradicts { border-left-color:var(--bad); }
+.src { font-size:12px; color:var(--muted); margin-top:3px; }
+a.link, button.link { background:none; border:0; padding:0; color:var(--accent); text-decoration:underline; cursor:pointer; }
+.rel { display:block; margin:2px 0; }
+.card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px 14px; margin-bottom:10px; box-shadow:var(--shadow); }
+.card .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.warnbox { background:rgba(180,83,9,.1); border:1px solid var(--warn); color:var(--warn); border-radius:6px; padding:4px 8px; margin-top:6px; font-size:13px; }
+.grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:12px; }
+.big { font-size:34px; font-weight:700; line-height:1.1; }
+.muted { color:var(--muted); }
+details { margin-top:8px; } summary { cursor:pointer; color:var(--accent); }
+.modal { position:fixed; inset:0; background:rgba(0,0,0,.45); display:flex; align-items:center; justify-content:center; z-index:50; padding:16px; }
+.modal > div { background:var(--panel); border-radius:10px; max-width:760px; width:100%; max-height:85vh; overflow:auto; padding:16px; }
+.modal pre { white-space:pre-wrap; font:13px/1.5 ui-monospace,Menlo,monospace; margin:0; }
+mark { background:#ffe58a; color:#1b1f27; padding:0 1px; }
+.diff { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:6px; }
+.diff pre { margin:0; padding:6px; border-radius:6px; font:12px ui-monospace,Menlo,monospace; white-space:pre-wrap; overflow:auto; background:var(--bg); }
+.diff .a { border-left:3px solid var(--ok); } .diff .b { border-left:3px solid var(--bad); }
+.pov { max-width:780px; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:8px 24px 20px; }
+.pov h1 { font-size:22px; } .pov h2 { font-size:17px; margin-top:22px; } .pov h3 { font-size:15px; }
+form.inline { display:grid; gap:6px; margin-top:6px; }
+.toast { position:fixed; bottom:16px; left:50%; transform:translateX(-50%); background:var(--ink); color:var(--bg); padding:8px 14px; border-radius:8px; z-index:60; }
+.empty { text-align:center; padding:60px 20px; color:var(--muted); }
+@media (max-width:700px){ main{padding:10px} header{padding:8px 10px} }
+</style>
+</head>
+<body>
+<header>
+  <h1>Product World Model</h1>
+  <select id="modelSel" aria-label="Model"></select>
+  <button id="newModel">New model</button>
+  <nav id="tabs" role="tablist"></nav>
+  <span class="spacer"></span>
+  <span class="muted" id="verLabel"></span>
+  <label class="muted">You <input type="text" id="actor" size="10" aria-label="Your name"></label>
+</header>
+<main id="main"></main>
+<div id="drawerHost"></div>
+<div id="modalHost"></div>
+
+<script>
+"use strict";
+const $ = (s, r = document) => r.querySelector(s);
+const TYPES = ["segment","outcome","problem","feature","metric","assumption","decision"];
+const COLS = [["segment","Users"],["outcome","Desired outcomes"],["problem","Problems"],["feature","Features"],["metric","Metrics"],["context","Assumptions & decisions"]];
+const EDGE_RULES = {
+  wants:{from:["segment"],to:["outcome"]}, blocked_by:{from:["outcome"],to:["problem"]},
+  addresses:{from:["feature"],to:["problem","outcome"]}, moves:{from:["feature"],to:["metric"]},
+  affects:{from:["decision","assumption"],to:["segment","outcome","problem","feature","metric","assumption","decision","product_area"]},
+};
+const FLAG_LABEL = { orphan:"orphan", gap:"gap", unmeasured:"unmeasured", stale:"stale", contradiction:"contradiction", unowned:"unowned" };
+
+// DOM builder: text is always set as text nodes, never parsed as HTML.
+function h(tag, props, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(props || {})) {
+    if (k.startsWith("aria-") && typeof v === "boolean") { el.setAttribute(k, String(v)); continue; }
+    if (v === false || v == null) continue;
+    if (k === "class") el.className = v;
+    else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+    else if (k === "value") el.value = v;
+    else el.setAttribute(k, v === true ? "" : v);
+  }
+  for (const kid of kids.flat(Infinity)) if (kid != null && kid !== false) el.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+  return el;
+}
+const ls = { get(k, d) { try { return localStorage.getItem(k) ?? d; } catch { return d; } }, set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
+const state = { models: [], modelId: ls.get("wm_model", ""), data: null, tab: "map", selected: null, traceId: null, traceSet: null,
+  filters: { segment: "", metric: "", status: "", flag: "" }, staleDays: 30, actor: ls.get("wm_actor", "owner") };
+const traceCache = new Map();
+
+function toast(msg) { const t = h("div", { class: "toast", role: "status" }, msg); document.body.append(t); setTimeout(() => t.remove(), 3500); }
+async function api(path, opts = {}, retry = true) {
+  const headers = { "content-type": "application/json", "x-actor": state.actor || "owner" };
+  const tok = ls.get("wm_token", ""); if (tok) headers.authorization = "Bearer " + tok;
+  const r = await fetch(path, { ...opts, headers });
+  const ct = r.headers.get("content-type") || "";
+  const body = ct.includes("json") ? await r.json() : await r.text();
+  if (r.status === 403 && retry) {
+    const t = prompt("This server requires the owner token to change the model:");
+    if (t) { ls.set("wm_token", t); return api(path, opts, false); }
+  }
+  if (!r.ok) throw new Error(body.error || r.statusText);
+  return body;
+}
+const post = (p, b) => api(p, { method: "POST", body: JSON.stringify(b) });
+const guard = (fn) => async (...a) => { try { await fn(...a); } catch (e) { toast(e.message); } };
+const ago = (iso) => { const d = Math.floor((Date.now() - Date.parse(iso)) / 864e5); return d <= 0 ? "today" : d === 1 ? "1 day ago" : d + " days ago"; };
+const nodeById = (id) => state.data.nodes.find((n) => n.id === id);
+
+// ---------- loading ----------
+async function loadModels() {
+  state.models = await api("/models");
+  if (!state.models.find((m) => m.id === state.modelId)) state.modelId = state.models[0]?.id || "";
+  const sel = $("#modelSel"); sel.replaceChildren(...state.models.map((m) => h("option", { value: m.id, selected: m.id === state.modelId }, m.name)));
+  sel.hidden = !state.models.length;
+}
+async function loadModel() {
+  if (!state.modelId) { state.data = null; return render(); }
+  ls.set("wm_model", state.modelId);
+  state.data = await api(`/models/${state.modelId}?stale_days=${state.staleDays}`);
+  traceCache.clear();
+  if (state.selected && !nodeById(state.selected)) state.selected = null;
+  render();
+}
+async function refresh() { await loadModels(); await loadModel(); }
+
+// ---------- shell ----------
+function renderTabs() {
+  const tabs = [["map","Map"],["review","Review queue"],["changelog","Changelog"],["health","Health"],["sources","Sources"],["pov","POV"]];
+  $("#tabs").replaceChildren(...tabs.map(([id, label]) => h("button", { role: "tab", "aria-selected": state.tab === id, onclick: () => { state.tab = id; closeDrawer(); render(); } },
+    label, id === "review" && state.data?.pending_proposals ? h("span", { class: "badge" }, state.data.pending_proposals) : null)));
+  $("#verLabel").textContent = state.data ? `v${state.data.version}` : "";
+}
+function render() {
+  renderTabs();
+  const main = $("#main");
+  if (!state.data) {
+    main.replaceChildren(h("div", { class: "empty" }, h("h2", {}, "No world model yet"),
+      h("p", {}, "Create a model for a product area, then upload the documents that define it."),
+      h("button", { class: "primary", onclick: guard(newModel) }, "Create a model"), " ",
+      h("button", { onclick: guard(async () => { const r = await post("/demo", {}); state.modelId = r.id; await refresh(); toast("Demo model loaded"); }) }, "Load the demo (PM artifacts)")));
+    return;
+  }
+  ({ map: renderMap, review: renderReview, changelog: renderChangelog, health: renderHealth, sources: renderSources, pov: renderPov }[state.tab])(main);
+}
+async function newModel() {
+  const name = prompt("Name the product area (e.g. 'PM artifacts: PRDs and product briefs')");
+  if (!name) return;
+  const r = await post("/models", { name }); state.modelId = r.id; state.tab = "sources"; await refresh();
+}
+
+// ---------- map ----------
+async function visibleSet() {
+  const f = state.filters, d = state.data; let set = null;
+  const inter = (s) => (set = set ? new Set([...set].filter((x) => s.has(x))) : s);
+  for (const id of [f.segment, f.metric]) if (id) inter(await traceIds(id));
+  if (f.status) inter(new Set(d.nodes.filter((n) => n.type !== "feature" || n.status === f.status).map((n) => n.id)));
+  if (f.flag) inter(new Set(d.nodes.filter((n) => (d.health.flags_by_node[n.id] || []).some((x) => f.flag === "any" || x === f.flag)).map((n) => n.id)));
+  return set;
+}
+async function traceIds(id) {
+  if (!traceCache.has(id)) { const t = await api(`/nodes/${id}/trace`); traceCache.set(id, new Set(t.nodes.map((n) => n.id))); }
+  return traceCache.get(id);
+}
+async function renderMap(main) {
+  const d = state.data, mine = state.modelId;
+  const vis = await visibleSet();
+  if (state.modelId !== mine || state.tab !== "map") return;
+  const opt = (type) => d.nodes.filter((n) => n.type === type).map((n) => h("option", { value: n.id }, n.title));
+  const sel = (key, label, first, opts) => { const s = h("select", { "aria-label": label, onchange: (e) => { state.filters[key] = e.target.value; state.traceId = null; state.traceSet = null; renderMap(main); } }, h("option", { value: "" }, first), opts); s.value = state.filters[key]; return h("label", {}, label, s); };
+  const flagOpts = ["any", "orphan", "gap", "unmeasured", "stale", "contradiction", "unowned"].map((x) => h("option", { value: x }, x === "any" ? "any flag" : x));
+  const filters = h("div", { class: "filters" },
+    sel("segment", "Segment", "All", opt("segment")), sel("metric", "Metric", "All", opt("metric")),
+    sel("status", "Feature status", "All", ["shipped", "in-flight", "proposed"].map((x) => h("option", { value: x }, x))),
+    sel("flag", "Health", "All", flagOpts),
+    h("label", {}, h("input", { type: "checkbox", checked: !!state.traceId, onchange: (e) => { if (!e.target.checked) clearTrace(); else if (state.selected) setTrace(state.selected); else { e.target.checked = false; toast("Select a node first, then turn on Trace"); } } }), "Trace mode"),
+    (state.filters.segment || state.filters.metric || state.filters.status || state.filters.flag) ? h("button", { onclick: () => { state.filters = { segment: "", metric: "", status: "", flag: "" }; renderMap(main); } }, "Clear filters") : null);
+  const legend = h("div", { class: "legend" }, TYPES.map((t) => h("span", {}, h("i", { style: `background:var(--${t})` }), t)), h("span", {}, "Arrows run user → outcome → problem ← feature → metric"));
+  const byCol = (c) => d.nodes.filter((n) => (c === "context" ? ["assumption", "decision"].includes(n.type) : n.type === c));
+  const order = orderNodes(d);
+  const cols = COLS.map(([c, title]) => h("div", { class: "col", "data-col": c }, h("h3", {}, title),
+    byCol(c).sort((a, b) => order.get(a.id) - order.get(b.id)).map((n) => nodeCard(n, vis))));
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg"); svg.id = "edges";
+  svg.innerHTML = '<defs><marker id="arr" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L8 4L0 8z" fill="currentColor" opacity=".6"/></marker></defs>';
+  const wrap = h("div", { id: "mapwrap" }, h("div", { id: "map" }, svg, cols));
+  main.replaceChildren(filters, legend, wrap);
+  const draw = () => drawEdges(vis); draw(); requestAnimationFrame(draw);
+  if (document.fonts?.ready) document.fonts.ready.then(draw);
+  window.onresize = draw;
+  if (state.selected) openDrawer(state.selected, true);
+}
+function orderNodes(d) {
+  const pos = new Map(), cols = ["segment","outcome","problem","feature","metric"];
+  const adj = (id) => d.edges.filter((e) => e.from_id === id || e.to_id === id).map((e) => (e.from_id === id ? e.to_id : e.from_id));
+  d.nodes.filter((n) => n.type === "segment").forEach((n, i) => pos.set(n.id, i));
+  for (const type of cols.slice(1)) {
+    const mine = d.nodes.filter((n) => n.type === type);
+    const score = (n) => { const s = adj(n.id).filter((x) => pos.has(x)).map((x) => pos.get(x)); return s.length ? Math.min(...s) : 1e3; };
+    mine.map((n, i) => [n, score(n), i]).sort((a, b) => a[1] - b[1] || a[2] - b[2]).forEach(([n], i) => pos.set(n.id, i + (type === "metric" ? 0 : 0)));
+  }
+  d.nodes.filter((n) => ["assumption","decision"].includes(n.type)).forEach((n, i) => pos.set(n.id, i));
+  return pos;
+}
+function nodeCard(n, vis) {
+  const flags = state.data.health.flags_by_node[n.id] || [];
+  const dim = (vis && !vis.has(n.id)) || (state.traceSet && !state.traceSet.has(n.id));
+  return h("button", { class: `node t-${n.type}${dim ? " dim" : ""}${state.selected === n.id ? " selected" : ""}${state.traceSet?.has(n.id) ? " hl" : ""}`, "data-id": n.id, onclick: guard(() => selectNode(n.id)), title: n.title },
+    h("div", { class: "t" }, n.title),
+    h("div", { class: "m" },
+      n.type === "feature" && n.status ? h("span", { class: `chip ${n.status === "shipped" ? "ok" : ""}` }, n.status) : null,
+      ...flags.map((f) => h("span", { class: `chip ${f === "contradiction" ? "bad" : "warn"}` }, f)),
+      h("span", { class: "chip" }, `${n.evidence_count} evidence`),
+      n.confidence === "low" ? h("span", { class: "chip warn" }, "low confidence") : null));
+}
+function drawEdges(vis) {
+  const svg = $("#edges"), map = $("#map"); if (!svg || !map) return;
+  svg.setAttribute("width", map.scrollWidth); svg.setAttribute("height", map.scrollHeight);
+  const base = map.getBoundingClientRect(), els = new Map([...map.querySelectorAll(".node")].map((e) => [e.dataset.id, e]));
+  const colIdx = (id) => { const t = nodeById(id)?.type; return ["segment","outcome","problem","feature","metric"].indexOf(t) >= 0 ? ["segment","outcome","problem","feature","metric"].indexOf(t) : 5; };
+  svg.querySelectorAll("path.edge").forEach((p) => p.remove());
+  for (const e of state.data.edges) {
+    const a = els.get(e.from_id), b = els.get(e.to_id); if (!a || !b) continue;
+    const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect(), right = colIdx(e.from_id) < colIdx(e.to_id);
+    const x1 = (right ? ra.right : ra.left) - base.left, y1 = ra.top + ra.height / 2 - base.top;
+    const x2 = (right ? rb.left : rb.right) - base.left, y2 = rb.top + rb.height / 2 - base.top;
+    const dx = Math.max(36, Math.abs(x2 - x1) / 2) * (right ? 1 : -1);
+    const inTrace = state.traceSet && state.traceSet.has(e.from_id) && state.traceSet.has(e.to_id);
+    const hidden = (vis && !(vis.has(e.from_id) && vis.has(e.to_id))) || (state.traceSet && !inTrace);
+    const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    p.setAttribute("d", `M${x1} ${y1} C${x1 + dx} ${y1} ${x2 - dx} ${y2} ${x2} ${y2}`);
+    p.setAttribute("class", `edge ${e.type}${hidden ? " dim" : ""}${inTrace ? " hl" : ""}`);
+    p.setAttribute("marker-end", "url(#arr)"); p.style.color = "var(--muted)";
+    const t = document.createElementNS("http://www.w3.org/2000/svg", "title"); t.textContent = e.type.replace("_", " "); p.append(t);
+    svg.append(p);
+  }
+}
+async function selectNode(id) { state.selected = id; if (state.traceId) await setTrace(id); else renderMap($("#main")); }
+async function setTrace(id) { const t = await api(`/nodes/${id}/trace`); state.traceId = id; state.traceSet = new Set(t.nodes.map((n) => n.id)); renderMap($("#main")); }
+function clearTrace() { state.traceId = null; state.traceSet = null; renderMap($("#main")); }
+
+// ---------- detail drawer ----------
+function closeDrawer() { $("#drawerHost").replaceChildren(); }
+async function openDrawer(id) {
+  const d = await api(`/nodes/${id}`), n = d.node, flags = state.data.health.flags_by_node[id] || [];
+  const link = (other) => h("button", { class: "link rel", onclick: guard(() => { state.tab = "map"; selectNode(other.id); }) }, `${other.type}: ${other.title}`);
+  const rels = [...d.outgoing.map((r) => [r.edge.type.replace("_", " ") + " →", r.node]), ...d.incoming.map((r) => ["← " + r.edge.type.replace("_", " "), r.node])];
+  const drawer = h("aside", { id: "drawer", "aria-label": "Node detail" },
+    h("div", { class: "row", style: "display:flex;justify-content:space-between;align-items:center" },
+      h("span", { class: `chip t-${n.type}`, style: "border-color:var(--c);color:var(--c)" }, n.type.replace("_", " ")),
+      h("span", {}, h("button", { onclick: guard(() => (state.traceId === id ? clearTrace() : setTrace(id))) }, state.traceId === id ? "Stop trace" : "Trace"), " ", h("button", { onclick: () => { state.selected = null; closeDrawer(); renderMap($("#main")); }, "aria-label": "Close" }, "✕"))),
+    h("h2", {}, n.title), n.description ? h("p", {}, n.description) : null,
+    h("dl", { class: "kv" }, h("dt", {}, "Status"), h("dd", {}, n.status || "n/a"), h("dt", {}, "Owner"), h("dd", {}, n.owner || "unassigned"),
+      h("dt", {}, "Confidence"), h("dd", {}, n.confidence), h("dt", {}, "Updated"), h("dd", {}, `${ago(n.updated_at)} (v${n.version})`)),
+    flags.length ? h("div", { class: "warnbox" }, "Health: " + flags.join(", ")) : null,
+    n.flags.map((f) => h("div", { class: "warnbox" }, `Flag “${f.flag}” by ${f.actor}: ${f.note || "no note"} `, h("button", { class: "link", onclick: guard(async () => { await post(`/nodes/${id}/resolve-flag`, { flag: f.flag }); await loadModel(); toast("Flag resolved"); }) }, "Resolve"))),
+    h("h4", {}, `Evidence (${d.evidence.length})`),
+    d.evidence.length ? d.evidence.map((e) => h("blockquote", { class: e.stance }, `“${e.quote}”`,
+      h("div", { class: "src" }, e.stance === "contradicts" ? h("b", { style: "color:var(--bad)" }, "contradicts · ") : null,
+        `${e.source?.label || e.source_type} · ${e.source_date.slice(0, 10)} · by ${e.actor || "?"} `,
+        e.source_id ? h("button", { class: "link", onclick: guard(() => showSource(e.source_id, e.span_start, e.span_end)) }, "view in source") : null))) : h("p", { class: "muted" }, "No evidence yet. Add some below."),
+    h("h4", {}, "Connections"), rels.length ? rels.map(([label, o]) => h("div", {}, h("span", { class: "muted" }, label + " "), link(o))) : h("p", { class: "muted" }, "None"),
+    h("h4", {}, "History"), d.history.length ? d.history.map((c) => h("div", {}, h("span", { class: "muted" }, `v${c.version} · ${c.actor} (${c.actor_type}) · ${ago(c.at)}: `), c.summary)) : h("p", { class: "muted" }, "No recorded changes"),
+    h("h4", {}, "Propose a change"), changeForms(n));
+  $("#drawerHost").replaceChildren(drawer);
+}
+async function sendHuman(payloadFor, auto) {
+  const p = await post(`/models/${state.modelId}/proposals`, { ...payloadFor, actor: state.actor || "owner", actor_type: "human" });
+  if (auto) { await post("/proposals/approve", { ids: [p.id], note: "Applied directly by owner" }); toast("Change applied (new version)"); } else toast("Added to the review queue");
+  await loadModel();
+}
+function changeForms(n) {
+  const evForm = () => {
+    const quote = h("textarea", { placeholder: "Quote or data point", required: true }), src = h("input", { type: "text", placeholder: "Where is it from? (doc, link, thread)", required: true });
+    const stance = h("select", {}, h("option", { value: "supports" }, "supports"), h("option", { value: "contradicts" }, "contradicts"));
+    const auto = h("input", { type: "checkbox", checked: true });
+    return h("details", {}, h("summary", {}, "Add evidence"), h("form", { class: "inline", onsubmit: guard(async (e) => { e.preventDefault();
+      await sendHuman({ change_type: "add", rationale: "Added from the map", payload: { kind: "evidence", node_ids: [n.id], quote: quote.value, stance: stance.value, source: { type: "note", uri: src.value, label: src.value, date: new Date().toISOString() } } }, auto.checked); }) },
+      quote, src, h("label", {}, "This ", stance, " the node"), h("label", {}, auto, " Apply immediately"), h("button", { class: "primary" }, "Submit")));
+  };
+  const editForm = () => {
+    const f = { title: h("input", { type: "text", value: n.title }), description: h("textarea", {}, n.description), status: h("input", { type: "text", value: n.status }), owner: h("input", { type: "text", value: n.owner }),
+      confidence: h("select", {}, ["low", "medium", "high"].map((c) => h("option", { value: c, selected: c === n.confidence }, c))) };
+    const auto = h("input", { type: "checkbox", checked: true });
+    return h("details", {}, h("summary", {}, "Edit fields"), h("form", { class: "inline", onsubmit: guard(async (e) => { e.preventDefault();
+      const fields = {}; for (const k in f) if (f[k].value !== (n[k] ?? "")) fields[k] = f[k].value;
+      if (!Object.keys(fields).length) return toast("Nothing changed");
+      await sendHuman({ change_type: "update", rationale: "Edited from the map", payload: { node_id: n.id, fields } }, auto.checked); }) },
+      ...Object.entries(f).map(([k, el]) => h("label", {}, k, el)), h("label", {}, auto, " Apply immediately"), h("button", { class: "primary" }, "Submit")));
+  };
+  const linkForm = () => {
+    const opts = []; for (const [t, r] of Object.entries(EDGE_RULES)) {
+      if (r.from.includes(n.type)) for (const o of state.data.nodes) if (r.to.includes(o.type) && o.id !== n.id) opts.push({ label: `${t.replace("_"," ")} → ${o.title}`, from: n.id, to: o.id, type: t });
+      if (r.to.includes(n.type)) for (const o of state.data.nodes) if (r.from.includes(o.type) && o.id !== n.id) opts.push({ label: `${o.title} → ${t.replace("_"," ")} (this)`, from: o.id, to: n.id, type: t });
+    }
+    if (!opts.length) return null;
+    const sel = h("select", {}, opts.map((o, i) => h("option", { value: i }, o.label))), auto = h("input", { type: "checkbox", checked: true });
+    return h("details", {}, h("summary", {}, "Add a link"), h("form", { class: "inline", onsubmit: guard(async (e) => { e.preventDefault(); const o = opts[sel.value];
+      await sendHuman({ change_type: "link", rationale: "Linked from the map", payload: { from_id: o.from, to_id: o.to, type: o.type } }, auto.checked); }) }, sel, h("label", {}, auto, " Apply immediately"), h("button", { class: "primary" }, "Submit")));
+  };
+  const flagForm = () => { const note = h("input", { type: "text", placeholder: "What looks wrong?", required: true }), auto = h("input", { type: "checkbox", checked: true });
+    return h("details", {}, h("summary", {}, "Flag a conflict"), h("form", { class: "inline", onsubmit: guard(async (e) => { e.preventDefault();
+      await sendHuman({ change_type: "flag", rationale: note.value, payload: { node_id: n.id, flag: "conflict", note: note.value } }, auto.checked); }) }, note, h("label", {}, auto, " Apply immediately"), h("button", { class: "primary" }, "Flag"))); };
+  return h("div", {}, evForm(), editForm(), linkForm(), flagForm());
+}
+async function showSource(id, start, end) {
+  const s = await api(`/sources/${id}`), mark = start != null ? h("mark", {}, s.text.slice(start, end)) : null;
+  const body = mark ? [s.text.slice(0, start), mark, s.text.slice(end)] : [s.text];
+  const close = () => $("#modalHost").replaceChildren();
+  $("#modalHost").replaceChildren(h("div", { class: "modal", onclick: (e) => { if (e.target.classList.contains("modal")) close(); } },
+    h("div", { role: "dialog", "aria-label": "Source" }, h("div", { style: "display:flex;justify-content:space-between;margin-bottom:8px" }, h("b", {}, `${s.label || s.filename || s.type} · ${s.source_date.slice(0, 10)}`), h("button", { onclick: close }, "Close")), h("pre", {}, body))));
+  mark?.scrollIntoView({ block: "center" });
+}
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") { $("#modalHost").replaceChildren(); closeDrawer(); } });
+
+// ---------- review queue ----------
+async function renderReview(main) {
+  const props = await api(`/models/${state.modelId}/proposals?status=pending`);
+  const titleOf = (id) => nodeById(id)?.title || props.map((p) => p.payload?.node).find((n) => n?.id === id)?.title || id;
+  main.replaceChildren(h("h2", {}, "Review queue"), h("p", { class: "muted" }, "Nothing from an agent or the extractor changes the model until you approve it. Approving a group creates one new version."));
+  if (!props.length) { main.append(h("div", { class: "empty" }, "Nothing waiting for review.")); return; }
+  const groups = new Map(); for (const p of props) { const k = p.batch_id || p.id; (groups.get(k) || groups.set(k, []).get(k)).push(p); }
+  for (const [, ps] of groups) {
+    const ids = ps.map((p) => p.id), first = ps[0];
+    main.append(h("div", { class: "card" }, h("div", { class: "row" },
+      h("b", {}, ps.length > 1 ? `${ps.length} proposed changes from ${first.actor}` : "1 proposed change"), h("span", { class: "muted" }, first.source_ref?.label ? `source: ${first.source_ref.label}` : first.rationale?.slice(0, 80)), h("span", { class: "spacer" }),
+      h("button", { class: "primary", onclick: guard(async () => { const r = await post("/proposals/approve", { ids }); toast(`Approved: model is now v${r.version}`); await loadModel(); }) }, `Approve all (${ps.length})`),
+      h("button", { class: "danger", onclick: guard(async () => { await post("/proposals/reject", { ids }); await loadModel(); }) }, "Reject all")),
+      ps.map((p) => proposalRow(p, titleOf))));
+  }
+}
+function proposalRow(p, titleOf) {
+  const pl = p.payload; let what;
+  if (p.change_type === "add" && pl.kind === "node") what = [h("span", { class: `chip t-${pl.node.type}`, style: "border-color:var(--c);color:var(--c)" }, pl.node.type), " ", h("b", {}, pl.node.title), pl.node.status ? ` (${pl.node.status})` : "", pl.node.description ? h("div", { class: "muted" }, pl.node.description) : null];
+  else if (p.change_type === "add") what = [h("b", {}, pl.stance === "contradicts" ? "Contradicting evidence" : "Evidence"), " for ", pl.node_ids.map(titleOf).join(", ")];
+  else if (p.change_type === "link") what = [h("b", {}, "Link: "), `${titleOf(pl.from_id)} —${pl.type.replace("_", " ")}→ ${titleOf(pl.to_id)}`];
+  else if (p.change_type === "update") what = [h("b", {}, "Update "), titleOf(pl.node_id), h("pre", { class: "muted", style: "margin:2px 0;white-space:pre-wrap" }, JSON.stringify(pl.fields, null, 1))];
+  else what = [h("b", {}, "Flag "), titleOf(pl.node_id), `: ${pl.flag}${pl.note ? " — " + pl.note : ""}`];
+  const quote = pl.evidence?.[0]?.quote || (pl.kind === "evidence" ? pl.quote : null) || p.source_ref?.quote;
+  const srcId = pl.evidence?.[0]?.source_id || pl.source_id || p.source_ref?.source_id;
+  const row = h("div", { style: "border-top:1px solid var(--line);padding:8px 0" }, h("div", {}, what),
+    quote ? h("blockquote", {}, `“${quote}”`, srcId ? [" ", h("button", { class: "link", onclick: guard(async () => { const s = await api(`/sources/${srcId}`); showSource(srcId, ...locate(s.text, quote)); }) }, "highlight in source")] : null) : null,
+    p.conflicts.map((c) => h("div", { class: "warnbox" }, "⚠ " + c)),
+    h("div", { class: "row", style: "margin-top:4px" }, h("span", { class: "muted" }, `${p.actor} (${p.actor_type}) · ${ago(p.created_at)}${p.rationale ? " · " + p.rationale : ""}`), h("span", { class: "spacer" }),
+      h("button", { onclick: () => editProposal(p, row) }, "Edit"),
+      h("button", { class: "primary", onclick: guard(async () => { const r = await post("/proposals/approve", { ids: [p.id] }); if (r.errors[p.id]) throw new Error(r.errors[p.id]); toast(`Approved: v${r.version}`); await loadModel(); }) }, "Approve"),
+      h("button", { class: "danger", onclick: guard(async () => { await post("/proposals/reject", { ids: [p.id] }); await loadModel(); }) }, "Reject")));
+  return row;
+}
+function locate(text, quote) { const i = text.indexOf(quote); return i >= 0 ? [i, i + quote.length] : [null, null]; }
+function editProposal(p, row) {
+  const ta = h("textarea", { style: "min-height:120px;font-family:ui-monospace,monospace;font-size:12px" }, JSON.stringify(p.payload.kind === "node" ? { ...p.payload, evidence: undefined } : p.payload, null, 2));
+  const form = h("div", { class: "inline" }, h("div", { class: "muted" }, "Edit the proposal payload (JSON), then approve with your edit."), ta, h("div", { class: "row" },
+    h("button", { class: "primary", onclick: guard(async () => { let edited; try { edited = JSON.parse(ta.value); } catch { throw new Error("That is not valid JSON"); }
+      if (p.payload.kind === "node") edited.evidence = p.payload.evidence;
+      const r = await post("/proposals/approve", { ids: [p.id], edits: { [p.id]: edited }, note: "Approved with edits" }); toast(`Approved with edits: v${r.version}`); await loadModel(); }) }, "Approve with edits"),
+    h("button", { onclick: () => form.remove() }, "Cancel")));
+  row.append(form);
+}
+
+// ---------- changelog ----------
+async function renderChangelog(main) {
+  const vs = await api(`/models/${state.modelId}/changelog`);
+  let since = ls.get("wm_since", "all");
+  const sel = h("select", { "aria-label": "Show changes since", onchange: (e) => { ls.set("wm_since", e.target.value); renderChangelog(main); } },
+    [["all", "all time"], ["7", "the last 7 days"], ["30", "the last 30 days"]].map(([v, l]) => h("option", { value: v, selected: v === since }, l)));
+  const cutoff = since === "all" ? 0 : Date.now() - Number(since) * 864e5;
+  const items = vs.map((v) => ({ ...v, changelog: v.changelog.filter((c) => Date.parse(c.at) >= cutoff) })).filter((v) => v.changelog.length);
+  main.replaceChildren(h("h2", {}, "Changelog"), h("div", { class: "filters" }, h("label", {}, "What changed in ", sel)));
+  if (!items.length) main.append(h("div", { class: "empty" }, "No changes in this window."));
+  for (const v of items) main.append(h("div", { class: "card" }, h("b", {}, `Version ${v.number}`), h("span", { class: "muted" }, ` · ${v.created_at.slice(0, 16).replace("T", " ")} · ${v.changelog.length} change${v.changelog.length > 1 ? "s" : ""}`),
+    v.changelog.map((c) => h("div", { style: "padding:6px 0;border-top:1px solid var(--line);margin-top:6px" },
+      h("span", { class: `chip ${c.actor_type === "agent" ? "warn" : ""}` }, `${c.actor} · ${c.actor_type}`), " ", c.summary,
+      h("details", {}, h("summary", {}, "diff"), h("div", { class: "diff" }, h("pre", { class: "b" }, c.diff.before == null ? "(nothing)" : JSON.stringify(c.diff.before, null, 1)), h("pre", { class: "a" }, JSON.stringify(c.diff.after, null, 1))))))));
+}
+
+// ---------- health ----------
+async function renderHealth(main) {
+  const h0 = state.data.health, cov = h0.coverage;
+  const days = h("input", { type: "number", min: 1, value: state.staleDays, style: "width:70px", "aria-label": "Stale after days", onchange: guard(async (e) => { state.staleDays = Math.max(1, Number(e.target.value) || 30); await loadModel(); }) });
+  const list = (title, items, hint) => h("div", { class: "card" }, h("b", {}, `${title} (${items.length})`), hint ? h("div", { class: "muted" }, hint) : null,
+    items.length ? items.map((i) => h("div", { style: "padding:4px 0" }, h("button", { class: "link", onclick: guard(() => { state.tab = "map"; state.selected = i.id; render(); }) }, i.title), h("span", { class: "muted" }, ` · ${i.type} · ${i.reason}`))) : h("div", { class: "muted" }, "None. Nice."));
+  main.replaceChildren(h("h2", {}, "Model health"), h("div", { class: "grid" },
+    h("div", { class: "card" }, h("div", { class: "muted" }, "Coverage score"), h("div", { class: "big" }, `${cov.score}%`), h("div", { class: "muted" }, `${cov.covered} of ${cov.outcomes} outcomes have a feature and a metric`)),
+    h("div", { class: "card" }, h("div", { class: "muted" }, "Median node age (days since last evidence)"), h("div", { class: "big" }, h0.median_node_age_days ?? "n/a"), h("label", { class: "muted" }, "Stale after ", days, " days"))),
+    list("Orphan features", h0.orphans, "A feature needs a path to an outcome and a metric it moves."),
+    list("Outcome gaps", h0.gaps, "No feature addresses these outcomes."),
+    list("Unmeasured outcomes", h0.unmeasured, "Features exist but none moves a metric."),
+    list("Outcomes no user wants", h0.unowned_outcomes), list("Contradictions", h0.contradictions), list("Stale", h0.stale), list("No evidence", h0.unsupported));
+}
+
+// ---------- sources ----------
+async function toB64(f) { const b = new Uint8Array(await f.arrayBuffer()); let s = ""; for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode(...b.subarray(i, i + 0x8000)); return btoa(s); }
+async function renderSources(main) {
+  const srcs = await api(`/models/${state.modelId}/sources`);
+  const text = h("textarea", { placeholder: "…or paste text here", style: "min-height:110px" }), label = h("input", { type: "text", placeholder: "Label (e.g. Granola reviews)" });
+  const type = h("select", {}, [["note","Note"],["prd","PRD"],["brief","Product brief"],["slack","Slack"],["research","User research"],["research_input","Research input (e.g. Granola, Zoom AI)"]].map(([v, l]) => h("option", { value: v }, l)));
+  const file = h("input", { type: "file", multiple: true, accept: ".md,.markdown,.txt,.pdf,.docx,.json" });
+  const status = h("div", { class: "muted", role: "status" });
+  const show = (r, name) => `${name}: ${r.ingestion.proposals} proposals (${r.ingestion.method})${r.ingestion.merged.length ? `, ${r.ingestion.merged.length} merged into existing nodes` : ""}${r.ingestion.skipped.length ? `, ${r.ingestion.skipped.length} skipped` : ""}`;
+  const go = h("button", { class: "primary", onclick: guard(async () => {
+    const files = [...file.files]; if (!files.length && !text.value.trim()) return toast("Choose a file or paste some text");
+    go.disabled = true; status.textContent = "Extracting… this can take a minute with an LLM."; const out = [];
+    try {
+      for (const f of files) {
+        const b64 = await toB64(f);
+        const r = await post(`/models/${state.modelId}/sources`, { filename: f.name, content_base64: b64, ...(files.length === 1 && label.value ? { label: label.value } : {}), ...(type.value !== "note" ? { type: type.value } : {}) });
+        out.push(show(r, f.name));
+      }
+      if (text.value.trim()) { const r = await post(`/models/${state.modelId}/sources`, { filename: (label.value || "pasted-text").replace(/\s+/g, "-") + ".txt", text: text.value, type: type.value, label: label.value }); out.push(show(r, "Pasted text")); }
+      toast(out.join(" | ")); state.tab = "review"; await loadModel();
+    } finally { go.disabled = false; status.textContent = ""; }
+  }) }, "Ingest and review");
+  main.replaceChildren(h("h2", {}, "Sources"),
+    h("div", { class: "card" }, h("b", {}, "Add sources"), h("p", { class: "muted" }, "Markdown, .txt, .pdf, .docx or a Slack export (.json). Extraction proposes nodes and edges with source quotes; nothing is added until you approve it in the Review queue. Without an ANTHROPIC_API_KEY the offline extractor only reads lines like “Outcome: …” (or the bundled demo files)."),
+      h("div", { class: "inline", style: "display:grid;gap:8px" }, file, text, h("div", { class: "row", style: "display:flex;gap:8px;flex-wrap:wrap" }, type, label), h("div", {}, go), status)),
+    h("h3", {}, `Ingested (${srcs.length})`),
+    srcs.length ? srcs.map((s) => h("div", { class: "card row", style: "display:flex;gap:8px;align-items:center" }, h("b", {}, s.label || s.filename || s.type), h("span", { class: "chip" }, s.type), h("span", { class: "muted" }, `${s.source_date.slice(0, 10)} · ${s.length} chars`), h("span", { class: "spacer" }), h("button", { onclick: guard(() => showSource(s.id)) }, "View"))) : h("p", { class: "muted" }, "No sources yet."));
+}
+
+// ---------- POV ----------
+async function renderPov(main) {
+  const md = await api(`/models/${state.modelId}/export?format=md`);
+  const dl = (name, href) => h("a", { class: "link", href, download: name }, name);
+  const body = h("div", { class: "pov" });
+  for (const line of md.split("\n")) {
+    const m = /^(#{1,3}) (.*)$/.exec(line);
+    if (m) body.append(h("h" + m[1].length, {}, m[2]));
+    else if (/^\s*- /.test(line)) body.append(h("div", { style: `margin-left:${line.search(/\S/) * 8 + 10}px` }, "• " + line.replace(/^\s*- /, "")));
+    else if (line.trim()) body.append(h("p", {}, line.replace(/^_|_$/g, "")));
+  }
+  main.replaceChildren(h("h2", {}, "POV: one-page summary"), h("p", { class: "muted" }, "Generated from the approved model. Agents without API access can use this as a context file: ",
+    dl("world-model.md", `/models/${state.modelId}/export?format=md`), " · ", dl("world-model.json", `/models/${state.modelId}/export?format=json`), " · ",
+    h("button", { class: "link", onclick: guard(async () => { await navigator.clipboard.writeText(md); toast("Copied"); }) }, "copy markdown")), body);
+}
+
+// ---------- init ----------
+$("#actor").value = state.actor;
+$("#actor").addEventListener("change", (e) => { state.actor = e.target.value.trim() || "owner"; ls.set("wm_actor", state.actor); });
+$("#modelSel").addEventListener("change", guard(async (e) => { state.modelId = e.target.value; state.selected = null; state.traceId = null; state.traceSet = null; closeDrawer(); await loadModel(); }));
+$("#newModel").addEventListener("click", guard(newModel));
+refresh().catch((e) => { $("#main").replaceChildren(h("div", { class: "empty" }, "Could not load: " + e.message)); });
+</script>
+</body>
+</html>

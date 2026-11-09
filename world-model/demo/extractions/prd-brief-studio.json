@@ -1,0 +1,250 @@
+{
+  "nodes": [
+    {
+      "ref": "s1",
+      "type": "segment",
+      "title": "Product managers and product leaders",
+      "description": "Write and maintain PRDs and briefs. Primary user.",
+      "quote": "Primary: product managers and product leaders who write and maintain PRDs and briefs."
+    },
+    {
+      "ref": "s2",
+      "type": "segment",
+      "title": "Cross-functional teammates (design and engineering)",
+      "description": "Read PRDs and briefs to understand why a feature exists.",
+      "quote": "Secondary: designers and engineers who read those documents to understand why a feature exists."
+    },
+    {
+      "ref": "o1",
+      "type": "outcome",
+      "title": "Produce a clear, well-grounded first draft in under 30 minutes",
+      "quote": "A PM can produce a clear, well-grounded first draft in under 30 minutes."
+    },
+    {
+      "ref": "o3",
+      "type": "outcome",
+      "title": "Define success metrics tied to the user outcome",
+      "quote": "A PM can define success metrics that are tied to the user outcome the feature serves."
+    },
+    {
+      "ref": "o2",
+      "type": "outcome",
+      "title": "Keep a document current as decisions change",
+      "quote": "A PM can keep a document current as decisions change."
+    },
+    {
+      "ref": "o4",
+      "type": "outcome",
+      "title": "Understand a product area and trace any feature to its purpose",
+      "quote": "A teammate can understand a product area and trace any feature back to its purpose."
+    },
+    {
+      "ref": "p1",
+      "type": "problem",
+      "title": "Blank-page start: PMs copy an old document",
+      "quote": "Product managers start most PRDs from a blank page or by copying an old document."
+    },
+    {
+      "ref": "p2",
+      "type": "problem",
+      "title": "Drafts ship without a measurable success metric",
+      "quote": "Drafts routinely ship without a measurable success metric"
+    },
+    {
+      "ref": "p3",
+      "type": "problem",
+      "title": "Documents go stale as decisions are made in Slack",
+      "quote": "the finished document goes out of date as soon as decisions are made in Slack"
+    },
+    {
+      "ref": "f1",
+      "type": "feature",
+      "title": "Template-guided PRD drafting",
+      "status": "in-flight",
+      "description": "Structured prompts for problem, users, outcomes and metrics.",
+      "quote": "Template-guided PRD drafting (in flight): structured prompts for problem, users, outcomes and metrics."
+    },
+    {
+      "ref": "f2",
+      "type": "feature",
+      "title": "Metric suggestion assistant",
+      "status": "proposed",
+      "description": "Suggests an input metric and an output metric for each outcome.",
+      "quote": "Metric suggestion assistant (proposed): suggests an input metric and an output metric for each outcome."
+    },
+    {
+      "ref": "f3",
+      "type": "feature",
+      "title": "Stale-document alerts",
+      "status": "shipped",
+      "description": "Notifies the owner when a document has had no edits or evidence for 30 days.",
+      "quote": "Stale-document alerts (shipped): notifies the owner when a document has had no edits or new evidence for 30 days."
+    },
+    {
+      "ref": "f4",
+      "type": "feature",
+      "title": "Decision log sidebar",
+      "status": "proposed",
+      "description": "Records decisions and reasons next to the text they affect.",
+      "quote": "Decision log sidebar (proposed): records decisions and the reasons behind them next to the text they affect."
+    },
+    {
+      "ref": "f5",
+      "type": "feature",
+      "title": "Shared area context panel",
+      "status": "in-flight",
+      "description": "One panel with the users, outcomes and metrics for the area a document belongs to.",
+      "quote": "Shared area context panel (in flight): one panel showing the users, outcomes and metrics for the area a document belongs to."
+    },
+    {
+      "ref": "f6",
+      "type": "feature",
+      "title": "Dark mode editor",
+      "status": "proposed",
+      "description": "A dark theme for the editor.",
+      "quote": "Dark mode editor (proposed): a dark theme for the editor."
+    },
+    {
+      "ref": "m1",
+      "type": "metric",
+      "title": "Time to first draft",
+      "description": "Median under 30 minutes (currently about 90).",
+      "quote": "Time to first draft: median under 30 minutes (currently about 90 minutes)."
+    },
+    {
+      "ref": "m2",
+      "type": "metric",
+      "title": "Share of PRDs with a defined success metric",
+      "description": "Target 80% (currently about 45%).",
+      "quote": "Share of PRDs with a defined success metric: 80% (currently about 45%)."
+    },
+    {
+      "ref": "m3",
+      "type": "metric",
+      "title": "Median days since last document update",
+      "description": "Target under 21 days.",
+      "quote": "Median days since last document update: under 21."
+    },
+    {
+      "ref": "m4",
+      "type": "metric",
+      "title": "New-teammate comprehension in 15 minutes",
+      "description": "A new teammate can explain the area after 15 minutes.",
+      "quote": "New-teammate comprehension: a new teammate can explain the area's users, outcomes and metrics after 15 minutes."
+    },
+    {
+      "ref": "d1",
+      "type": "decision",
+      "title": "Ship stale-document alerts before the metric suggestion assistant",
+      "description": "Decided 2026-09-14 by Priya Nair: stale documents were the most cited complaint in interviews.",
+      "quote": "Priya Nair decided to ship stale-document alerts before the metric suggestion assistant, because stale documents were the most cited complaint in interviews."
+    }
+  ],
+  "edges": [
+    {
+      "from": "s1",
+      "to": "o1",
+      "type": "wants"
+    },
+    {
+      "from": "s1",
+      "to": "o2",
+      "type": "wants"
+    },
+    {
+      "from": "s1",
+      "to": "o3",
+      "type": "wants"
+    },
+    {
+      "from": "s2",
+      "to": "o4",
+      "type": "wants"
+    },
+    {
+      "from": "o1",
+      "to": "p1",
+      "type": "blocked_by"
+    },
+    {
+      "from": "o3",
+      "to": "p2",
+      "type": "blocked_by"
+    },
+    {
+      "from": "o2",
+      "to": "p3",
+      "type": "blocked_by"
+    },
+    {
+      "from": "f1",
+      "to": "p1",
+      "type": "addresses"
+    },
+    {
+      "from": "f1",
+      "to": "o1",
+      "type": "addresses"
+    },
+    {
+      "from": "f1",
+      "to": "m1",
+      "type": "moves"
+    },
+    {
+      "from": "f2",
+      "to": "p2",
+      "type": "addresses"
+    },
+    {
+      "from": "f2",
+      "to": "o3",
+      "type": "addresses"
+    },
+    {
+      "from": "f2",
+      "to": "m2",
+      "type": "moves"
+    },
+    {
+      "from": "f3",
+      "to": "p3",
+      "type": "addresses"
+    },
+    {
+      "from": "f3",
+      "to": "o2",
+      "type": "addresses"
+    },
+    {
+      "from": "f3",
+      "to": "m3",
+      "type": "moves"
+    },
+    {
+      "from": "f4",
+      "to": "p3",
+      "type": "addresses"
+    },
+    {
+      "from": "f5",
+      "to": "o4",
+      "type": "addresses"
+    },
+    {
+      "from": "f5",
+      "to": "m4",
+      "type": "moves"
+    },
+    {
+      "from": "d1",
+      "to": "f3",
+      "type": "affects"
+    },
+    {
+      "from": "d1",
+      "to": "f2",
+      "type": "affects"
+    }
+  ]
+}

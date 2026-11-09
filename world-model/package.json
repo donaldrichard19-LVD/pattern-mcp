@@ -1,0 +1,29 @@
+{
+  "name": "world-model",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Product World Model prototype: ingest PM docs into a typed graph, explore it as a map, and let agents read and write back via REST and MCP.",
+  "type": "module",
+  "engines": { "node": ">=22.13" },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "start": "node --disable-warning=ExperimentalWarning --import tsx src/server.ts",
+    "mcp": "node --disable-warning=ExperimentalWarning --import tsx src/mcp.ts",
+    "seed": "node --disable-warning=ExperimentalWarning --import tsx src/seed.ts",
+    "demo:agent": "node --disable-warning=ExperimentalWarning --import tsx src/demo-agent.ts",
+    "test": "node --disable-warning=ExperimentalWarning --import tsx --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.60.0",
+    "@modelcontextprotocol/sdk": "^1.17.0",
+    "mammoth": "^1.9.0",
+    "pdf-parse": "^1.1.1",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}

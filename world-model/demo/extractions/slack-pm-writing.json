@@ -1,0 +1,52 @@
+{
+  "nodes": [
+    {
+      "ref": "f6",
+      "type": "feature",
+      "title": "Dark mode editor",
+      "quote": "Can we get a dark mode in the editor?"
+    },
+    {
+      "ref": "p3",
+      "type": "problem",
+      "title": "Documents go stale as decisions are made in Slack",
+      "quote": "The brief is stale. We agreed in the thread last week to slip the launch by two weeks and nobody updated either doc."
+    },
+    {
+      "ref": "p2",
+      "type": "problem",
+      "title": "Drafts ship without a measurable success metric",
+      "quote": "Reminder that every PRD needs a success metric before it goes to review. Half of the drafts I see this month still have none."
+    },
+    {
+      "ref": "s2",
+      "type": "segment",
+      "title": "Cross-functional teammates (design and engineering)",
+      "quote": "As an engineer I read the brief first. I only open the PRD when I need an edge case."
+    },
+    {
+      "ref": "a1",
+      "type": "assumption",
+      "title": "PMs will trust AI-suggested metrics enough to keep them in the document"
+    },
+    {
+      "ref": "f2",
+      "type": "feature",
+      "title": "Metric suggestion assistant"
+    }
+  ],
+  "edges": [
+    {
+      "from": "a1",
+      "to": "f2",
+      "type": "affects"
+    }
+  ],
+  "evidence": [
+    {
+      "ref": "a1",
+      "quote": "I do not trust a suggested metric unless I can see why it was picked. Show me the reasoning and I will use it.",
+      "stance": "contradicts"
+    }
+  ]
+}

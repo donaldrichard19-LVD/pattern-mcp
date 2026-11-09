@@ -1,0 +1,23 @@
+{
+  "nodes": [
+    {
+      "ref": "o5",
+      "type": "outcome",
+      "title": "Turn meeting conversations into written artifacts without retyping",
+      "quote": "The summaries pile up in my inbox. Nobody goes back to read them, and they never reach the PRD."
+    },
+    {
+      "ref": "p5",
+      "type": "problem",
+      "title": "AI meeting notes are unstructured, so PMs reshape them by hand",
+      "quote": "I copy the summary into a doc and then spend half an hour turning it into something a teammate can use."
+    }
+  ],
+  "edges": [],
+  "evidence": [
+    {
+      "ref": "p5",
+      "quote": "Zoom's summary lists action items well, but it has no idea which product outcome we were discussing."
+    }
+  ]
+}

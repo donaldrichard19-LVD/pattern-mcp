@@ -1,0 +1,62 @@
+{
+  "nodes": [
+    {
+      "ref": "s1",
+      "type": "segment",
+      "title": "Product managers and product leaders",
+      "quote": "Product managers who write PRDs and briefs."
+    },
+    {
+      "ref": "s2",
+      "type": "segment",
+      "title": "Cross-functional teammates (design and engineering)",
+      "quote": "Cross-functional teammates in design and engineering who read them to decide what to build."
+    },
+    {
+      "ref": "o1",
+      "type": "outcome",
+      "title": "Produce a clear, well-grounded first draft in under 30 minutes",
+      "quote": "PMs want to write a defensible PRD without starting from scratch."
+    },
+    {
+      "ref": "o4",
+      "type": "outcome",
+      "title": "Understand a product area and trace any feature to its purpose",
+      "quote": "Teammates want to understand why a feature exists without asking the PM."
+    },
+    {
+      "ref": "p3",
+      "type": "problem",
+      "title": "Documents go stale as decisions are made in Slack",
+      "quote": "Documents go stale after decisions are made elsewhere."
+    },
+    {
+      "ref": "p4",
+      "type": "problem",
+      "title": "Context is scattered across documents, Slack threads and meeting notes",
+      "description": "Documents, Slack threads and meeting notes each hold part of the picture.",
+      "quote": "Context is scattered across documents, Slack threads and meeting notes."
+    },
+    {
+      "ref": "a1",
+      "type": "assumption",
+      "title": "PMs will trust AI-suggested metrics enough to keep them in the document",
+      "description": "Open question from the brief.",
+      "quote": "Will PMs trust AI-suggested metrics enough to keep them in the document?"
+    },
+    {
+      "ref": "a2",
+      "type": "assumption",
+      "title": "AI meeting notes are a primary input to PRDs",
+      "description": "Open question from the brief.",
+      "quote": "Are AI meeting notes a primary input to PRDs, or only a reference?"
+    }
+  ],
+  "edges": [
+    {
+      "from": "o4",
+      "to": "p4",
+      "type": "blocked_by"
+    }
+  ]
+}

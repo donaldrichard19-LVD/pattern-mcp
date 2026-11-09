@@ -1,0 +1,37 @@
+[
+  {
+    "ts": "1793199720",
+    "user_name": "Marcus Lee",
+    "text": "Can we get a dark mode in the editor? I write PRDs at night and the white background hurts."
+  },
+  {
+    "ts": "1793200200",
+    "user_name": "Priya Nair",
+    "text": "Not a priority this quarter, but I will add it to the list."
+  },
+  {
+    "ts": "1793265240",
+    "user_name": "Dana Ortiz",
+    "text": "Honest question: which doc is current, the PRD or the brief? I opened both and they disagree on the launch date."
+  },
+  {
+    "ts": "1793265600",
+    "user_name": "Priya Nair",
+    "text": "The brief is stale. We agreed in the thread last week to slip the launch by two weeks and nobody updated either doc."
+  },
+  {
+    "ts": "1793360700",
+    "user_name": "Sam Cho",
+    "text": "As an engineer I read the brief first. I only open the PRD when I need an edge case."
+  },
+  {
+    "ts": "1793637000",
+    "user_name": "Priya Nair",
+    "text": "Reminder that every PRD needs a success metric before it goes to review. Half of the drafts I see this month still have none."
+  },
+  {
+    "ts": "1793700300",
+    "user_name": "Marcus Lee",
+    "text": "I do not trust a suggested metric unless I can see why it was picked. Show me the reasoning and I will use it."
+  }
+]
